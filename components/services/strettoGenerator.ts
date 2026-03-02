@@ -1,6 +1,6 @@
 
 import { RawNote, StrettoChainResult, StrettoSearchOptions, StrettoChainOption, StrettoConstraintMode, StrettoSearchReport } from '../../types';
-import { INTERVALS, SCALE_INTERVALS } from './strettoConstants';
+import { INTERVALS } from './strettoConstants';
 import { calculateStrettoScore, SubjectVariant } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
 
@@ -23,7 +23,7 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
     
     const grouped: Map<number, RawNote[]> = new Map();
     valid.forEach(n => {
-        const t = Math.round(n.ticks / (ppq/8)); 
+        const t = n.ticks; 
         if (!grouped.has(t)) grouped.set(t, []);
         grouped.get(t)!.push(n);
     });
@@ -52,13 +52,12 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
 // --- Rule Definitions (Pruning) ---
 
 const DISSONANT_INTERVALS = new Set([1, 2, 6, 10, 11]);
-// STRICT RULE: Include 5 (P4) in Perfect Intervals to prevent parallel 4ths
-const PERFECT_INTERVALS = new Set([0, 7, 5]);
+const PERFECT_INTERVALS = new Set([0, 7]);
 
 /**
  * PHASE 1 CHECK: Structural Validity (Pairwise)
  * Relaxed: Does NOT check "Ends on Dissonance" (C6) as that is position-dependent.
- * Checks: Parallel Perfects (including P4), Run Length <= 2.
+ * Checks: Parallel Perfects (P1/P5), Run Length <= 2.
  * NOW INCLUDES: Strict Dissonance Ratio Filter
  */
 function checkCounterpointStructure(
@@ -118,7 +117,7 @@ function checkCounterpointStructure(
         const hi = Math.max(p1, p2);
         const interval = (hi - lo) % 12;
         
-        // Rule 5: Parallel Perfects (Now includes P4 via PERFECT_INTERVALS)
+        // Rule 5: Parallel Perfects (P1/P5 class)
         if (prevP1 !== null && prevP2 !== null) {
             const p1Moved = p1 !== prevP1;
             const p2Moved = p2 !== prevP2;
@@ -134,8 +133,7 @@ function checkCounterpointStructure(
         }
         
         // Rule 6: Dissonance (Structural)
-        let isDiss = DISSONANT_INTERVALS.has(interval);
-        if (interval === 5) isDiss = true; // P4 against bass always diss in 2-part
+        const isDiss = DISSONANT_INTERVALS.has(interval);
         
         if (isDiss) {
             dissonantTicks++;
@@ -227,8 +225,7 @@ function checkMetricCompliance(
             const hi = Math.max(p1, p2);
             const interval = (hi - lo) % 12;
             
-            let isDiss = DISSONANT_INTERVALS.has(interval);
-            if (interval === 5) isDiss = true;
+            const isDiss = DISSONANT_INTERVALS.has(interval);
 
             // Corrected Metric Check using Absolute Grid alignment
             const isStrong = isStrong8th(t + metricOffset, tsNum, tsDenom);
@@ -268,6 +265,8 @@ export async function searchStrettoChains(
     const startTime = Date.now();
     let nodesVisited = 0;
     let maxDepth = 0;
+    let hitTimeout = false;
+    let hitNodeLimit = false;
     
     const { notes: baseNotes, offset8 } = normalizeSubject(rawSubject, ppq);
     if (baseNotes.length === 0) return { results: [], stats: { nodesVisited: 0, timeMs: 0, stopReason: 'Exhausted', maxDepthReached: 0 } };
@@ -331,6 +330,7 @@ export async function searchStrettoChains(
     const results: StrettoChainResult[] = [];
     const partialResults: StrettoChainResult[] = []; // Store best partials
     const MAX_PARTIALS = 20;
+    const deadEndStateCache = new Set<string>();
     
     async function solve(
         chain: StrettoChainOption[], 
@@ -339,20 +339,27 @@ export async function searchStrettoChains(
         nInv: number, 
         nTrunc: number,
         nRestricted: number,
-        nFree: number
-    ) {
+        nFree: number,
+        usedLargeDelays: Set<number>
+    ): Promise<boolean> {
         nodesVisited++;
         maxDepth = Math.max(maxDepth, chain.length);
         
-        if (Date.now() - startTime > TIME_LIMIT_MS) return;
-        if (results.length >= MAX_RESULTS * 10) return; // Allow finding more chains before early termination
-        if (nodesVisited > MAX_SEARCH_NODES) return;
+        if (Date.now() - startTime > TIME_LIMIT_MS) {
+            hitTimeout = true;
+            return false;
+        }
+        if (results.length >= MAX_RESULTS * 10) return true; // Allow finding more chains before early termination
+        if (nodesVisited > MAX_SEARCH_NODES) {
+            hitNodeLimit = true;
+            return false;
+        }
 
         // If target reached, store result
         if (chain.length === options.targetChainLength) {
             const final = calculateStrettoScore(chain, variants, variantIndices, options);
             if (final.isValid) results.push(final);
-            return;
+            return final.isValid;
         }
 
         // --- PARTIAL RESULTS LOGIC ---
@@ -371,6 +378,22 @@ export async function searchStrettoChains(
 
         const depth = chain.length; 
         const prevEntry = chain[depth - 1];
+        const prevDelay8 = depth >= 2 ? Math.round((chain[depth-1].startBeat - chain[depth-2].startBeat) * 2) : -1;
+        const prevPrevDelay8 = depth >= 3 ? Math.round((chain[depth-2].startBeat - chain[depth-3].startBeat) * 2) : -1;
+        const stateKey = [
+            depth,
+            prevEntry.voiceIndex,
+            Math.round(prevEntry.startBeat * 2),
+            prevDelay8,
+            prevPrevDelay8,
+            nInv,
+            nTrunc,
+            nRestricted,
+            nFree,
+            voiceEndTimes8.join(','),
+            Array.from(usedLargeDelays).sort((a, b) => a - b).join(',')
+        ].join('|');
+        if (deadEndStateCache.has(stateKey)) return false;
         
         // --- RULE 1 & 2: DELAY LOGIC (STRICT) ---
         const possibleDelays8: number[] = [];
@@ -380,10 +403,8 @@ export async function searchStrettoChains(
         if (depth > 0) {
             if (depth + 1 > 3) maxD = Math.min(maxD, Math.floor(subjectLength8 * 0.5) - 1);
             if (depth >= 2) {
-                const prevDelay8 = Math.round((chain[depth-1].startBeat - chain[depth-2].startBeat) * 2);
                 maxD = Math.min(maxD, prevDelay8 + 2);
                 if (depth >= 3) {
-                    const prevPrevDelay8 = Math.round((chain[depth-2].startBeat - chain[depth-3].startBeat) * 2);
                     // Expansion Reaction Logic
                     if (prevDelay8 > prevPrevDelay8) maxD = Math.min(maxD, prevPrevDelay8 - 1);
                 }
@@ -394,11 +415,11 @@ export async function searchStrettoChains(
         for (let d = minD; d <= maxD; d++) possibleDelays8.push(d);
         possibleDelays8.sort((a,b) => a - b); 
 
+        let foundCompletion = false;
+
         for (const delay8 of possibleDelays8) {
-            if (depth >= 2) {
-                const prevDelay8 = Math.round((chain[depth-1].startBeat - chain[depth-2].startBeat) * 2);
-                if (delay8 === prevDelay8) continue;
-            }
+            if (depth >= 2 && delay8 === prevDelay8) continue;
+            if (delay8 > Math.floor(subjectLength8 / 3) && usedLargeDelays.has(delay8)) continue;
 
             const absStart8 = Math.round(prevEntry.startBeat * 2) + delay8;
             const absStartBeat = absStart8 / 2;
@@ -496,19 +517,27 @@ export async function searchStrettoChains(
                         
                         const nextChain = [...chain, tempNextEntry];
 
-                        await solve(
+                        const nextUsedLargeDelays = new Set(usedLargeDelays);
+                        if (delay8 > Math.floor(subjectLength8 / 3)) nextUsedLargeDelays.add(delay8);
+
+                        const branchFound = await solve(
                             nextChain,
                             [...variantIndices, varIdx],
                             newVoiceState,
                             nInv + (isInv?1:0),
                             nTrunc + (isTrunc?1:0),
                             nextRestricted,
-                            nextFree
+                            nextFree,
+                            nextUsedLargeDelays
                         );
+                        foundCompletion = foundCompletion || branchFound;
                     }
                 }
             }
         }
+
+        if (!foundCompletion) deadEndStateCache.add(stateKey);
+        return foundCompletion;
     }
     
     const initialVoiceState = new Array(options.ensembleTotal).fill(0);
@@ -518,7 +547,8 @@ export async function searchStrettoChains(
         [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].length8 * 2, voiceIndex: options.subjectVoiceIndex }],
         [0],
         initialVoiceState,
-        0, 0, 0, 1
+        0, 0, 0, 1,
+        new Set<number>()
     );
 
     // Fallback: Use partial results if full results empty
@@ -528,6 +558,10 @@ export async function searchStrettoChains(
     if (results.length === 0 && partialResults.length > 0) {
         sourceResults = partialResults;
         stopReason = 'Partial'; // Indicates found chains are shorter than target
+    } else if (results.length === 0 && hitTimeout) {
+        stopReason = 'Timeout';
+    } else if (results.length === 0 && hitNodeLimit) {
+        stopReason = 'NodeLimit';
     }
 
     // Grouping Logic
