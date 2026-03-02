@@ -1,0 +1,5 @@
+{
+  "name": "Stretto Assembly",
+  "description": "An application for uploading MIDI files, analyzing their tracks, and combining selected tracks into a new, downloadable MIDI file.",
+  "requestFramePermissions": []
+}
