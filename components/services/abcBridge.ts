@@ -1,6 +1,17 @@
 
 import { RawNote } from '../../types';
 
+export interface AbcParseDiagnostics {
+    normalizedKey: string | null;
+    keyAccidentalCount: number;
+    issues: string[];
+}
+
+export interface ParsedAbcData {
+    notes: RawNote[];
+    diagnostics: AbcParseDiagnostics;
+}
+
 // Standard ABC Pitch Mapping
 // C = Middle C (MIDI 60)
 // c = C5 (MIDI 72)
@@ -92,12 +103,18 @@ export function extractKeyFromAbc(abc: string): { root: number, mode: string } |
 }
 
 export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] {
+    return parseAbcWithDiagnostics(abcString, ppq).notes;
+}
+
+export function parseAbcWithDiagnostics(abcString: string, ppq: number = 480): ParsedAbcData {
     const lines = abcString.split(/\r?\n/);
     
     // Default Context
     let keyAccidentals: Record<string, number> = {};
+    let normalizedKey: string | null = null;
     let defaultNoteLength = 1/8; 
     let tempo = 120;
+    const issues: string[] = [];
     
     const notes: RawNote[] = [];
     let currentTick = 0;
@@ -130,11 +147,15 @@ export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] 
                     }
                     
                     const normalized = pitchStr + (isMinor ? 'm' : '');
+                    normalizedKey = normalized;
                     if (KEY_SIGNATURES[normalized]) {
                         keyAccidentals = { ...KEY_SIGNATURES[normalized] };
                     } else {
                         keyAccidentals = {};
+                        issues.push(`K:${value} is not recognised; using C/Am accidentals (none).`);
                     }
+                } else {
+                    issues.push(`Could not parse key signature from K:${value}.`);
                 }
             } else if (field === 'L') {
                 const parts = value.split('/');
@@ -235,5 +256,68 @@ export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] 
         currentTick += durationTicks;
     }
 
-    return notes;
+    if (!normalizedKey) {
+        issues.push('No K: header found; defaulting to C/Am accidentals (none).');
+    }
+
+    if (notes.length === 0) {
+        issues.push('No note tokens were parsed from the ABC body.');
+    }
+
+    return {
+        notes,
+        diagnostics: {
+            normalizedKey,
+            keyAccidentalCount: Object.keys(keyAccidentals).length / 2,
+            issues,
+        }
+    };
+}
+
+export function convertRawNotesToAbc(
+    notes: RawNote[],
+    options: { ppq: number; ts: { num: number; den: number }; truncateBeats?: number }
+): string {
+    const sorted = [...notes].sort((a, b) => a.ticks - b.ticks);
+    const beatsToKeep = options.truncateBeats && options.truncateBeats > 0 ? options.truncateBeats : null;
+    const maxTick = beatsToKeep ? Math.round(beatsToKeep * options.ppq) : null;
+
+    const toPitch = (midi: number): string => {
+        const semitone = ((midi % 12) + 12) % 12;
+        const octave = Math.floor(midi / 12) - 1;
+        const abcNames = ['C', '^C', 'D', '^D', 'E', 'F', '^F', 'G', '^G', 'A', '^A', 'B'];
+        let p = abcNames[semitone];
+        const letterIndex = p.startsWith('^') ? 1 : 0;
+        const letter = p[letterIndex];
+        const accidental = p.startsWith('^') ? '^' : '';
+        let pitchLetter = octave >= 5 ? letter.toLowerCase() : letter;
+        if (octave > 5) pitchLetter += "'".repeat(octave - 5);
+        if (octave < 4) pitchLetter += ','.repeat(4 - octave);
+        return accidental + pitchLetter;
+    };
+
+    const toLen = (ticks: number): string => {
+        const q = ticks / options.ppq;
+        if (Math.abs(q - 1) < 0.001) return '';
+        if (Math.abs(q - 0.5) < 0.001) return '/2';
+        if (Math.abs(q - 0.25) < 0.001) return '/4';
+        if (Number.isInteger(q)) return `${q}`;
+        return `${Math.round(q * 100)}/100`;
+    };
+
+    let body = '';
+    let cursorTick = 0;
+    sorted.forEach((note) => {
+        if (maxTick !== null && note.ticks >= maxTick) return;
+        const startTick = note.ticks;
+        const endTick = maxTick !== null ? Math.min(note.ticks + note.durationTicks, maxTick) : note.ticks + note.durationTicks;
+        const duration = Math.max(1, endTick - startTick);
+        if (startTick > cursorTick) {
+            body += `z${toLen(startTick - cursorTick)} `;
+        }
+        body += `${toPitch(note.midi)}${toLen(duration)} `;
+        cursorTick = Math.max(cursorTick, endTick);
+    });
+
+    return `X:1\nM:${options.ts.num}/${options.ts.den}\nL:1/4\nQ:120\nK:C\n${body.trim()}`;
 }
