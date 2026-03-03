@@ -326,8 +326,10 @@ export async function searchStrettoChains(
     }
 
     const compatTable = new Map<string, boolean>();
+    const delayTripleMap = new Map<string, Set<number>>();
     const validDelays: number[] = [];
     const maxDelay8 = Math.floor(subjectLength8 * (2/3));
+    const halfCapDelay8 = Math.floor(subjectLength8 * 0.5) - 1;
     
     for (let d = 1; d <= maxDelay8; d++) validDelays.push(d);
     
@@ -348,6 +350,29 @@ export async function searchStrettoChains(
             });
         });
     });
+
+    // Phase 1b: Cheap rhythm-only pruning graph.
+    // Lift pairwise delay relations to triples so deeper recursion can prune without harmony checks.
+    for (const d1 of validDelays) {
+        for (const d2 of validDelays) {
+            const key = `${d1}_${d2}`;
+            for (const d3 of validDelays) {
+                if (d3 === d2) continue; // No immediate repeated delay
+                if (d3 > d2 + unitsPerBeat) continue; // Elasticity
+                if (d2 > d1 && d3 >= d1) continue; // Expansion must react with contraction
+                if (d2 > (subjectLength8 / 2) && d3 >= d2) continue; // No further widening after very large gap
+                if (halfCapDelay8 > 0 && d3 > halfCapDelay8) continue;
+
+                const usedLarge = new Set<number>();
+                if (d1 > Math.floor(subjectLength8 / 3)) usedLarge.add(d1);
+                if (d2 > Math.floor(subjectLength8 / 3)) usedLarge.add(d2);
+                if (d3 > Math.floor(subjectLength8 / 3) && usedLarge.has(d3)) continue;
+
+                if (!delayTripleMap.has(key)) delayTripleMap.set(key, new Set<number>());
+                delayTripleMap.get(key)!.add(d3);
+            }
+        }
+    }
 
     const results: StrettoChainResult[] = [];
     const partialResults: StrettoChainResult[] = []; // Store best partials
@@ -435,6 +460,18 @@ export async function searchStrettoChains(
         }
 
         for (let d = minD; d <= maxD; d++) possibleDelays8.push(d);
+
+        // Triple-lifted delay pruning: once we have at least 2 prior delay values,
+        // only keep next delays that belong to precomputed valid delay-triples.
+        if (depth >= 3) {
+            const tripleKey = `${prevPrevDelay8}_${prevDelay8}`;
+            const allowed = delayTripleMap.get(tripleKey);
+            if (allowed) {
+                for (let i = possibleDelays8.length - 1; i >= 0; i--) {
+                    if (!allowed.has(possibleDelays8[i])) possibleDelays8.splice(i, 1);
+                }
+            }
+        }
         possibleDelays8.sort((a,b) => a - b); 
 
         let foundCompletion = false;
@@ -443,13 +480,25 @@ export async function searchStrettoChains(
             if (depth >= 2 && delay8 === prevDelay8) continue;
             if (delay8 > Math.floor(subjectLength8 / 3) && usedLargeDelays.has(delay8)) continue;
 
+            // Depth>4 strategy: build from compatible triple-blocks instead of blind single-step recursion.
+            // If this new delay cannot be followed by at least one triple-lifted successor, skip now.
+            if (depth > 4) {
+                const nextTripleKey = `${prevDelay8}_${delay8}`;
+                const continuations = delayTripleMap.get(nextTripleKey);
+                if (!continuations || continuations.size === 0) continue;
+            }
+
             const absStart8 = Math.round(prevEntry.startBeat * unitsPerBeat) + delay8;
             const absStartBeat = absStart8 / unitsPerBeat;
 
+            const eligibleVoices: number[] = [];
+            for (let v = 0; v < options.ensembleTotal; v++) {
+                if (absStart8 >= voiceEndTimes8[v] - unitsPerBeat) eligibleVoices.push(v);
+            }
+            if (eligibleVoices.length === 0) continue;
+
             for (const t of transpositions) {
-                for (let v = 0; v < options.ensembleTotal; v++) {
-                    
-                    if (absStart8 < voiceEndTimes8[v] - unitsPerBeat) continue; 
+                for (const v of eligibleVoices) {
                     
                     let stratFail = false;
                     for (let existingIdx = 0; existingIdx < chain.length; existingIdx++) {
