@@ -17,20 +17,10 @@ interface InternalNote {
 
 // --- Precomputation: Scales & Inversion ---
 
-function gcd(a: number, b: number): number {
-    let x = Math.abs(a);
-    let y = Math.abs(b);
-    while (y !== 0) {
-        const t = y;
-        y = x % y;
-        x = t;
-    }
-    return x || 1;
-}
 
-function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offset8: number, gridStep: number } {
+function normalizeSubject(notes: RawNote[]): { notes: InternalNote[], offset8: number, gridStep: number } {
     const valid = notes.filter(n => !!n).sort((a,b) => a.ticks - b.ticks);
-    if (valid.length === 0) return { notes: [], offset8: 0, gridStep: Math.max(1, ppq) };
+    if (valid.length === 0) return { notes: [], offset8: 0, gridStep: 1 };
     
     const grouped: Map<number, RawNote[]> = new Map();
     valid.forEach(n => {
@@ -48,19 +38,15 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
 
     const startTick = monoNotes[0].ticks;
 
-    // Use the source material's own rhythmic quantum (plus PPQ to preserve beat alignment)
-    let gridStep = Math.max(1, ppq);
-    monoNotes.forEach(n => {
-        gridStep = gcd(gridStep, n.ticks - startTick);
-        gridStep = gcd(gridStep, n.durationTicks);
-    });
-    gridStep = Math.max(1, gridStep);
+    // Keep raw tick fidelity: no quantization/normalization beyond translating origin.
+    // Internal "8" fields remain historical names and now represent raw ticks.
+    const gridStep = 1;
     
     const offset8 = Math.round(startTick / gridStep);
 
     const internalNotes = monoNotes.map(n => ({
-        relTick8: Math.round((n.ticks - startTick) / gridStep),
-        dur8: Math.max(1, Math.round(n.durationTicks / gridStep)),
+        relTick8: n.ticks - startTick,
+        dur8: Math.max(1, n.durationTicks),
         pitch: n.midi
     }));
 
@@ -275,6 +261,71 @@ function checkMetricCompliance(
     return true;
 }
 
+function isVoiceTranspositionCompatible(
+    candidateVoice: number,
+    candidateTransposition: number,
+    existingVoice: number,
+    existingTransposition: number,
+    ensembleTotal: number
+): boolean {
+    if (Math.abs(existingVoice - candidateVoice) === 1) {
+        const highVoiceIdx = Math.min(existingVoice, candidateVoice);
+        const lowVoiceIdx = Math.max(existingVoice, candidateVoice);
+        const highVoiceTrans = (existingVoice === highVoiceIdx) ? existingTransposition : candidateTransposition;
+        const lowVoiceTrans = (existingVoice === lowVoiceIdx) ? existingTransposition : candidateTransposition;
+        if (highVoiceTrans < lowVoiceTrans) return false;
+    }
+
+    const bassIdx = ensembleTotal - 1;
+    const altoIdx = bassIdx - 2;
+    if (bassIdx >= 2) {
+        const isNewBass = (candidateVoice === bassIdx);
+        const isNewAlto = (candidateVoice === altoIdx);
+        const isExistingBass = (existingVoice === bassIdx);
+        const isExistingAlto = (existingVoice === altoIdx);
+        if ((isNewBass && isExistingAlto) || (isNewAlto && isExistingBass)) {
+            const bassTrans = isNewBass ? candidateTransposition : existingTransposition;
+            const altoTrans = isNewAlto ? candidateTransposition : existingTransposition;
+            if (altoTrans < bassTrans + 12) return false;
+        }
+    }
+
+    if (Math.abs(existingVoice - candidateVoice) === 2) {
+        const highVoiceIdx = Math.min(existingVoice, candidateVoice);
+        const lowVoiceIdx = Math.max(existingVoice, candidateVoice);
+        const highVoiceTrans = (existingVoice === highVoiceIdx) ? existingTransposition : candidateTransposition;
+        const lowVoiceTrans = (existingVoice === lowVoiceIdx) ? existingTransposition : candidateTransposition;
+        if (highVoiceTrans < lowVoiceTrans + 7) return false;
+    }
+
+    return true;
+}
+
+function hasConsonantOverlapWithFirstEntry(
+    newVariant: SubjectVariant,
+    newStart8: number,
+    newTransposition: number,
+    firstVariant: SubjectVariant,
+    firstStart8: number,
+    firstTransposition: number
+): boolean {
+    const overlapStart = Math.max(newStart8, firstStart8);
+    const overlapEnd = Math.min(newStart8 + newVariant.length8, firstStart8 + firstVariant.length8);
+    if (overlapEnd <= overlapStart) return true;
+
+    for (let t = overlapStart; t < overlapEnd; t++) {
+        const tRelNew = t - newStart8;
+        const tRelFirst = t - firstStart8;
+        const noteNew = newVariant.notes.find(n => n.relTick8 <= tRelNew && (n.relTick8 + n.dur8) > tRelNew);
+        const noteFirst = firstVariant.notes.find(n => n.relTick8 <= tRelFirst && (n.relTick8 + n.dur8) > tRelFirst);
+        if (!noteNew || !noteFirst) continue;
+        const intv = Math.abs((noteNew.pitch + newTransposition) - (noteFirst.pitch + firstTransposition)) % 12;
+        if (!DISSONANT_INTERVALS.has(intv)) return true;
+    }
+
+    return false;
+}
+
 // --- Generator ---
 
 export async function searchStrettoChains(
@@ -291,7 +342,7 @@ export async function searchStrettoChains(
     
     const { notes: baseNotes, offset8, gridStep } = normalizeSubject(rawSubject, ppq);
     if (baseNotes.length === 0) return { results: [], stats: { nodesVisited: 0, timeMs: 0, stopReason: 'Exhausted', maxDepthReached: 0 } };
-    const unitsPerBeat = Math.max(1, Math.round(ppq / gridStep));
+    const unitsPerBeat = Math.max(1, ppq);
     
     const subjectLength8 = Math.max(...baseNotes.map(n => n.relTick8 + n.dur8));
     
@@ -306,7 +357,7 @@ export async function searchStrettoChains(
         variants.push({ type: 'I', truncationBeats: 0, length8: subjectLength8, notes: invNotes });
     }
     if (options.truncationMode !== 'None' && options.truncationTargetBeats > 0) {
-        const trunc8 = Math.round(options.truncationTargetBeats * 2);
+        const trunc8 = Math.round(options.truncationTargetBeats * unitsPerBeat);
         if (trunc8 < subjectLength8) {
             variants.push({ 
                 type: 'N', truncationBeats: options.truncationTargetBeats, length8: trunc8,
@@ -498,37 +549,37 @@ export async function searchStrettoChains(
             if (eligibleVoices.length === 0) continue;
 
             for (const t of transpositions) {
-                for (const v of eligibleVoices) {
-                    
+                // Stage A (interval-only): not all voices are eligible for each transposition.
+                let intervalEligibleVoices = eligibleVoices.filter(v =>
+                    isVoiceTranspositionCompatible(v, t, chain[0].voiceIndex, chain[0].transposition, options.ensembleTotal)
+                );
+                if (intervalEligibleVoices.length === 0) continue;
+
+                // Stage B (pair restrictions): further constrain by most recent active pair context.
+                if (chain.length >= 2) {
+                    const last = chain[chain.length - 1];
+                    intervalEligibleVoices = intervalEligibleVoices.filter(v =>
+                        isVoiceTranspositionCompatible(v, t, last.voiceIndex, last.transposition, options.ensembleTotal)
+                    );
+                    if (intervalEligibleVoices.length === 0) continue;
+                }
+
+                // Stage C (triple restrictions): intersect against a third anchor for deeper chains.
+                if (chain.length >= 3) {
+                    const thirdAnchor = chain[chain.length - 2];
+                    intervalEligibleVoices = intervalEligibleVoices.filter(v =>
+                        isVoiceTranspositionCompatible(v, t, thirdAnchor.voiceIndex, thirdAnchor.transposition, options.ensembleTotal)
+                    );
+                    if (intervalEligibleVoices.length === 0) continue;
+                }
+
+                for (const v of intervalEligibleVoices) {
                     let stratFail = false;
                     for (let existingIdx = 0; existingIdx < chain.length; existingIdx++) {
                         const e = chain[existingIdx];
-                        if (Math.abs(e.voiceIndex - v) === 1) {
-                            const highVoiceIdx = Math.min(e.voiceIndex, v);
-                            const lowVoiceIdx = Math.max(e.voiceIndex, v);
-                            const highVoiceTrans = (e.voiceIndex === highVoiceIdx) ? e.transposition : t;
-                            const lowVoiceTrans = (e.voiceIndex === lowVoiceIdx) ? e.transposition : t;
-                            if (highVoiceTrans < lowVoiceTrans) stratFail = true;
-                        }
-                        const bassIdx = options.ensembleTotal - 1;
-                        const altoIdx = bassIdx - 2; 
-                        if (bassIdx >= 2) {
-                            const isNewBass = (v === bassIdx);
-                            const isNewAlto = (v === altoIdx);
-                            const isExistingBass = (e.voiceIndex === bassIdx);
-                            const isExistingAlto = (e.voiceIndex === altoIdx);
-                            if ((isNewBass && isExistingAlto) || (isNewAlto && isExistingBass)) {
-                                const bassTrans = isNewBass ? t : e.transposition;
-                                const altoTrans = isNewAlto ? t : e.transposition;
-                                if (altoTrans < bassTrans + 12) stratFail = true;
-                            }
-                        }
-                        if (Math.abs(e.voiceIndex - v) === 2) {
-                            const highVoiceIdx = Math.min(e.voiceIndex, v);
-                            const lowVoiceIdx = Math.max(e.voiceIndex, v);
-                            const highVoiceTrans = (e.voiceIndex === highVoiceIdx) ? e.transposition : t;
-                            const lowVoiceTrans = (e.voiceIndex === lowVoiceIdx) ? e.transposition : t;
-                            if (highVoiceTrans < lowVoiceTrans + 7) stratFail = true;
+                        if (!isVoiceTranspositionCompatible(v, t, e.voiceIndex, e.transposition, options.ensembleTotal)) {
+                            stratFail = true;
+                            break;
                         }
                     }
                     if (stratFail) continue;
@@ -570,6 +621,15 @@ export async function searchStrettoChains(
                             }
                         }
                         if (harmonicFail) continue;
+
+                        if (!hasConsonantOverlapWithFirstEntry(
+                            variant,
+                            absStart8,
+                            t,
+                            variants[variantIndices[0]],
+                            Math.round(chain[0].startBeat * unitsPerBeat),
+                            chain[0].transposition
+                        )) continue;
 
                         const tempNextEntry: StrettoChainOption = {
                             startBeat: absStartBeat,
