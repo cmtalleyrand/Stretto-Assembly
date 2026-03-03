@@ -10,16 +10,17 @@ const TIME_LIMIT_MS = 30000;
 const MAX_RESULTS = 50;
 
 interface InternalNote {
-    relTick8: number; // 8th note grid relative to start
+    relTick8: number; // Adaptive grid unit relative to start
     dur8: number;
     pitch: number;
 }
 
 // --- Precomputation: Scales & Inversion ---
 
-function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offset8: number } {
+
+function normalizeSubject(notes: RawNote[]): { notes: InternalNote[], offset8: number, gridStep: number } {
     const valid = notes.filter(n => !!n).sort((a,b) => a.ticks - b.ticks);
-    if (valid.length === 0) return { notes: [], offset8: 0 };
+    if (valid.length === 0) return { notes: [], offset8: 0, gridStep: 1 };
     
     const grouped: Map<number, RawNote[]> = new Map();
     valid.forEach(n => {
@@ -36,17 +37,20 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
     monoNotes.sort((a,b) => a.ticks - b.ticks);
 
     const startTick = monoNotes[0].ticks;
-    const ticksPer8 = ppq / 2;
+
+    // Keep raw tick fidelity: no quantization/normalization beyond translating origin.
+    // Internal "8" fields remain historical names and now represent raw ticks.
+    const gridStep = 1;
     
-    const offset8 = Math.round(startTick / ticksPer8);
+    const offset8 = Math.round(startTick / gridStep);
 
     const internalNotes = monoNotes.map(n => ({
-        relTick8: Math.round((n.ticks - startTick) / ticksPer8),
-        dur8: Math.max(1, Math.round(n.durationTicks / ticksPer8)),
+        relTick8: n.ticks - startTick,
+        dur8: Math.max(1, n.durationTicks),
         pitch: n.midi
     }));
 
-    return { notes: internalNotes, offset8 };
+    return { notes: internalNotes, offset8, gridStep };
 }
 
 // --- Rule Definitions (Pruning) ---
@@ -65,14 +69,15 @@ function checkCounterpointStructure(
     variantB: SubjectVariant, 
     delay8: number, 
     transposition: number,
-    maxDissonanceRatio: number
+    maxDissonanceRatio: number,
+    step: number = 1
 ): { compatible: boolean } {
     const notesA = variantA.notes;
     const notesB = variantB.notes;
     const timeline = new Map<number, { pA?: number, pB?: number }>();
     
     notesA.forEach(n => {
-        for(let t=0; t<n.dur8; t++) {
+        for(let t=0; t<n.dur8; t += step) {
             const tick = n.relTick8 + t;
             if (!timeline.has(tick)) timeline.set(tick, {});
             timeline.get(tick)!.pA = n.pitch;
@@ -80,7 +85,7 @@ function checkCounterpointStructure(
     });
     
     notesB.forEach(n => {
-        for(let t=0; t<n.dur8; t++) {
+        for(let t=0; t<n.dur8; t += step) {
             const tick = n.relTick8 + delay8 + t;
             if (timeline.has(tick)) timeline.get(tick)!.pB = n.pitch + transposition;
         }
@@ -163,14 +168,14 @@ function checkCounterpointStructure(
 }
 
 // Helper: Determine beat strength
-function isStrong8th(tick8: number, tsNum: number, tsDenom: number): boolean {
-    const eighthsPerBar = (tsNum * 8) / tsDenom;
-    const pos = tick8 % eighthsPerBar;
+function isStrong8th(tick8: number, tsNum: number, tsDenom: number, unitsPerBeat: number): boolean {
+    const unitsPerBar = tsNum * unitsPerBeat;
+    const pos = tick8 % unitsPerBar;
     
     if (pos === 0) return true; // Downbeat always strong
     
     if (tsNum === 4 && tsDenom === 4) {
-        if (pos === 4) return true; // Beat 3 in 4/4
+        if (pos === unitsPerBeat * 2) return true; // Beat 3 in 4/4
     }
     
     return false;
@@ -187,16 +192,18 @@ function checkMetricCompliance(
     variantIndices: number[],
     tsNum: number = 4,
     tsDenom: number = 4,
-    metricOffset: number = 0
+    metricOffset: number = 0,
+    unitsPerBeat: number = 2,
+    step: number = 1
 ): boolean {
     
-    const newStart8 = Math.round(newEntry.startBeat * 2);
+    const newStart8 = Math.round(newEntry.startBeat * unitsPerBeat);
     
     // Check against every existing voice
     for (let k = 0; k < chain.length; k++) {
         const existEntry = chain[k];
         const existVariant = variants[variantIndices[k]];
-        const existStart8 = Math.round(existEntry.startBeat * 2);
+        const existStart8 = Math.round(existEntry.startBeat * unitsPerBeat);
         
         // Determine overlapping region
         const overlapStart = Math.max(newStart8, existStart8);
@@ -208,7 +215,7 @@ function checkMetricCompliance(
         let lastIsDiss = false;
 
         // Iterate overlap ticks
-        for (let t = overlapStart; t < overlapEnd; t++) {
+        for (let t = overlapStart; t < overlapEnd; t += step) {
             const tRelNew = t - newStart8;
             const tRelExist = t - existStart8;
             
@@ -228,7 +235,7 @@ function checkMetricCompliance(
             const isDiss = DISSONANT_INTERVALS.has(interval);
 
             // Corrected Metric Check using Absolute Grid alignment
-            const isStrong = isStrong8th(t + metricOffset, tsNum, tsDenom);
+            const isStrong = isStrong8th(t + metricOffset, tsNum, tsDenom, unitsPerBeat);
 
             if (isDiss) {
                 if (!lastIsDiss) dissRunLength = 1; else dissRunLength++;
@@ -238,7 +245,7 @@ function checkMetricCompliance(
 
                 // Rule C4A: If r=2, BOTH must be weak.
                 if (dissRunLength === 2) {
-                    const prevIsStrong = isStrong8th((t - 1) + metricOffset, tsNum, tsDenom);
+                    const prevIsStrong = isStrong8th((t - step) + metricOffset, tsNum, tsDenom, unitsPerBeat);
                     if (isStrong || prevIsStrong) return false; 
                 }
                 
@@ -252,6 +259,71 @@ function checkMetricCompliance(
         }
     }
     return true;
+}
+
+function isVoiceTranspositionCompatible(
+    candidateVoice: number,
+    candidateTransposition: number,
+    existingVoice: number,
+    existingTransposition: number,
+    ensembleTotal: number
+): boolean {
+    if (Math.abs(existingVoice - candidateVoice) === 1) {
+        const highVoiceIdx = Math.min(existingVoice, candidateVoice);
+        const lowVoiceIdx = Math.max(existingVoice, candidateVoice);
+        const highVoiceTrans = (existingVoice === highVoiceIdx) ? existingTransposition : candidateTransposition;
+        const lowVoiceTrans = (existingVoice === lowVoiceIdx) ? existingTransposition : candidateTransposition;
+        if (highVoiceTrans < lowVoiceTrans) return false;
+    }
+
+    const bassIdx = ensembleTotal - 1;
+    const altoIdx = bassIdx - 2;
+    if (bassIdx >= 2) {
+        const isNewBass = (candidateVoice === bassIdx);
+        const isNewAlto = (candidateVoice === altoIdx);
+        const isExistingBass = (existingVoice === bassIdx);
+        const isExistingAlto = (existingVoice === altoIdx);
+        if ((isNewBass && isExistingAlto) || (isNewAlto && isExistingBass)) {
+            const bassTrans = isNewBass ? candidateTransposition : existingTransposition;
+            const altoTrans = isNewAlto ? candidateTransposition : existingTransposition;
+            if (altoTrans < bassTrans + 12) return false;
+        }
+    }
+
+    if (Math.abs(existingVoice - candidateVoice) === 2) {
+        const highVoiceIdx = Math.min(existingVoice, candidateVoice);
+        const lowVoiceIdx = Math.max(existingVoice, candidateVoice);
+        const highVoiceTrans = (existingVoice === highVoiceIdx) ? existingTransposition : candidateTransposition;
+        const lowVoiceTrans = (existingVoice === lowVoiceIdx) ? existingTransposition : candidateTransposition;
+        if (highVoiceTrans < lowVoiceTrans + 7) return false;
+    }
+
+    return true;
+}
+
+function hasConsonantOverlapWithFirstEntry(
+    newVariant: SubjectVariant,
+    newStart8: number,
+    newTransposition: number,
+    firstVariant: SubjectVariant,
+    firstStart8: number,
+    firstTransposition: number
+): boolean {
+    const overlapStart = Math.max(newStart8, firstStart8);
+    const overlapEnd = Math.min(newStart8 + newVariant.length8, firstStart8 + firstVariant.length8);
+    if (overlapEnd <= overlapStart) return true;
+
+    for (let t = overlapStart; t < overlapEnd; t++) {
+        const tRelNew = t - newStart8;
+        const tRelFirst = t - firstStart8;
+        const noteNew = newVariant.notes.find(n => n.relTick8 <= tRelNew && (n.relTick8 + n.dur8) > tRelNew);
+        const noteFirst = firstVariant.notes.find(n => n.relTick8 <= tRelFirst && (n.relTick8 + n.dur8) > tRelFirst);
+        if (!noteNew || !noteFirst) continue;
+        const intv = Math.abs((noteNew.pitch + newTransposition) - (noteFirst.pitch + firstTransposition)) % 12;
+        if (!DISSONANT_INTERVALS.has(intv)) return true;
+    }
+
+    return false;
 }
 
 // --- Generator ---
@@ -268,8 +340,9 @@ export async function searchStrettoChains(
     let hitTimeout = false;
     let hitNodeLimit = false;
     
-    const { notes: baseNotes, offset8 } = normalizeSubject(rawSubject, ppq);
+    const { notes: baseNotes, offset8, gridStep } = normalizeSubject(rawSubject, ppq);
     if (baseNotes.length === 0) return { results: [], stats: { nodesVisited: 0, timeMs: 0, stopReason: 'Exhausted', maxDepthReached: 0 } };
+    const unitsPerBeat = Math.max(1, ppq);
     
     const subjectLength8 = Math.max(...baseNotes.map(n => n.relTick8 + n.dur8));
     
@@ -284,7 +357,7 @@ export async function searchStrettoChains(
         variants.push({ type: 'I', truncationBeats: 0, length8: subjectLength8, notes: invNotes });
     }
     if (options.truncationMode !== 'None' && options.truncationTargetBeats > 0) {
-        const trunc8 = Math.round(options.truncationTargetBeats * 2);
+        const trunc8 = Math.round(options.truncationTargetBeats * unitsPerBeat);
         if (trunc8 < subjectLength8) {
             variants.push({ 
                 type: 'N', truncationBeats: options.truncationTargetBeats, length8: trunc8,
@@ -304,8 +377,10 @@ export async function searchStrettoChains(
     }
 
     const compatTable = new Map<string, boolean>();
+    const delayTripleMap = new Map<string, Set<number>>();
     const validDelays: number[] = [];
     const maxDelay8 = Math.floor(subjectLength8 * (2/3));
+    const halfCapDelay8 = Math.floor(subjectLength8 * 0.5) - 1;
     
     for (let d = 1; d <= maxDelay8; d++) validDelays.push(d);
     
@@ -320,12 +395,35 @@ export async function searchStrettoChains(
             validDelays.forEach(d => {
                 transpositions.forEach(t => {
                     const key = `${iA}_${iB}_${d}_${t}`;
-                    const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance);
+                    const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance, 1);
                     if (res.compatible) compatTable.set(key, true);
                 });
             });
         });
     });
+
+    // Phase 1b: Cheap rhythm-only pruning graph.
+    // Lift pairwise delay relations to triples so deeper recursion can prune without harmony checks.
+    for (const d1 of validDelays) {
+        for (const d2 of validDelays) {
+            const key = `${d1}_${d2}`;
+            for (const d3 of validDelays) {
+                if (d3 === d2) continue; // No immediate repeated delay
+                if (d3 > d2 + unitsPerBeat) continue; // Elasticity
+                if (d2 > d1 && d3 >= d1) continue; // Expansion must react with contraction
+                if (d2 > (subjectLength8 / 2) && d3 >= d2) continue; // No further widening after very large gap
+                if (halfCapDelay8 > 0 && d3 > halfCapDelay8) continue;
+
+                const usedLarge = new Set<number>();
+                if (d1 > Math.floor(subjectLength8 / 3)) usedLarge.add(d1);
+                if (d2 > Math.floor(subjectLength8 / 3)) usedLarge.add(d2);
+                if (d3 > Math.floor(subjectLength8 / 3) && usedLarge.has(d3)) continue;
+
+                if (!delayTripleMap.has(key)) delayTripleMap.set(key, new Set<number>());
+                delayTripleMap.get(key)!.add(d3);
+            }
+        }
+    }
 
     const results: StrettoChainResult[] = [];
     const partialResults: StrettoChainResult[] = []; // Store best partials
@@ -357,7 +455,7 @@ export async function searchStrettoChains(
 
         // If target reached, store result
         if (chain.length === options.targetChainLength) {
-            const final = calculateStrettoScore(chain, variants, variantIndices, options);
+            const final = calculateStrettoScore(chain, variants, variantIndices, options, unitsPerBeat);
             if (final.isValid) results.push(final);
             return final.isValid;
         }
@@ -367,7 +465,7 @@ export async function searchStrettoChains(
         if (chain.length >= 3) {
             // Simple heuristic: if we have few partials or this is longer than the worst stored partial
             if (partialResults.length < MAX_PARTIALS || chain.length > partialResults[partialResults.length-1].entries.length) {
-                const final = calculateStrettoScore(chain, variants, variantIndices, options);
+                const final = calculateStrettoScore(chain, variants, variantIndices, options, unitsPerBeat);
                 if (final.isValid) {
                     partialResults.push(final);
                     partialResults.sort((a,b) => b.entries.length - a.entries.length); // Keep longest
@@ -378,12 +476,12 @@ export async function searchStrettoChains(
 
         const depth = chain.length; 
         const prevEntry = chain[depth - 1];
-        const prevDelay8 = depth >= 2 ? Math.round((chain[depth-1].startBeat - chain[depth-2].startBeat) * 2) : -1;
-        const prevPrevDelay8 = depth >= 3 ? Math.round((chain[depth-2].startBeat - chain[depth-3].startBeat) * 2) : -1;
+        const prevDelay8 = depth >= 2 ? Math.round((chain[depth-1].startBeat - chain[depth-2].startBeat) * unitsPerBeat) : -1;
+        const prevPrevDelay8 = depth >= 3 ? Math.round((chain[depth-2].startBeat - chain[depth-3].startBeat) * unitsPerBeat) : -1;
         const stateKey = [
             depth,
             prevEntry.voiceIndex,
-            Math.round(prevEntry.startBeat * 2),
+            Math.round(prevEntry.startBeat * unitsPerBeat),
             prevDelay8,
             prevPrevDelay8,
             nInv,
@@ -403,7 +501,7 @@ export async function searchStrettoChains(
         if (depth > 0) {
             if (depth + 1 > 3) maxD = Math.min(maxD, Math.floor(subjectLength8 * 0.5) - 1);
             if (depth >= 2) {
-                maxD = Math.min(maxD, prevDelay8 + 2);
+                maxD = Math.min(maxD, prevDelay8 + unitsPerBeat);
                 if (depth >= 3) {
                     // Expansion Reaction Logic
                     if (prevDelay8 > prevPrevDelay8) maxD = Math.min(maxD, prevPrevDelay8 - 1);
@@ -413,6 +511,18 @@ export async function searchStrettoChains(
         }
 
         for (let d = minD; d <= maxD; d++) possibleDelays8.push(d);
+
+        // Triple-lifted delay pruning: once we have at least 2 prior delay values,
+        // only keep next delays that belong to precomputed valid delay-triples.
+        if (depth >= 3) {
+            const tripleKey = `${prevPrevDelay8}_${prevDelay8}`;
+            const allowed = delayTripleMap.get(tripleKey);
+            if (allowed) {
+                for (let i = possibleDelays8.length - 1; i >= 0; i--) {
+                    if (!allowed.has(possibleDelays8[i])) possibleDelays8.splice(i, 1);
+                }
+            }
+        }
         possibleDelays8.sort((a,b) => a - b); 
 
         let foundCompletion = false;
@@ -421,43 +531,55 @@ export async function searchStrettoChains(
             if (depth >= 2 && delay8 === prevDelay8) continue;
             if (delay8 > Math.floor(subjectLength8 / 3) && usedLargeDelays.has(delay8)) continue;
 
-            const absStart8 = Math.round(prevEntry.startBeat * 2) + delay8;
-            const absStartBeat = absStart8 / 2;
+            // Depth>4 strategy: build from compatible triple-blocks instead of blind single-step recursion.
+            // If this new delay cannot be followed by at least one triple-lifted successor, skip now.
+            if (depth > 4) {
+                const nextTripleKey = `${prevDelay8}_${delay8}`;
+                const continuations = delayTripleMap.get(nextTripleKey);
+                if (!continuations || continuations.size === 0) continue;
+            }
+
+            const absStart8 = Math.round(prevEntry.startBeat * unitsPerBeat) + delay8;
+            const absStartBeat = absStart8 / unitsPerBeat;
+
+            const eligibleVoices: number[] = [];
+            for (let v = 0; v < options.ensembleTotal; v++) {
+                if (absStart8 >= voiceEndTimes8[v] - unitsPerBeat) eligibleVoices.push(v);
+            }
+            if (eligibleVoices.length === 0) continue;
 
             for (const t of transpositions) {
-                for (let v = 0; v < options.ensembleTotal; v++) {
-                    
-                    if (absStart8 < voiceEndTimes8[v] - 2) continue; 
-                    
+                // Stage A (interval-only): not all voices are eligible for each transposition.
+                let intervalEligibleVoices = eligibleVoices.filter(v =>
+                    isVoiceTranspositionCompatible(v, t, chain[0].voiceIndex, chain[0].transposition, options.ensembleTotal)
+                );
+                if (intervalEligibleVoices.length === 0) continue;
+
+                // Stage B (pair restrictions): further constrain by most recent active pair context.
+                if (chain.length >= 2) {
+                    const last = chain[chain.length - 1];
+                    intervalEligibleVoices = intervalEligibleVoices.filter(v =>
+                        isVoiceTranspositionCompatible(v, t, last.voiceIndex, last.transposition, options.ensembleTotal)
+                    );
+                    if (intervalEligibleVoices.length === 0) continue;
+                }
+
+                // Stage C (triple restrictions): intersect against a third anchor for deeper chains.
+                if (chain.length >= 3) {
+                    const thirdAnchor = chain[chain.length - 2];
+                    intervalEligibleVoices = intervalEligibleVoices.filter(v =>
+                        isVoiceTranspositionCompatible(v, t, thirdAnchor.voiceIndex, thirdAnchor.transposition, options.ensembleTotal)
+                    );
+                    if (intervalEligibleVoices.length === 0) continue;
+                }
+
+                for (const v of intervalEligibleVoices) {
                     let stratFail = false;
                     for (let existingIdx = 0; existingIdx < chain.length; existingIdx++) {
                         const e = chain[existingIdx];
-                        if (Math.abs(e.voiceIndex - v) === 1) {
-                            const highVoiceIdx = Math.min(e.voiceIndex, v);
-                            const lowVoiceIdx = Math.max(e.voiceIndex, v);
-                            const highVoiceTrans = (e.voiceIndex === highVoiceIdx) ? e.transposition : t;
-                            const lowVoiceTrans = (e.voiceIndex === lowVoiceIdx) ? e.transposition : t;
-                            if (highVoiceTrans < lowVoiceTrans) stratFail = true;
-                        }
-                        const bassIdx = options.ensembleTotal - 1;
-                        const altoIdx = bassIdx - 2; 
-                        if (bassIdx >= 2) {
-                            const isNewBass = (v === bassIdx);
-                            const isNewAlto = (v === altoIdx);
-                            const isExistingBass = (e.voiceIndex === bassIdx);
-                            const isExistingAlto = (e.voiceIndex === altoIdx);
-                            if ((isNewBass && isExistingAlto) || (isNewAlto && isExistingBass)) {
-                                const bassTrans = isNewBass ? t : e.transposition;
-                                const altoTrans = isNewAlto ? t : e.transposition;
-                                if (altoTrans < bassTrans + 12) stratFail = true;
-                            }
-                        }
-                        if (Math.abs(e.voiceIndex - v) === 2) {
-                            const highVoiceIdx = Math.min(e.voiceIndex, v);
-                            const lowVoiceIdx = Math.max(e.voiceIndex, v);
-                            const highVoiceTrans = (e.voiceIndex === highVoiceIdx) ? e.transposition : t;
-                            const lowVoiceTrans = (e.voiceIndex === lowVoiceIdx) ? e.transposition : t;
-                            if (highVoiceTrans < lowVoiceTrans + 7) stratFail = true;
+                        if (!isVoiceTranspositionCompatible(v, t, e.voiceIndex, e.transposition, options.ensembleTotal)) {
+                            stratFail = true;
+                            break;
                         }
                     }
                     if (stratFail) continue;
@@ -485,7 +607,7 @@ export async function searchStrettoChains(
                         for (let k = 0; k < chain.length; k++) {
                             const prevE = chain[k];
                             const prevVarIdx = variantIndices[k];
-                            const prevStart8 = Math.round(prevE.startBeat * 2);
+                            const prevStart8 = Math.round(prevE.startBeat * unitsPerBeat);
                             const prevEnd8 = prevStart8 + variants[prevVarIdx].length8;
                             
                             if (absStart8 < prevEnd8) {
@@ -500,15 +622,24 @@ export async function searchStrettoChains(
                         }
                         if (harmonicFail) continue;
 
+                        if (!hasConsonantOverlapWithFirstEntry(
+                            variant,
+                            absStart8,
+                            t,
+                            variants[variantIndices[0]],
+                            Math.round(chain[0].startBeat * unitsPerBeat),
+                            chain[0].transposition
+                        )) continue;
+
                         const tempNextEntry: StrettoChainOption = {
                             startBeat: absStartBeat,
                             transposition: t,
                             type: variant.type,
-                            length: variant.length8 * 2,
+                            length: variant.length8 * gridStep,
                             voiceIndex: v
                         };
                         
-                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, 4, 4, offset8)) {
+                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, 4, 4, offset8, unitsPerBeat, 1)) {
                             continue;
                         }
 
@@ -544,7 +675,7 @@ export async function searchStrettoChains(
     initialVoiceState[options.subjectVoiceIndex] = variants[0].length8;
     
     await solve(
-        [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].length8 * 2, voiceIndex: options.subjectVoiceIndex }],
+        [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].length8 * gridStep, voiceIndex: options.subjectVoiceIndex }],
         [0],
         initialVoiceState,
         0, 0, 0, 1,
