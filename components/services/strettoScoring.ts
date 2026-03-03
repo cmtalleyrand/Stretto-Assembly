@@ -69,7 +69,8 @@ export function calculateStrettoScore(
     chain: StrettoChainOption[], 
     variants: SubjectVariant[], 
     variantIndices: number[], 
-    options: StrettoSearchOptions
+    options: StrettoSearchOptions,
+    unitsPerBeat: number = 2
 ): StrettoChainResult {
     
     // 1. Build Timeline
@@ -79,7 +80,7 @@ export function calculateStrettoScore(
 
     chain.forEach((e, i) => {
         const variant = variants[variantIndices[i]];
-        const start8 = Math.round(e.startBeat * 2);
+        const start8 = Math.round(e.startBeat * unitsPerBeat);
         
         variant.notes.forEach(n => {
             for (let t=0; t<n.dur8; t++) {
@@ -101,7 +102,7 @@ export function calculateStrettoScore(
     const harmonyTicks: number[] = [];
 
     timeline.forEach((voices, t) => {
-        const tick16 = t * 2; // Converting 8th-grid index to 16th-grid space
+        const tick16 = Math.round((t / unitsPerBeat) * 4); // Convert adaptive grid index to 16th-grid
         harmonyTicks.push(tick16);
         harmonyTimeline[tick16] = {};
         voices.forEach(v => {
@@ -142,8 +143,8 @@ export function calculateStrettoScore(
 
         totalPolyTime++; 
         
-        // S2 Weighting: Strong beat (divisible by 2 for 4/4 quarter assumption on 8th grid)
-        const isStrong = (t % 2 === 0); 
+        // S2 Weighting: Strong beat (bar-aligned quarter-level assumption)
+        const isStrong = (t % unitsPerBeat === 0); 
         const weight = isStrong ? 1.5 : 1.0;
         weightedTotalPoly += weight;
 
@@ -235,7 +236,7 @@ export function calculateStrettoScore(
     if (options.requireConsonantEnd) {
         chain.forEach((e, i) => {
             const variant = variants[variantIndices[i]];
-            const end8 = Math.round(e.startBeat * 2) + variant.length8;
+            const end8 = Math.round(e.startBeat * unitsPerBeat) + variant.length8;
             const lastMoment = end8 - 1;
             
             const activeVoices = timeline.get(lastMoment);
