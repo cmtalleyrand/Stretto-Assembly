@@ -7,7 +7,7 @@ import { getVoiceLabel } from './midiVoices';
  * Generates and downloads a multi-track MIDI file representing the Stretto result.
  * Fixes "Cannot set property ppq" error by scaling ticks instead of modifying read-only header.
  */
-export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq: number, voiceNames?: Record<number, string>) {
+export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq: number, voiceNames?: Record<number, string>, ts: { num: number; den: number } = { num: 4, den: 4 }, bpm: number = 120, keyRoot?: number, keyMode?: string) {
     const midi = new Midi();
     
     // Tone.js MIDI instances default to 480 PPQ. 
@@ -16,11 +16,19 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
     const scaleFactor = TARGET_PPQ / sourcePpq;
     
     // Set basic metadata
-    midi.header.setTempo(120);
-    midi.header.timeSignatures.push({
-        timeSignature: [4, 4],
+    midi.header.setTempo(bpm);
+    midi.header.timeSignatures = [{
+        timeSignature: [ts.num, ts.den],
         ticks: 0,
-    });
+    }];
+
+    if (typeof keyRoot === 'number') {
+        const keyNameMap = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+        const safeRoot = ((keyRoot % 12) + 12) % 12;
+        const key = keyNameMap[safeRoot];
+        const scale = keyMode && keyMode.toLowerCase().includes('minor') ? 'minor' : 'major';
+        (midi.header as any).keySignatures = [{ key, scale, ticks: 0 }];
+    }
     
     // Group notes by voice index
     const notesByVoice: Record<number, any[]> = {};
@@ -78,15 +86,23 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
 /**
  * Bundles multiple candidates into a single multi-track MIDI file.
  */
-export function downloadStrettoSelection(candidates: StrettoCandidate[], sourcePpq: number, voiceNames?: Record<number, string>) {
+export function downloadStrettoSelection(candidates: StrettoCandidate[], sourcePpq: number, voiceNames?: Record<number, string>, ts: { num: number; den: number } = { num: 4, den: 4 }, bpm: number = 120, keyRoot?: number, keyMode?: string) {
     if (candidates.length === 0) return;
 
     const midi = new Midi();
     const TARGET_PPQ = 480; 
     const scaleFactor = TARGET_PPQ / sourcePpq;
     
-    midi.header.setTempo(120);
-    midi.header.timeSignatures.push({ timeSignature: [4, 4], ticks: 0 });
+    midi.header.setTempo(bpm);
+    midi.header.timeSignatures = [{ timeSignature: [ts.num, ts.den], ticks: 0 }];
+
+    if (typeof keyRoot === 'number') {
+        const keyNameMap = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+        const safeRoot = ((keyRoot % 12) + 12) % 12;
+        const key = keyNameMap[safeRoot];
+        const scale = keyMode && keyMode.toLowerCase().includes('minor') ? 'minor' : 'major';
+        (midi.header as any).keySignatures = [{ key, scale, ticks: 0 }];
+    }
 
     candidates.forEach((candidate, cIdx) => {
         // Group notes by voice index

@@ -197,7 +197,8 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
         const abc = convertRawNotesToAbc(initialNotes, {
             ppq: ppq || 480,
             ts,
-            truncateBeats: truncateMidiForAbc ? truncateMidiBeats : undefined
+            truncateBeats: truncateMidiForAbc ? truncateMidiBeats : undefined,
+            bpm: 120
         });
         setAbcInput(abc);
         setMode('abc');
@@ -452,9 +453,9 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
                             checkedIds={checkedIds} 
                             onToggleCheck={toggleCheck} 
                         />
-                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames)} />
+                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, ts, 120, searchOptions.scaleRoot, searchOptions.scaleMode)} />
                     </div>
-                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput)} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
+                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, ts, 120, searchOptions.scaleRoot, searchOptions.scaleMode)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput)} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
                 </>
             ) : (
                 <StrettoChainView 
@@ -472,7 +473,7 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
                     ts={ts} 
                     isPlaying={isPlaying} 
                     onPlay={handlePlay} 
-                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames)} 
+                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, ts, 120, searchOptions.scaleRoot, searchOptions.scaleMode)} 
                     searchReport={searchReport}
                     masterTransposition={masterTransposition}
                     setMasterTransposition={setMasterTransposition}

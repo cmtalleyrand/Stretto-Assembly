@@ -20,6 +20,7 @@ const BASE_PITCHES: Record<string, number> = {
     'c': 72, 'd': 74, 'e': 76, 'f': 77, 'g': 79, 'a': 81, 'b': 83
 };
 
+
 // Key Signature Definitions (Standard sharps/flats)
 const KEY_SIGNATURES: Record<string, Record<string, number>> = {
     // Major Keys
@@ -276,11 +277,48 @@ export function parseAbcWithDiagnostics(abcString: string, ppq: number = 480): P
 
 export function convertRawNotesToAbc(
     notes: RawNote[],
-    options: { ppq: number; ts: { num: number; den: number }; truncateBeats?: number }
+    options: { ppq: number; ts: { num: number; den: number }; truncateBeats?: number; bpm?: number }
 ): string {
     const sorted = [...notes].sort((a, b) => a.ticks - b.ticks);
     const beatsToKeep = options.truncateBeats && options.truncateBeats > 0 ? options.truncateBeats : null;
     const maxTick = beatsToKeep ? Math.round(beatsToKeep * options.ppq) : null;
+    const exportBpm = options.bpm && options.bpm > 0 ? options.bpm : 120;
+
+    const keyCandidates = [
+        { name: 'C', root: 0, mode: 'Major' }, { name: 'G', root: 7, mode: 'Major' }, { name: 'D', root: 2, mode: 'Major' },
+        { name: 'A', root: 9, mode: 'Major' }, { name: 'E', root: 4, mode: 'Major' }, { name: 'B', root: 11, mode: 'Major' },
+        { name: 'F#', root: 6, mode: 'Major' }, { name: 'C#', root: 1, mode: 'Major' }, { name: 'F', root: 5, mode: 'Major' },
+        { name: 'Bb', root: 10, mode: 'Major' }, { name: 'Eb', root: 3, mode: 'Major' }, { name: 'Ab', root: 8, mode: 'Major' },
+        { name: 'Am', root: 9, mode: 'Natural Minor' }, { name: 'Em', root: 4, mode: 'Natural Minor' },
+        { name: 'Bm', root: 11, mode: 'Natural Minor' }, { name: 'F#m', root: 6, mode: 'Natural Minor' },
+        { name: 'C#m', root: 1, mode: 'Natural Minor' }, { name: 'G#m', root: 8, mode: 'Natural Minor' },
+        { name: 'D#m', root: 3, mode: 'Natural Minor' }, { name: 'A#m', root: 10, mode: 'Natural Minor' },
+        { name: 'Dm', root: 2, mode: 'Natural Minor' }, { name: 'Gm', root: 7, mode: 'Natural Minor' },
+        { name: 'Cm', root: 0, mode: 'Natural Minor' }, { name: 'Fm', root: 5, mode: 'Natural Minor' },
+        { name: 'Bbm', root: 10, mode: 'Natural Minor' }, { name: 'Ebm', root: 3, mode: 'Natural Minor' },
+        { name: 'Abm', root: 8, mode: 'Natural Minor' }
+    ];
+    const majorScale = [0,2,4,5,7,9,11];
+    const minorScale = [0,2,3,5,7,8,10];
+    const pcCounts = new Array(12).fill(0);
+    sorted.forEach(n => { if (maxTick === null || n.ticks < maxTick) pcCounts[((n.midi % 12) + 12) % 12]++; });
+    const totalCount = pcCounts.reduce((a,b) => a+b, 0);
+    const bestKey = totalCount === 0
+        ? { name: 'C', root: 0, mode: 'Major' as const }
+        : keyCandidates.reduce((best, cand) => {
+            const scale = cand.mode === 'Major' ? majorScale : minorScale;
+            let fit = 0;
+            let off = 0;
+            for (let i = 0; i < 12; i++) {
+                const count = pcCounts[i];
+                if (!count) continue;
+                const interval = (i - cand.root + 12) % 12;
+                if (scale.includes(interval)) fit += count;
+                else off += count;
+            }
+            const score = (fit * 2) - off;
+            return score > best.score ? { ...cand, score } : best;
+        }, { name: 'C', root: 0, mode: 'Major' as const, score: -999999 });
 
     const toPitch = (midi: number): string => {
         const semitone = ((midi % 12) + 12) % 12;
@@ -319,5 +357,5 @@ export function convertRawNotesToAbc(
         cursorTick = Math.max(cursorTick, endTick);
     });
 
-    return `X:1\nM:${options.ts.num}/${options.ts.den}\nL:1/4\nQ:120\nK:C\n${body.trim()}`;
+    return `X:1\nM:${options.ts.num}/${options.ts.den}\nL:1/4\nQ:1/4=${Math.round(exportBpm)}\nK:${bestKey.name}\n${body.trim()}`;
 }
