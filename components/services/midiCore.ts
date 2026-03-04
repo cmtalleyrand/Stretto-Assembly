@@ -207,4 +207,4 @@ export async function parseMidiFromFile(file: File): Promise<{ midi: Midi; track
   return { midi, tracks, eventCounts };
 }
 
-export const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+export { NOTE_NAMES } from './midiConstants';

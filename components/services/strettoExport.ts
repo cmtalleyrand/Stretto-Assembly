@@ -7,7 +7,7 @@ import { getVoiceLabel } from './midiVoices';
  * Generates and downloads a multi-track MIDI file representing the Stretto result.
  * Fixes "Cannot set property ppq" error by scaling ticks instead of modifying read-only header.
  */
-export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq: number, voiceNames?: Record<number, string>, ts: { num: number; den: number } = { num: 4, den: 4 }, bpm: number = 120, keyRoot?: number, keyMode?: string) {
+export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq: number, voiceNames?: Record<number, string>, subjectName: string = "Untitled") {
     const midi = new Midi();
     
     // Tone.js MIDI instances default to 480 PPQ. 
@@ -16,19 +16,11 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
     const scaleFactor = TARGET_PPQ / sourcePpq;
     
     // Set basic metadata
-    midi.header.setTempo(bpm);
-    midi.header.timeSignatures = [{
-        timeSignature: [ts.num, ts.den],
+    midi.header.setTempo(120);
+    midi.header.timeSignatures.push({
+        timeSignature: [4, 4],
         ticks: 0,
-    }];
-
-    if (typeof keyRoot === 'number') {
-        const keyNameMap = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-        const safeRoot = ((keyRoot % 12) + 12) % 12;
-        const key = keyNameMap[safeRoot];
-        const scale = keyMode && keyMode.toLowerCase().includes('minor') ? 'minor' : 'major';
-        (midi.header as any).keySignatures = [{ key, scale, ticks: 0 }];
-    }
+    });
     
     // Group notes by voice index
     const notesByVoice: Record<number, any[]> = {};
@@ -73,9 +65,23 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
     const a = document.createElement('a');
     a.href = url;
     
-    // Descriptive filename
-    const safeLabel = candidate.intervalLabel.replace(/[^a-z0-9]/gi, '_');
-    a.download = `Stretto_${safeLabel}_${candidate.delayBeats}beats.mid`;
+    // Descriptive filename logic
+    const safeSubject = subjectName.replace(/[^a-z0-9]/gi, '_').slice(0, 25);
+    const dateStr = new Date().toISOString().slice(0,16).replace(/[:T]/g, '-');
+    
+    let filename = `Stretto_${safeSubject}`;
+    
+    if (candidate.intervalLabel === "Chain") {
+        // Chain specific naming
+        const voiceCount = voiceIndices.length;
+        filename += `_Chain_${voiceCount}Voices_${dateStr}`;
+    } else {
+        // Pairwise specific naming
+        const safeLabel = candidate.intervalLabel.replace(/[^a-z0-9]/gi, '');
+        filename += `_${safeLabel}_${candidate.delayBeats}beats_${dateStr}`;
+    }
+    
+    a.download = `${filename}.mid`;
     
     document.body.appendChild(a);
     a.click();
@@ -86,23 +92,15 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
 /**
  * Bundles multiple candidates into a single multi-track MIDI file.
  */
-export function downloadStrettoSelection(candidates: StrettoCandidate[], sourcePpq: number, voiceNames?: Record<number, string>, ts: { num: number; den: number } = { num: 4, den: 4 }, bpm: number = 120, keyRoot?: number, keyMode?: string) {
+export function downloadStrettoSelection(candidates: StrettoCandidate[], sourcePpq: number, voiceNames?: Record<number, string>, subjectName: string = "Untitled") {
     if (candidates.length === 0) return;
 
     const midi = new Midi();
     const TARGET_PPQ = 480; 
     const scaleFactor = TARGET_PPQ / sourcePpq;
     
-    midi.header.setTempo(bpm);
-    midi.header.timeSignatures = [{ timeSignature: [ts.num, ts.den], ticks: 0 }];
-
-    if (typeof keyRoot === 'number') {
-        const keyNameMap = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
-        const safeRoot = ((keyRoot % 12) + 12) % 12;
-        const key = keyNameMap[safeRoot];
-        const scale = keyMode && keyMode.toLowerCase().includes('minor') ? 'minor' : 'major';
-        (midi.header as any).keySignatures = [{ key, scale, ticks: 0 }];
-    }
+    midi.header.setTempo(120);
+    midi.header.timeSignatures.push({ timeSignature: [4, 4], ticks: 0 });
 
     candidates.forEach((candidate, cIdx) => {
         // Group notes by voice index
@@ -141,7 +139,11 @@ export function downloadStrettoSelection(candidates: StrettoCandidate[], sourceP
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Stretto_Selection_Export_${candidates.length}_items.mid`;
+    
+    const safeSubject = subjectName.replace(/[^a-z0-9]/gi, '_').slice(0, 25);
+    const dateStr = new Date().toISOString().slice(0,16).replace(/[:T]/g, '-');
+    a.download = `Stretto_Selection_${safeSubject}_${candidates.length}items_${dateStr}.mid`;
+    
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

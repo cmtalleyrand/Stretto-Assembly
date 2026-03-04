@@ -76,7 +76,7 @@ export default function StrettoChainView({
 
                 return { ...n, ticks: (n.ticks - startTick) + entryStartTick, midi: pitch, name: getStrictPitchName(pitch), voiceIndex: entry.voiceIndex };
             });
-            const entryEnd = entryStartTick + (entry.length * (currentPpq/4));
+            const entryEnd = entryStartTick + (entry.length * (currentPpq/2));
             const clipped = transformed.filter(n => n.ticks < entryEnd).map(n => ({ ...n, durationTicks: Math.min(n.durationTicks, entryEnd - n.ticks) }));
             allNotes = [...allNotes, ...clipped];
         });
@@ -132,7 +132,17 @@ export default function StrettoChainView({
                     )}
                     {searchReport && searchReport.stats.stopReason === 'Exhausted' && (
                         <div className="bg-red-900/30 border-b border-red-800 p-2 text-[10px] text-red-200">
-                            <strong>Search Failed:</strong> No valid chains found. Try relaxing rules.
+                            <strong>Search Exhausted:</strong> No valid chains found. Try relaxing rules.
+                        </div>
+                    )}
+                    {searchReport && searchReport.stats.stopReason === 'Timeout' && (
+                        <div className="bg-yellow-900/30 border-b border-yellow-800 p-2 text-[10px] text-yellow-200">
+                            <strong>Search Timed Out:</strong> Time limit reached. Max depth: {searchReport.stats.maxDepthReached}. Try relaxing constraints.
+                        </div>
+                    )}
+                    {searchReport && searchReport.stats.stopReason === 'NodeLimit' && (
+                        <div className="bg-yellow-900/30 border-b border-yellow-800 p-2 text-[10px] text-yellow-200">
+                            <strong>Search Node Limit Reached:</strong> Search space too large. Max depth: {searchReport.stats.maxDepthReached}. Try tightening constraints.
                         </div>
                     )}
                     <StrettoResultsList 
@@ -173,15 +183,6 @@ export default function StrettoChainView({
                             </div>
                             <span className="text-[10px] text-gray-500 hidden sm:inline">Shift entire chain before export.</span>
                         </div>
-
-                        {chainCandidate && (
-                            <button 
-                                onClick={onDownloadChain}
-                                className="flex items-center gap-2 px-4 py-2 bg-brand-primary text-white font-bold rounded shadow-lg hover:bg-brand-secondary transition-colors"
-                            >
-                                <DownloadIcon className="w-4 h-4" /> Download Chain MIDI
-                            </button>
-                        )}
                     </div>
                 </div>
             </div>

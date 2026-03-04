@@ -1,17 +1,6 @@
 
 import { RawNote } from '../../types';
 
-export interface AbcParseDiagnostics {
-    normalizedKey: string | null;
-    keyAccidentalCount: number;
-    issues: string[];
-}
-
-export interface ParsedAbcData {
-    notes: RawNote[];
-    diagnostics: AbcParseDiagnostics;
-}
-
 // Standard ABC Pitch Mapping
 // C = Middle C (MIDI 60)
 // c = C5 (MIDI 72)
@@ -19,7 +8,6 @@ const BASE_PITCHES: Record<string, number> = {
     'C': 60, 'D': 62, 'E': 64, 'F': 65, 'G': 67, 'A': 69, 'B': 71,
     'c': 72, 'd': 74, 'e': 76, 'f': 77, 'g': 79, 'a': 81, 'b': 83
 };
-
 
 // Key Signature Definitions (Standard sharps/flats)
 const KEY_SIGNATURES: Record<string, Record<string, number>> = {
@@ -104,18 +92,12 @@ export function extractKeyFromAbc(abc: string): { root: number, mode: string } |
 }
 
 export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] {
-    return parseAbcWithDiagnostics(abcString, ppq).notes;
-}
-
-export function parseAbcWithDiagnostics(abcString: string, ppq: number = 480): ParsedAbcData {
     const lines = abcString.split(/\r?\n/);
     
     // Default Context
     let keyAccidentals: Record<string, number> = {};
-    let normalizedKey: string | null = null;
     let defaultNoteLength = 1/8; 
     let tempo = 120;
-    const issues: string[] = [];
     
     const notes: RawNote[] = [];
     let currentTick = 0;
@@ -148,15 +130,11 @@ export function parseAbcWithDiagnostics(abcString: string, ppq: number = 480): P
                     }
                     
                     const normalized = pitchStr + (isMinor ? 'm' : '');
-                    normalizedKey = normalized;
                     if (KEY_SIGNATURES[normalized]) {
                         keyAccidentals = { ...KEY_SIGNATURES[normalized] };
                     } else {
                         keyAccidentals = {};
-                        issues.push(`K:${value} is not recognised; using C/Am accidentals (none).`);
                     }
-                } else {
-                    issues.push(`Could not parse key signature from K:${value}.`);
                 }
             } else if (field === 'L') {
                 const parts = value.split('/');
@@ -257,105 +235,5 @@ export function parseAbcWithDiagnostics(abcString: string, ppq: number = 480): P
         currentTick += durationTicks;
     }
 
-    if (!normalizedKey) {
-        issues.push('No K: header found; defaulting to C/Am accidentals (none).');
-    }
-
-    if (notes.length === 0) {
-        issues.push('No note tokens were parsed from the ABC body.');
-    }
-
-    return {
-        notes,
-        diagnostics: {
-            normalizedKey,
-            keyAccidentalCount: Object.keys(keyAccidentals).length / 2,
-            issues,
-        }
-    };
-}
-
-export function convertRawNotesToAbc(
-    notes: RawNote[],
-    options: { ppq: number; ts: { num: number; den: number }; truncateBeats?: number; bpm?: number }
-): string {
-    const sorted = [...notes].sort((a, b) => a.ticks - b.ticks);
-    const beatsToKeep = options.truncateBeats && options.truncateBeats > 0 ? options.truncateBeats : null;
-    const maxTick = beatsToKeep ? Math.round(beatsToKeep * options.ppq) : null;
-    const exportBpm = options.bpm && options.bpm > 0 ? options.bpm : 120;
-
-    const keyCandidates = [
-        { name: 'C', root: 0, mode: 'Major' }, { name: 'G', root: 7, mode: 'Major' }, { name: 'D', root: 2, mode: 'Major' },
-        { name: 'A', root: 9, mode: 'Major' }, { name: 'E', root: 4, mode: 'Major' }, { name: 'B', root: 11, mode: 'Major' },
-        { name: 'F#', root: 6, mode: 'Major' }, { name: 'C#', root: 1, mode: 'Major' }, { name: 'F', root: 5, mode: 'Major' },
-        { name: 'Bb', root: 10, mode: 'Major' }, { name: 'Eb', root: 3, mode: 'Major' }, { name: 'Ab', root: 8, mode: 'Major' },
-        { name: 'Am', root: 9, mode: 'Natural Minor' }, { name: 'Em', root: 4, mode: 'Natural Minor' },
-        { name: 'Bm', root: 11, mode: 'Natural Minor' }, { name: 'F#m', root: 6, mode: 'Natural Minor' },
-        { name: 'C#m', root: 1, mode: 'Natural Minor' }, { name: 'G#m', root: 8, mode: 'Natural Minor' },
-        { name: 'D#m', root: 3, mode: 'Natural Minor' }, { name: 'A#m', root: 10, mode: 'Natural Minor' },
-        { name: 'Dm', root: 2, mode: 'Natural Minor' }, { name: 'Gm', root: 7, mode: 'Natural Minor' },
-        { name: 'Cm', root: 0, mode: 'Natural Minor' }, { name: 'Fm', root: 5, mode: 'Natural Minor' },
-        { name: 'Bbm', root: 10, mode: 'Natural Minor' }, { name: 'Ebm', root: 3, mode: 'Natural Minor' },
-        { name: 'Abm', root: 8, mode: 'Natural Minor' }
-    ];
-    const majorScale = [0,2,4,5,7,9,11];
-    const minorScale = [0,2,3,5,7,8,10];
-    const pcCounts = new Array(12).fill(0);
-    sorted.forEach(n => { if (maxTick === null || n.ticks < maxTick) pcCounts[((n.midi % 12) + 12) % 12]++; });
-    const totalCount = pcCounts.reduce((a,b) => a+b, 0);
-    const bestKey = totalCount === 0
-        ? { name: 'C', root: 0, mode: 'Major' as const }
-        : keyCandidates.reduce((best, cand) => {
-            const scale = cand.mode === 'Major' ? majorScale : minorScale;
-            let fit = 0;
-            let off = 0;
-            for (let i = 0; i < 12; i++) {
-                const count = pcCounts[i];
-                if (!count) continue;
-                const interval = (i - cand.root + 12) % 12;
-                if (scale.includes(interval)) fit += count;
-                else off += count;
-            }
-            const score = (fit * 2) - off;
-            return score > best.score ? { ...cand, score } : best;
-        }, { name: 'C', root: 0, mode: 'Major' as const, score: -999999 });
-
-    const toPitch = (midi: number): string => {
-        const semitone = ((midi % 12) + 12) % 12;
-        const octave = Math.floor(midi / 12) - 1;
-        const abcNames = ['C', '^C', 'D', '^D', 'E', 'F', '^F', 'G', '^G', 'A', '^A', 'B'];
-        let p = abcNames[semitone];
-        const letterIndex = p.startsWith('^') ? 1 : 0;
-        const letter = p[letterIndex];
-        const accidental = p.startsWith('^') ? '^' : '';
-        let pitchLetter = octave >= 5 ? letter.toLowerCase() : letter;
-        if (octave > 5) pitchLetter += "'".repeat(octave - 5);
-        if (octave < 4) pitchLetter += ','.repeat(4 - octave);
-        return accidental + pitchLetter;
-    };
-
-    const toLen = (ticks: number): string => {
-        const q = ticks / options.ppq;
-        if (Math.abs(q - 1) < 0.001) return '';
-        if (Math.abs(q - 0.5) < 0.001) return '/2';
-        if (Math.abs(q - 0.25) < 0.001) return '/4';
-        if (Number.isInteger(q)) return `${q}`;
-        return `${Math.round(q * 100)}/100`;
-    };
-
-    let body = '';
-    let cursorTick = 0;
-    sorted.forEach((note) => {
-        if (maxTick !== null && note.ticks >= maxTick) return;
-        const startTick = note.ticks;
-        const endTick = maxTick !== null ? Math.min(note.ticks + note.durationTicks, maxTick) : note.ticks + note.durationTicks;
-        const duration = Math.max(1, endTick - startTick);
-        if (startTick > cursorTick) {
-            body += `z${toLen(startTick - cursorTick)} `;
-        }
-        body += `${toPitch(note.midi)}${toLen(duration)} `;
-        cursorTick = Math.max(cursorTick, endTick);
-    });
-
-    return `X:1\nM:${options.ts.num}/${options.ts.den}\nL:1/4\nQ:1/4=${Math.round(exportBpm)}\nK:${bestKey.name}\n${body.trim()}`;
+    return notes;
 }

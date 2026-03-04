@@ -1,6 +1,6 @@
 
 import { CHORD_SHAPES, SCORING } from './strettoConstants';
-import { NOTE_NAMES } from './midiCore';
+import { NOTE_NAMES } from './midiConstants';
 
 export interface StrettoHarmonyResult {
     reward: number;

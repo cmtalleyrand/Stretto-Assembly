@@ -1,5 +1,5 @@
 import { ChordMatch, ChordEvent, RawNote } from '../../types';
-import { NOTE_NAMES } from './midiCore';
+import { NOTE_NAMES } from './midiConstants';
 
 export const CHORD_SHAPES = [
     { name: '13', intervals: [0, 4, 7, 10, 2, 5, 9], optional5th: true },

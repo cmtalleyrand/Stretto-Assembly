@@ -34,22 +34,68 @@ export default function StrettoSearchPanel({
         }
     };
 
-    const renderConstraintSelector = (label: string, field: keyof StrettoSearchOptions, value: StrettoConstraintMode) => (
-        <div className="bg-gray-900 p-2 rounded border border-gray-700">
-            <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase">{label}</label>
-            <div className="flex gap-1">
-                {['None', 'Max 1', 'Unlimited'].map((mode) => (
+    const renderConstraintSelector = (label: string, field: keyof StrettoSearchOptions, value: StrettoConstraintMode) => {
+        const isNumber = typeof value === 'number';
+        const isMax1 = value === 'Max 1';
+        const numValue = isNumber ? value : (isMax1 ? 1 : 1);
+        const isCustom = isNumber || isMax1;
+
+        // Local state to allow empty string while typing
+        const [inputValue, setInputValue] = useState<string>(numValue.toString());
+
+        // Sync local state when external value changes
+        React.useEffect(() => {
+            setInputValue(numValue.toString());
+        }, [numValue]);
+
+        return (
+            <div className="bg-gray-900 p-2 rounded border border-gray-700">
+                <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase">{label}</label>
+                <div className="flex gap-1 items-center">
                     <button
-                        key={mode}
-                        onClick={() => handleChange(field, mode as StrettoConstraintMode)}
-                        className={`flex-1 py-1 text-[10px] rounded border transition-colors ${value === mode ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-800 text-gray-500 border-gray-600 hover:border-gray-500'}`}
+                        onClick={() => handleChange(field, 'None')}
+                        className={`flex-1 py-1 text-[10px] rounded border transition-colors ${value === 'None' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-800 text-gray-500 border-gray-600 hover:border-gray-500'}`}
                     >
-                        {mode}
+                        None
                     </button>
-                ))}
+                    
+                    <div 
+                        className={`flex items-center border rounded transition-colors cursor-pointer ${isCustom ? 'bg-brand-primary border-brand-primary' : 'bg-gray-800 border-gray-600 hover:border-gray-500'}`}
+                        onClick={() => { if (!isCustom) handleChange(field, numValue); }}
+                    >
+                        <span className={`pl-2 pr-1 py-1 text-[10px] ${isCustom ? 'text-white' : 'text-gray-500'}`}>Max</span>
+                        <input 
+                            type="number" 
+                            min="1" 
+                            max="10"
+                            value={inputValue}
+                            onChange={(e) => {
+                                setInputValue(e.target.value);
+                                const val = parseInt(e.target.value);
+                                if (!isNaN(val) && val > 0) {
+                                    handleChange(field, val === 1 ? 'Max 1' : val);
+                                }
+                            }}
+                            onBlur={() => {
+                                if (inputValue === '' || isNaN(parseInt(inputValue)) || parseInt(inputValue) < 1) {
+                                    setInputValue('1');
+                                    handleChange(field, 'Max 1');
+                                }
+                            }}
+                            className={`w-8 bg-transparent text-[10px] text-center outline-none ${isCustom ? 'text-white' : 'text-gray-500'}`}
+                        />
+                    </div>
+
+                    <button
+                        onClick={() => handleChange(field, 'Unlimited')}
+                        className={`flex-1 py-1 text-[10px] rounded border transition-colors ${value === 'Unlimited' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-800 text-gray-500 border-gray-600 hover:border-gray-500'}`}
+                    >
+                        Unlimited
+                    </button>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     const availableAbove = options.subjectVoiceIndex; 
     const availableBelow = (options.ensembleTotal - 1) - options.subjectVoiceIndex;
@@ -58,11 +104,12 @@ export default function StrettoSearchPanel({
     const truncationVisual = useMemo(() => {
         if (subjectNotes.length === 0) return null;
         
+        const effectivePpq = ppq || 480;
         const sorted = [...subjectNotes].sort((a,b) => a.ticks - b.ticks);
         const startTick = sorted[0].ticks;
         const totalDuration = Math.max(...sorted.map(n => n.ticks + n.durationTicks)) - startTick;
         
-        const targetTicks = Math.round(options.truncationTargetBeats * ppq);
+        const targetTicks = Math.round(options.truncationTargetBeats * effectivePpq);
         const minMidi = Math.min(...sorted.map(n => n.midi));
         const maxMidi = Math.max(...sorted.map(n => n.midi));
         const range = maxMidi - minMidi + 12; // Buffer
@@ -71,11 +118,11 @@ export default function StrettoSearchPanel({
             <div className="w-full h-16 bg-gray-900 border border-gray-700 rounded mt-2 relative overflow-hidden select-none">
                 <svg className="w-full h-full" preserveAspectRatio="none" viewBox={`0 0 ${totalDuration} ${range}`}>
                     {/* Background Grid (Beats) */}
-                    {Array.from({ length: Math.ceil(totalDuration / ppq) }).map((_, i) => (
+                    {Array.from({ length: Math.ceil(totalDuration / effectivePpq) }).map((_, i) => (
                         <line 
                             key={i} 
-                            x1={i * ppq} y1={0} 
-                            x2={i * ppq} y2={range} 
+                            x1={i * effectivePpq} y1={0} 
+                            x2={i * effectivePpq} y2={range} 
                             stroke="#333" 
                             strokeWidth={i % 4 === 0 ? 2 : 1}
                             vectorEffect="non-scaling-stroke" 
@@ -242,7 +289,7 @@ export default function StrettoSearchPanel({
                             <input 
                                 type="number" 
                                 min="0.5" step="0.5"
-                                value={options.truncationTargetBeats}
+                                value={isNaN(options.truncationTargetBeats) ? '' : options.truncationTargetBeats}
                                 onChange={(e) => handleChange('truncationTargetBeats', parseFloat(e.target.value))}
                                 className="w-16 bg-gray-900 border border-gray-600 text-xs rounded px-1 py-1 text-white text-center"
                             />
@@ -339,6 +386,17 @@ export default function StrettoSearchPanel({
                 className="w-full py-2 bg-brand-primary hover:bg-brand-secondary text-white font-bold rounded shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm uppercase tracking-wide"
             >
                 {isSearching ? 'Processing Combinations...' : 'Run Search Algorithm v4.3'}
+            </button>
+            
+            <button 
+                onClick={async () => {
+                    const { runStrettoTests } = await import('../services/strettoTests');
+                    runStrettoTests();
+                }}
+                disabled={isSearching}
+                className="w-full mt-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 font-bold rounded border border-gray-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-[10px] uppercase tracking-wide"
+            >
+                Run Test Suite (Check Console)
             </button>
         </div>
     );

@@ -350,7 +350,7 @@ export interface StrettoSearchReport {
     stats: {
         nodesVisited: number;
         timeMs: number;
-        stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted' | 'Partial';
+        stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
     };
 }

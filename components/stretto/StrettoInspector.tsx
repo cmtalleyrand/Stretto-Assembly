@@ -175,7 +175,10 @@ export default function StrettoInspector({
                             <button onClick={handleExportAnalysis} className="p-2 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors text-white" title="Export Analysis Report">
                                 <DocumentTextIcon className="w-5 h-5"/>
                             </button>
-                            <button onClick={() => onPlay(candidate.notes)} className="bg-brand-primary p-2 rounded-full hover:bg-brand-secondary transition-transform active:scale-95 shadow-md">
+                            <button onClick={onDownloadChain} className="p-2 bg-gray-700 rounded-full hover:bg-gray-600 transition-colors text-white" title="Download MIDI">
+                                <DownloadIcon className="w-5 h-5"/>
+                            </button>
+                            <button onClick={() => onPlay(candidate.notes)} className="bg-brand-primary p-2 rounded-full hover:bg-brand-secondary transition-transform active:scale-95 shadow-md" title={isPlaying ? "Stop" : "Play"}>
                                 {isPlaying ? <StopIcon className="w-5 h-5 text-white"/> : <PlayIcon className="w-5 h-5 text-white"/>}
                             </button>
                         </div>

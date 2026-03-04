@@ -354,7 +354,7 @@ export interface StrettoSearchReport {
     };
 }
 
-export type StrettoConstraintMode = 'None' | 'Max 1' | 'Unlimited';
+export type StrettoConstraintMode = 'None' | 'Max 1' | 'Unlimited' | number;
 
 export interface StrettoSearchOptions {
     ensembleTotal: number;

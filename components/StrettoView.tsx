@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade } from '../types';
-import { parseAbcWithDiagnostics, extractKeyFromAbc, convertRawNotesToAbc } from './services/abcBridge';
+import { parseSimpleAbc, extractKeyFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
 import { searchStrettoChains } from './services/strettoGenerator'; 
 import { getStrictPitchName } from './services/midiSpelling';
@@ -34,8 +34,6 @@ interface SavedSubject {
 export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, setVoiceNames }: StrettoViewProps) {
     const [mode, setMode] = useState<'midi' | 'abc'>(initialNotes.length > 0 ? 'midi' : 'abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
-    const [truncateMidiForAbc, setTruncateMidiForAbc] = useState<boolean>(false);
-    const [truncateMidiBeats, setTruncateMidiBeats] = useState<number>(8);
     const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain'); 
     
     const [gradeFilter, setGradeFilter] = useState<Record<StrettoGrade, boolean>>({
@@ -89,12 +87,18 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
         }
     }, []);
 
-    const abcParsed = useMemo(() => parseAbcWithDiagnostics(abcInput, ppq || 480), [abcInput, ppq]);
+    const subjectTitle = useMemo(() => {
+        if (mode === 'abc') {
+            const match = abcInput.match(/^T:\s*(.+)$/m);
+            return match ? match[1].trim() : "ABC_Subject";
+        }
+        return "MIDI_Subject";
+    }, [mode, abcInput]);
 
     const subjectNotes = useMemo(() => {
-        if (mode === 'abc') return abcParsed.notes;
+        if (mode === 'abc') return parseSimpleAbc(abcInput, ppq || 480);
         return initialNotes; 
-    }, [mode, abcParsed, initialNotes]);
+    }, [mode, abcInput, initialNotes, ppq]);
 
     // Clear selection when subject changes
     useEffect(() => {
@@ -191,18 +195,6 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
     };
 
     const handleLoadSubject = (data: string) => { setAbcInput(data); };
-
-    const handleUseMidiAsAbc = () => {
-        if (!initialNotes.length) return;
-        const abc = convertRawNotesToAbc(initialNotes, {
-            ppq: ppq || 480,
-            ts,
-            truncateBeats: truncateMidiForAbc ? truncateMidiBeats : undefined,
-            bpm: 120
-        });
-        setAbcInput(abc);
-        setMode('abc');
-    };
 
     const { 
         isAssembling, assemblyStatus, assemblyResult, assemblyLog, 
@@ -399,31 +391,7 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
                             </div>
                         </div>
                     )}
-                    <div className="bg-gray-900/40 border border-gray-700 rounded p-3 text-xs text-gray-300 space-y-2">
-                        <div className="flex flex-wrap items-center gap-3">
-                            <span><span className="text-gray-500">Parsed key:</span> {abcParsed.diagnostics.normalizedKey || 'Unknown (C/Am default accidentals)'}</span>
-                            <span><span className="text-gray-500">Signature accidentals:</span> {abcParsed.diagnostics.keyAccidentalCount}</span>
-                            <span><span className="text-gray-500">Parsed notes:</span> {abcParsed.notes.length}</span>
-                        </div>
-                        {abcParsed.diagnostics.issues.length > 0 && (
-                            <ul className="list-disc list-inside text-amber-300">
-                                {abcParsed.diagnostics.issues.map((issue, idx) => <li key={idx}>{issue}</li>)}
-                            </ul>
-                        )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                        <button onClick={handleUseMidiAsAbc} disabled={!initialNotes.length} className="text-xs bg-gray-800 hover:bg-gray-700 text-brand-primary border border-brand-primary/30 px-3 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed">Use selected MIDI as ABC</button>
-                        <label className="flex items-center gap-2 text-xs text-gray-300">
-                            <input type="checkbox" checked={truncateMidiForAbc} onChange={(e) => setTruncateMidiForAbc(e.target.checked)} />
-                            Truncate converted MIDI
-                        </label>
-                        {truncateMidiForAbc && (
-                            <label className="flex items-center gap-2 text-xs text-gray-300">Beats:
-                                <input type="number" min={1} value={truncateMidiBeats} onChange={(e) => setTruncateMidiBeats(Math.max(1, parseInt(e.target.value) || 1))} className="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1" />
-                            </label>
-                        )}
-                    </div>
-                    <textarea value={abcInput} onChange={e => setAbcInput(e.target.value)} placeholder="Paste ABC notation here (Include K: Key field)" className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white font-mono h-24 outline-none focus:border-brand-primary" />
+                    <textarea value={abcInput} onChange={e => setAbcInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white font-mono h-24 outline-none focus:border-brand-primary" />
                 </div>
             )}
 
@@ -453,9 +421,9 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
                             checkedIds={checkedIds} 
                             onToggleCheck={toggleCheck} 
                         />
-                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, ts, 120, searchOptions.scaleRoot, searchOptions.scaleMode)} />
+                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle)} />
                     </div>
-                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, ts, 120, searchOptions.scaleRoot, searchOptions.scaleMode)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput)} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
+                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput)} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
                 </>
             ) : (
                 <StrettoChainView 
@@ -473,7 +441,7 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
                     ts={ts} 
                     isPlaying={isPlaying} 
                     onPlay={handlePlay} 
-                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, ts, 120, searchOptions.scaleRoot, searchOptions.scaleMode)} 
+                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle)} 
                     searchReport={searchReport}
                     masterTransposition={masterTransposition}
                     setMasterTransposition={setMasterTransposition}
