@@ -29,6 +29,7 @@ async function run() {
     requireConsonantEnd: true,
     disallowComplexExceptions: false,
     maxPairwiseDissonance: 1,
+    delaySpacingBeats: 0.5,
     scaleRoot: 0,
     scaleMode: 'Major',
   };

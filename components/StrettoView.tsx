@@ -71,6 +71,7 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
         requireConsonantEnd: true,
         disallowComplexExceptions: false,
         maxPairwiseDissonance: 1.0, // Default to Allow All
+        delaySpacingBeats: 0.5,
         scaleRoot: 0,
         scaleMode: 'Major'
     });

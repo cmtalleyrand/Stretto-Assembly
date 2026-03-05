@@ -313,29 +313,17 @@ function hasOverlap(
 // --- Generator ---
 
 
-function buildDelayCandidates(baseNotes: InternalNote[], maxDelay8: number): number[] {
-    const boundaries = new Set<number>();
-    for (const n of baseNotes) {
-        boundaries.add(n.relTick8);
-        boundaries.add(n.relTick8 + n.dur8);
+function buildDelayCandidates(maxDelay8: number, unitsPerBeat: number, delaySpacingBeats: number): number[] {
+    if (maxDelay8 < 1) return [];
+    const spacingUnits = Math.max(1, Math.round(Math.max(0.125, delaySpacingBeats) * unitsPerBeat));
+    const candidates: number[] = [];
+    for (let d = spacingUnits; d <= maxDelay8; d += spacingUnits) {
+        candidates.push(d);
     }
-
-    const points = Array.from(boundaries).sort((a, b) => a - b);
-    const candidates = new Set<number>();
-
-    for (let i = 0; i < points.length; i++) {
-        for (let j = i + 1; j < points.length; j++) {
-            const delta = points[j] - points[i];
-            if (delta <= 0 || delta > maxDelay8) continue;
-            candidates.add(delta);
-        }
+    if (candidates.length === 0 || candidates[candidates.length - 1] !== maxDelay8) {
+        candidates.push(maxDelay8);
     }
-
-    if (candidates.size === 0 && maxDelay8 > 0) {
-        candidates.add(Math.min(maxDelay8, Math.max(1, baseNotes[0]?.dur8 ?? 1)));
-    }
-
-    return Array.from(candidates).sort((a, b) => a - b);
+    return Array.from(new Set(candidates)).sort((a, b) => a - b);
 }
 
 function formatSeqNumber(value: number): string {
@@ -407,7 +395,7 @@ export async function searchStrettoChains(
     const delayTripleMap = new Map<string, Set<number>>();
     const maxDelay8 = Math.floor(subjectLength8 * (2/3));
     const halfCapDelay8 = Math.floor(subjectLength8 * 0.5) - 1;
-    const validDelays = buildDelayCandidates(baseNotes, maxDelay8);
+    const validDelays = buildDelayCandidates(maxDelay8, unitsPerBeat, options.delaySpacingBeats);
     
     const transpositions = Array.from(INTERVALS.TRAD_TRANSPOSITIONS);
     if (options.thirdSixthMode !== 'None') {

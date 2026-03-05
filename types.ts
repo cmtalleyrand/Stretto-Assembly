@@ -370,6 +370,7 @@ export interface StrettoSearchOptions {
     requireConsonantEnd: boolean;
     disallowComplexExceptions: boolean;
     maxPairwiseDissonance: number;
+    delaySpacingBeats: number;
     voiceNames?: Record<number, string>;
     scaleRoot: number; // 0-11
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.

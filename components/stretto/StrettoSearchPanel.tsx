@@ -226,6 +226,19 @@ export default function StrettoSearchPanel({
                         </select>
                     </div>
 
+                    <div className="flex-1 mt-1">
+                        <label className="block text-[9px] text-gray-500 mb-1">Delay Spacing</label>
+                        <select
+                            value={options.delaySpacingBeats}
+                            onChange={(e) => handleChange('delaySpacingBeats', parseFloat(e.target.value))}
+                            className="w-full bg-gray-800 border border-gray-600 rounded text-xs text-white px-1 py-1"
+                        >
+                            <option value={0.5}>Half beat (eighth note)</option>
+                            <option value={1}>1 beat (quarter note)</option>
+                            <option value={0.25}>Quarter beat (sixteenth note)</option>
+                        </select>
+                    </div>
+
                     <div className="text-[10px] text-gray-400 flex justify-between bg-black/20 p-1 rounded mt-1">
                         <span>↑ {availableAbove} Above</span>
                         <span className="font-bold text-brand-primary">S</span>
