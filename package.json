@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:stretto": "npx esbuild tests/stretto.chain80.test.ts --bundle --platform=node --format=esm --outfile=.tmp/stretto.chain80.test.mjs && node .tmp/stretto.chain80.test.mjs",
-    "test:stretto:report": "npx esbuild scripts/generate-stretto-chain80-report.mjs --bundle --platform=node --format=esm --outfile=.tmp/generate-stretto-chain80-report.mjs && node .tmp/generate-stretto-chain80-report.mjs"
+    "test:stretto": "npx esbuild tests/stretto.chain8.test.ts --bundle --platform=node --format=esm --outfile=.tmp/stretto.chain8.test.mjs && node .tmp/stretto.chain8.test.mjs && npx esbuild tests/stretto.arpeggio-guaranteed.test.ts --bundle --platform=node --format=esm --outfile=.tmp/stretto.arpeggio-guaranteed.test.mjs && node .tmp/stretto.arpeggio-guaranteed.test.mjs",
+    "test:stretto:report": "npx esbuild scripts/generate-stretto-chain8-report.mjs --bundle --platform=node --format=esm --outfile=.tmp/generate-stretto-chain8-report.mjs && node .tmp/generate-stretto-chain8-report.mjs",
+    "test:stretto:guaranteed": "npx esbuild tests/stretto.arpeggio-guaranteed.test.ts --bundle --platform=node --format=esm --outfile=.tmp/stretto.arpeggio-guaranteed.test.mjs && node .tmp/stretto.arpeggio-guaranteed.test.mjs"
   },
   "dependencies": {
     "react": "18.2.0",

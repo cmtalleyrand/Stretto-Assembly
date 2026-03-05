@@ -5,8 +5,8 @@ import { calculateStrettoScore, SubjectVariant } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
 
 // --- Constants & Types ---
-const MAX_SEARCH_NODES = 2000000; // Increased to allow deeper search
-const TIME_LIMIT_MS = 30000;
+const MAX_SEARCH_NODES = 400000; // Bound search breadth to prevent runaway exploration
+const TIME_LIMIT_MS = 7500; // Bound wall time so UI gets a prompt terminal report
 const MAX_RESULTS = 50;
 
 interface InternalNote {
@@ -312,6 +312,32 @@ function hasOverlap(
 
 // --- Generator ---
 
+
+function buildDelayCandidates(baseNotes: InternalNote[], maxDelay8: number): number[] {
+    const boundaries = new Set<number>();
+    for (const n of baseNotes) {
+        boundaries.add(n.relTick8);
+        boundaries.add(n.relTick8 + n.dur8);
+    }
+
+    const points = Array.from(boundaries).sort((a, b) => a - b);
+    const candidates = new Set<number>();
+
+    for (let i = 0; i < points.length; i++) {
+        for (let j = i + 1; j < points.length; j++) {
+            const delta = points[j] - points[i];
+            if (delta <= 0 || delta > maxDelay8) continue;
+            candidates.add(delta);
+        }
+    }
+
+    if (candidates.size === 0 && maxDelay8 > 0) {
+        candidates.add(Math.min(maxDelay8, Math.max(1, baseNotes[0]?.dur8 ?? 1)));
+    }
+
+    return Array.from(candidates).sort((a, b) => a - b);
+}
+
 export async function searchStrettoChains(
     rawSubject: RawNote[],
     options: StrettoSearchOptions,
@@ -362,11 +388,9 @@ export async function searchStrettoChains(
 
     const compatTable = new Map<string, boolean>();
     const delayTripleMap = new Map<string, Set<number>>();
-    const validDelays: number[] = [];
     const maxDelay8 = Math.floor(subjectLength8 * (2/3));
     const halfCapDelay8 = Math.floor(subjectLength8 * 0.5) - 1;
-    
-    for (let d = 1; d <= maxDelay8; d++) validDelays.push(d);
+    const validDelays = buildDelayCandidates(baseNotes, maxDelay8);
     
     const transpositions = Array.from(INTERVALS.TRAD_TRANSPOSITIONS);
     if (options.thirdSixthMode !== 'None') {
@@ -478,23 +502,22 @@ export async function searchStrettoChains(
         if (deadEndStateCache.has(stateKey)) return false;
         
         // --- RULE 1 & 2: DELAY LOGIC (STRICT) ---
-        const possibleDelays8: number[] = [];
-        let minD = 1; 
-        let maxD = Math.floor(subjectLength8 * (2/3)); 
+        const minD = 1;
+        let maxD = maxDelay8;
 
-        if (depth > 0) {
-            if (depth + 1 > 3) maxD = Math.min(maxD, Math.floor(subjectLength8 * 0.5) - 1);
-            if (depth >= 2) {
-                maxD = Math.min(maxD, prevDelay8 + unitsPerBeat);
-                if (depth >= 3) {
-                    // Expansion Reaction Logic
-                    if (prevDelay8 > prevPrevDelay8) maxD = Math.min(maxD, prevPrevDelay8 - 1);
-                }
-                if (prevDelay8 > (subjectLength8 / 2)) maxD = Math.min(maxD, prevDelay8 - 1);
-            }
+        if (depth > 3) maxD = Math.min(maxD, halfCapDelay8);
+
+        if (prevDelay8 >= 0 && prevPrevDelay8 >= 0 && prevDelay8 > prevPrevDelay8) {
+            maxD = Math.min(maxD, prevDelay8 - 1);
         }
 
-        for (let d = minD; d <= maxD; d++) possibleDelays8.push(d);
+        if (prevDelay8 >= 0) {
+            maxD = Math.min(maxD, prevDelay8 + unitsPerBeat);
+        }
+
+        if (maxD < minD) return false;
+
+        const possibleDelays8 = validDelays.filter(d => d >= minD && d <= maxD);
 
         // Triple-lifted delay pruning: once we have at least 2 prior delay values,
         // only keep next delays that belong to precomputed valid delay-triples.
