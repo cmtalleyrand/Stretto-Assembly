@@ -5,8 +5,8 @@ import { calculateStrettoScore, SubjectVariant } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
 
 // --- Constants & Types ---
-const MAX_SEARCH_NODES = 400000; // Bound search breadth to prevent runaway exploration
-const TIME_LIMIT_MS = 7500; // Bound wall time so UI gets a prompt terminal report
+const MAX_SEARCH_NODES = 2000000; // Allow deeper valid searches before terminating
+const TIME_LIMIT_MS = 30000; // Preserve prior search budget to avoid premature truncation
 const MAX_RESULTS = 50;
 
 interface InternalNote {
@@ -336,6 +336,23 @@ function buildDelayCandidates(baseNotes: InternalNote[], maxDelay8: number): num
     }
 
     return Array.from(candidates).sort((a, b) => a - b);
+}
+
+function formatSeqNumber(value: number): string {
+    return Number.isInteger(value) ? String(value) : value.toFixed(6);
+}
+
+function getTranspositionSignature(entries: StrettoChainOption[]): string {
+    return entries.map(e => e.transposition).join(',');
+}
+
+function getDelaySignature(entries: StrettoChainOption[]): string {
+    if (entries.length <= 1) return 'ROOT';
+    const deltas: string[] = [];
+    for (let i = 1; i < entries.length; i++) {
+        deltas.push(formatSeqNumber(entries[i].startBeat - entries[i - 1].startBeat));
+    }
+    return deltas.join(',');
 }
 
 export async function searchStrettoChains(
@@ -706,26 +723,63 @@ export async function searchStrettoChains(
         stopReason = 'NodeLimit';
     }
 
-    // Grouping Logic
-    const groupedMap = new Map<string, StrettoChainResult[]>();
-    
-    sourceResults.forEach(res => {
-        const delays = res.entries.map(e => e.startBeat).join(',');
-        const voices = res.entries.map(e => e.voiceIndex).join(',');
-        const key = `D:${delays}|V:${voices}`;
-        
-        if (!groupedMap.has(key)) groupedMap.set(key, []);
-        groupedMap.get(key)!.push(res);
+    // Grouping logic: collapse near-duplicate chains when either
+    // (a) transposition sequence matches, or
+    // (b) delay-distance sequence matches.
+    const parents = sourceResults.map((_, i) => i);
+    const rank = sourceResults.map(() => 0);
+
+    const find = (x: number): number => {
+        if (parents[x] !== x) parents[x] = find(parents[x]);
+        return parents[x];
+    };
+
+    const union = (a: number, b: number): void => {
+        const ra = find(a);
+        const rb = find(b);
+        if (ra === rb) return;
+        if (rank[ra] < rank[rb]) {
+            parents[ra] = rb;
+        } else if (rank[rb] < rank[ra]) {
+            parents[rb] = ra;
+        } else {
+            parents[rb] = ra;
+            rank[ra]++;
+        }
+    };
+
+    const transpositionBuckets = new Map<string, number[]>();
+    const delayBuckets = new Map<string, number[]>();
+
+    sourceResults.forEach((res, idx) => {
+        const transSig = getTranspositionSignature(res.entries);
+        const delaySig = getDelaySignature(res.entries);
+        if (!transpositionBuckets.has(transSig)) transpositionBuckets.set(transSig, []);
+        if (!delayBuckets.has(delaySig)) delayBuckets.set(delaySig, []);
+        transpositionBuckets.get(transSig)!.push(idx);
+        delayBuckets.get(delaySig)!.push(idx);
+    });
+
+    [transpositionBuckets, delayBuckets].forEach(bucketMap => {
+        bucketMap.forEach(indices => {
+            if (indices.length <= 1) return;
+            const [head, ...tail] = indices;
+            tail.forEach(i => union(head, i));
+        });
+    });
+
+    const groupedMap = new Map<number, StrettoChainResult[]>();
+    sourceResults.forEach((res, idx) => {
+        const root = find(idx);
+        if (!groupedMap.has(root)) groupedMap.set(root, []);
+        groupedMap.get(root)!.push(res);
     });
 
     const finalResults: StrettoChainResult[] = [];
-    
-    groupedMap.forEach((group) => {
+    groupedMap.forEach(group => {
         group.sort((a,b) => b.score - a.score);
         const leader = group[0];
-        if (group.length > 1) {
-            leader.variations = group.slice(1);
-        }
+        if (group.length > 1) leader.variations = group.slice(1);
         finalResults.push(leader);
     });
 

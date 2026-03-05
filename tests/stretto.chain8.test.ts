@@ -54,6 +54,23 @@ async function run(): Promise<void> {
   assert.ok(leader.entries.length >= 3, 'Expected non-trivial chain entries in top chain');
   assert.equal(leader.entries[0].startBeat, 0, 'Expected chain to start at beat 0');
 
+  const transpositionSigs = new Set<string>();
+  const delaySigs = new Set<string>();
+  for (const result of report.results) {
+    const transSig = result.entries.map((entry) => entry.transposition).join(',');
+    const delaySig = result.entries.length <= 1
+      ? 'ROOT'
+      : result.entries
+          .slice(1)
+          .map((entry, i) => (entry.startBeat - result.entries[i].startBeat).toFixed(6))
+          .join(',');
+
+    assert.ok(!transpositionSigs.has(transSig), `Duplicate transposition signature leaked: ${transSig}`);
+    assert.ok(!delaySigs.has(delaySig), `Duplicate delay signature leaked: ${delaySig}`);
+    transpositionSigs.add(transSig);
+    delaySigs.add(delaySig);
+  }
+
   console.log('stretto.chain8.test passed', {
     subjectBeats: 12,
     subjectNotes: subject.length,
