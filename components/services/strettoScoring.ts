@@ -1,6 +1,6 @@
 
 import { StrettoChainOption, StrettoSearchOptions, StrettoChainResult, ScoreLog } from '../../types';
-import { INTERVALS } from './strettoConstants';
+import { INTERVALS, SCORING } from './strettoConstants';
 import { analyzeStrettoHarmony } from './strettoHarmonyAnalysis';
 
 // --- Weights & Constants ---
@@ -261,25 +261,69 @@ export function calculateStrettoScore(
         prevBass = bass;
     }
 
-    // 3. Final Calculation
+    // 3. Final Calculation: S1-S4 quality penalty (proportional)
     const S1 = totalPolyTime > 0 ? totalDissTime / totalPolyTime : 0;
     const S2 = weightedTotalPoly > 0 ? totalWeightedDissTime / weightedTotalPoly : 0;
     const S3 = totalPolyTime > 0 ? totalNCTTime / totalPolyTime : 0;
     const S4 = totalDissEvents > 0 ? unpreparedDissEvents / totalDissEvents : 0;
 
-    const penalty = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3) + (S4 * W_S4);
-    const score = Math.max(0, Math.round(1000 * (1 - penalty)));
+    const qualityPenaltyFraction = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3) + (S4 * W_S4);
+    let score = Math.round(1000 * (1 - qualityPenaltyFraction));
 
-    const log: ScoreLog = { 
-        base: 1000, 
-        bonuses: [], 
-        penalties: [
-            { reason: `S1: Unweighted Diss (${(S1*100).toFixed(0)}%)`, points: Math.round(S1 * 1000 * W_S1) },
-            { reason: `S2: Weighted Diss (${(S2*100).toFixed(0)}%)`, points: Math.round(S2 * 1000 * W_S2) },
-            { reason: `S3: NCT Time (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * 1000 * W_S3) },
-            { reason: `S4: Unprepared Diss (${(S4*100).toFixed(0)}%)`, points: Math.round(S4 * 1000 * W_S4) },
-        ], 
-        total: score 
+    const bonuses: ScoreLog['bonuses'] = [];
+    const penalties: ScoreLog['penalties'] = [
+        { reason: `S1: Unweighted Diss (${(S1*100).toFixed(0)}%)`, points: Math.round(S1 * 1000 * W_S1) },
+        { reason: `S2: Weighted Diss (${(S2*100).toFixed(0)}%)`, points: Math.round(S2 * 1000 * W_S2) },
+        { reason: `S3: NCT Time (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * 1000 * W_S3) },
+        { reason: `S4: Unprepared Diss (${(S4*100).toFixed(0)}%)`, points: Math.round(S4 * 1000 * W_S4) },
+    ];
+
+    // --- 3B. Additive Bonuses & Penalties (per SCORING_MECHANISM.md) ---
+
+    const subjectLengthBeats = variants[0].lengthTicks / PPQ;
+
+    // B_compactness: reward hyper-stretto entries
+    for (let i = 1; i < chain.length; i++) {
+        const delay = chain[i].startBeat - chain[i-1].startBeat;
+        const ratio = delay / subjectLengthBeats;
+        if (ratio < SCORING.COMPACT_HYPER_THRESH) {
+            score += SCORING.COMPACT_HYPER_BONUS;
+            bonuses.push({ reason: `B_compactness: hyper-stretto entry ${i+1}`, points: SCORING.COMPACT_HYPER_BONUS });
+        } else if (ratio < SCORING.COMPACT_TIGHT_THRESH) {
+            score += SCORING.COMPACT_TIGHT_BONUS;
+            bonuses.push({ reason: `B_compactness: tight entry ${i+1}`, points: SCORING.COMPACT_TIGHT_BONUS });
+        }
+    }
+
+    // B_variety: reward interval diversity between successive entries (+40 per unique interval beyond first)
+    const transpositionLinks: number[] = [];
+    for (let i = 1; i < chain.length; i++) {
+        transpositionLinks.push(chain[i].transposition - chain[i-1].transposition);
+    }
+    const uniqueIntervals = new Set(transpositionLinks);
+    if (uniqueIntervals.size > 1) {
+        const varietyBonus = (uniqueIntervals.size - 1) * 40;
+        score += varietyBonus;
+        bonuses.push({ reason: `B_variety: ${uniqueIntervals.size} unique intervals`, points: varietyBonus });
+    }
+
+    // P_truncation: penalise beats removed
+    for (let i = 0; i < chain.length; i++) {
+        const truncBeats = variants[variantIndices[i]].truncationBeats;
+        if (truncBeats > 0) {
+            const truncPenalty = truncBeats * SCORING.TRUNCATION_PENALTY_PER_BEAT;
+            score -= truncPenalty;
+            penalties.push({ reason: `P_truncation: ${truncBeats} beat(s) removed entry ${i+1}`, points: truncPenalty });
+        }
+    }
+
+    score = Math.max(0, score);
+
+    const log: ScoreLog = {
+        base: 1000,
+        bonuses,
+        penalties,
+        total: score
     };
 
     // 4. Consonant End Validation (Gatekeeper A)

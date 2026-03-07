@@ -61,6 +61,18 @@ An algorithm to split polyphonic tracks (piano/guitar) into separate monophonic 
 - `hooks/`: State management (`useMidiController`).
 - `types.ts`: Shared TypeScript interfaces.
 
+## Stretto Assembly: Expected Input
+
+The **Stretto Assembly** engine is designed to work with **pre-quantised, metrically clean material**. The intended primary workflow is:
+
+1. Compose or transcribe a fugue subject in your notation software and export it as **ABC notation** with exact rhythmic values (no swing, no micro-timing).
+2. Convert the ABC to MIDI (the app's ABC Bridge handles this) to obtain a perfectly grid-aligned note sequence.
+3. Run the Stretto search on this clean MIDI.
+
+Raw performance MIDI (e.g. recorded live) will produce unreliable results because the search algorithm reasons about beat positions and delay intervals in exact ticks. Notes that are slightly early or late will cause overlap windows to be computed incorrectly, leading to spurious dissonance counts and missed valid chains. Always quantise first.
+
+---
+
 ## Usage Guide
 
 1.  **Upload:** Drop a MIDI file onto the landing zone.
