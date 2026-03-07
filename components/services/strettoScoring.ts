@@ -295,8 +295,7 @@ export function calculateStrettoScore(
         }
     }
 
-    // B_variety: unique transposition intervals and imperfect consonances
-    const IMPERFECT_INTERVAL_CLASSES = new Set([3, 4, 8, 9]); // m3, M3, m6, M6
+    // B_variety: reward interval diversity between successive entries (+40 per unique interval beyond first)
     const transpositionLinks: number[] = [];
     for (let i = 1; i < chain.length; i++) {
         transpositionLinks.push(chain[i].transposition - chain[i-1].transposition);
@@ -307,29 +306,6 @@ export function calculateStrettoScore(
         score += varietyBonus;
         bonuses.push({ reason: `B_variety: ${uniqueIntervals.size} unique intervals`, points: varietyBonus });
     }
-    for (let i = 1; i < chain.length; i++) {
-        const ic = ((chain[i].transposition - chain[i-1].transposition) % 12 + 12) % 12;
-        if (IMPERFECT_INTERVAL_CLASSES.has(ic)) {
-            score += SCORING.IMPERFECT_CONS_BONUS;
-            bonuses.push({ reason: `B_variety: imperfect consonance entry ${i+1}`, points: SCORING.IMPERFECT_CONS_BONUS });
-        }
-    }
-
-    // B_complexity: inversions and extra voices
-    let invCount = 0;
-    for (let i = 0; i < chain.length; i++) {
-        if (variants[variantIndices[i]].type === 'I') invCount++;
-    }
-    if (invCount > 0) {
-        const invBonus = invCount * SCORING.INVERSION_BONUS;
-        score += invBonus;
-        bonuses.push({ reason: `B_complexity: ${invCount} inverted voice(s)`, points: invBonus });
-    }
-    if (chain.length > 2) {
-        const extraVoiceBonus = (chain.length - 2) * SCORING.CHAIN_LENGTH_BONUS;
-        score += extraVoiceBonus;
-        bonuses.push({ reason: `B_complexity: ${chain.length - 2} extra voice(s) beyond 2`, points: extraVoiceBonus });
-    }
 
     // P_truncation: penalise beats removed
     for (let i = 0; i < chain.length; i++) {
@@ -338,22 +314,6 @@ export function calculateStrettoScore(
             const truncPenalty = truncBeats * SCORING.TRUNCATION_PENALTY_PER_BEAT;
             score -= truncPenalty;
             penalties.push({ reason: `P_truncation: ${truncBeats} beat(s) removed entry ${i+1}`, points: truncPenalty });
-        }
-    }
-
-    // P_monotony: penalise if any single transposition interval dominates
-    if (transpositionLinks.length >= 2) {
-        const totalLinks = transpositionLinks.length;
-        const intervalCounts: Record<number, number> = {};
-        for (const iv of transpositionLinks) {
-            intervalCounts[iv] = (intervalCounts[iv] || 0) + 1;
-        }
-        for (const count of Object.values(intervalCounts)) {
-            if (count > totalLinks * 0.5) {
-                score -= SCORING.MONOTONY_PENALTY;
-                penalties.push({ reason: 'P_monotony: single interval > 50% of links', points: SCORING.MONOTONY_PENALTY });
-                break;
-            }
         }
     }
 

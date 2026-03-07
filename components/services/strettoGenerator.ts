@@ -163,42 +163,6 @@ function isStrongBeat(tick: number, ppq: number): boolean {
     return (tick % (ppq * 2)) === 0;
 }
 
-/**
- * Returns all absolute pitches active across every voice in a chain
- * (plus the candidate new entry) at the given tick.
- * Used to determine the overall bass at any moment for P4 dissonance ruling.
- */
-function getAllActivePitches(
-    tick: number,
-    newVariant: SubjectVariant,
-    newEntry: StrettoChainOption,
-    newStartTick: number,
-    chain: StrettoChainOption[],
-    variants: SubjectVariant[],
-    variantIndices: number[],
-    ppq: number
-): number[] {
-    const pitches: number[] = [];
-
-    const newNote = newVariant.notes.find(n => {
-        const s = newStartTick + n.relTick;
-        return s <= tick && s + n.durationTicks > tick;
-    });
-    if (newNote) pitches.push(newNote.pitch + newEntry.transposition);
-
-    for (let k = 0; k < chain.length; k++) {
-        const e = chain[k];
-        const v = variants[variantIndices[k]];
-        const eStart = Math.round(e.startBeat * ppq);
-        const note = v.notes.find(n => {
-            const s = eStart + n.relTick;
-            return s <= tick && s + n.durationTicks > tick;
-        });
-        if (note) pitches.push(note.pitch + e.transposition);
-    }
-
-    return pitches;
-}
 
 /**
  * PHASE 5 CHECK: Metric Compliance
@@ -213,9 +177,33 @@ function checkMetricCompliance(
     ppq: number,
     metricOffset: number = 0
 ): boolean {
-    
+
     const newStartTick = Math.round(newEntry.startBeat * ppq);
-    
+
+    // Pre-build a flat list of (startTick, endTick, absolutePitch) for every note in every
+    // voice (new entry + entire chain). Built once here so the P4-vs-bass lookup inside the
+    // pairwise loop is a single linear scan over a cached array rather than a repeated
+    // re-traversal of the chain.  Treating P4 as dissonant against the bass prunes branches:
+    // when the bass-P4 makes `isDiss = true`, the existing dissonance-run counter fires and
+    // returns false immediately, cutting that branch from the search tree.
+    type NoteEvent = [number, number, number]; // [start, end, pitch]
+    const allNoteEvents: NoteEvent[] = [];
+    for (const n of newVariant.notes) {
+        allNoteEvents.push([newStartTick + n.relTick, newStartTick + n.relTick + n.durationTicks, n.pitch + newEntry.transposition]);
+    }
+    for (let k = 0; k < chain.length; k++) {
+        const eStart = Math.round(chain[k].startBeat * ppq);
+        for (const n of variants[variantIndices[k]].notes) {
+            allNoteEvents.push([eStart + n.relTick, eStart + n.relTick + n.durationTicks, n.pitch + chain[k].transposition]);
+        }
+    }
+    // Returns the lowest absolute pitch active at `tick` across all voices, or Infinity if none.
+    const overallBassAt = (tick: number): number => {
+        let min = Infinity;
+        for (const [s, e, p] of allNoteEvents) { if (s <= tick && e > tick && p < min) min = p; }
+        return min;
+    };
+
     // Check against every existing voice
     for (let k = 0; k < chain.length; k++) {
         const existEntry = chain[k];
@@ -280,15 +268,11 @@ function checkMetricCompliance(
 
             let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
 
-            // P4 (interval 5) is dissonant only when it occurs against the bass (lowest
-            // active note across all voices, not just this pair). Check the full texture.
-            if (!isDiss && interval === 5) {
-                const allPitches = getAllActivePitches(start, newVariant, newEntry, newStartTick, chain, variants, variantIndices, ppq);
-                if (allPitches.length > 0) {
-                    const overallBass = Math.min(...allPitches);
-                    if (lo === overallBass) isDiss = true;
-                }
-            }
+            // P4 (5 semitones) is consonant between upper voices but dissonant above the bass.
+            // Use the precomputed allNoteEvents to find the lowest active pitch at this tick.
+            // If the lower note of the P4 IS the bass, mark it dissonant so the run-limit
+            // check below can prune the branch immediately.
+            if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
             // Corrected Metric Check using Absolute Grid alignment
             const isStrong = isStrongBeat(start + metricOffset, ppq);
