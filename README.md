@@ -19,11 +19,11 @@ Deep inspection of MIDI data to inform processing decisions.
   - *Sustain:* Chords formed by overlapping held notes.
   - *Attack:* Block chords struck simultaneously (with configurable tolerance).
   - *Hybrid:* Intelligent detection for arpeggiated or polyphonic textures based on voice config.
-  - *Beat Synced:* Harmonies normalized to specific beat buckets (Harmonic Rhythm).
+  - *Arpeggio (Time Window):* Harmonies inferred by collecting closely spaced attacks in a configurable temporal window.
 - **Voice Leading:** Histograms of melodic intervals to analyze the smoothness of lines.
 
-### 3. Transformation Pipeline (The "Shadow Grid")
-The application uses a sophisticated 2-pass "Shadow Quantization" engine logic:
+### 3. Transformation Pipeline (Quantization & Structural Cleanup)
+The application uses a two-pass quantization and cleanup pipeline:
 - **Quantization:** Snap notes to standard (1/4, 1/8, 1/16) or tuplets grids (Triplets, Quintuplets).
 - **Duration Constraints:** Enforce minimum note lengths to clean up staccato performance or "ghost notes".
 - **Overlap Pruning:** Intelligently shorten notes to prevent monophonic overlap conflicts, essential for clean sheet music export.
