@@ -6,6 +6,7 @@ interface DiagnosticCase {
   name: string;
   options: StrettoSearchOptions;
   expectation: (result: Awaited<ReturnType<typeof searchStrettoChains>>) => void;
+  isSlow?: boolean;
 }
 
 const SIMPLE_SUBJECT: RawNote[] = [
@@ -42,6 +43,7 @@ const DIAGNOSTIC_CASES: DiagnosticCase[] = [
   {
     name: 'UI default-like request times out before target depth (targetChainLength = 8)',
     options: { ...BASE_OPTIONS, targetChainLength: 8, inversionMode: 1, thirdSixthMode: 1 },
+    isSlow: true,
     expectation: (result) => {
       assert.equal(result.stats.stopReason, 'Timeout');
       assert.ok(result.stats.maxDepthReached < 8, 'Expected solver to fail to reach depth 8 before time limit.');
@@ -58,9 +60,13 @@ const DIAGNOSTIC_CASES: DiagnosticCase[] = [
 ];
 
 async function runDiagnostics() {
-  console.log('=== STRETTO DIAGNOSTIC SUITE ===');
+  const runSlowDiagnostics = process.env.STRETTO_DIAGNOSTIC_FULL === '1';
+  const selectedCases = DIAGNOSTIC_CASES.filter((testCase) => runSlowDiagnostics || !testCase.isSlow);
 
-  for (const testCase of DIAGNOSTIC_CASES) {
+  console.log('=== STRETTO DIAGNOSTIC SUITE ===');
+  console.log(`Running ${selectedCases.length}/${DIAGNOSTIC_CASES.length} cases (full=${runSlowDiagnostics ? 'enabled' : 'disabled'})`);
+
+  for (const testCase of selectedCases) {
     const startedAt = Date.now();
     const result = await searchStrettoChains(SIMPLE_SUBJECT, testCase.options, 480);
     const elapsedMs = Date.now() - startedAt;
