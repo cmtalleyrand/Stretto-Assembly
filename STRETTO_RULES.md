@@ -1,3 +1,4 @@
+
 # Stretto Generator Rules & Logic (v4.8 Strict)
 
 This document defines the strict set of rules, constraints, and scoring mechanisms used by the Stretto Assembly algorithm.
@@ -23,7 +24,7 @@ The algorithm strictly enforces vertical ordering:
 If `requireConsonantEnd` is enabled, dissonant endpoints invalidate the chain.
 
 ## 2. Scoring Metrics (S1-S3)
-Candidates that pass the Hard Constraints are ranked by a composite score derived from these strict metrics.
+Candidates that pass the Hard Constraints are ranked by a composite score derived from these three strict metrics.
 
 ### Metric S1: Dissonance Ratio (Unweighted)
 The fraction of polyphonic duration that contains any dissonance.
@@ -36,18 +37,21 @@ Similar to S1, but dissonances occurring on **Strong Beats** are penalized more 
 
 ### Metric S3: Non-Chord Tone (NCT) Ratio
 Measures harmonic stability by fitting vertical slices to a strict **Chord Template Library** (Triads, 7ths, Aug6).
-*   **Formula:** proportional NCT burden over slices with $\ge 3$ voices.
+*   **Formula:** proportional NCT burden over slices with at least 3 active voices.
 *   **Ideal:** Lower indicates cleaner, more triadic harmony.
 
-### Removed Metric
-Metric S4 (Unprepared Dissonance Ratio) is intentionally excluded from this scorer revision.
+Metric S4 (Unprepared Dissonance Ratio) is intentionally excluded from the active scorer.
 
 ## 3. Scoring Composition
 For feasible chains:
 
 $$ S(C)=U_{quality}+B_{compactness}+B_{polyphony}+R_{harmony}-P_{distance}-P_{truncation}-P_{monotony}-P_{harmonyNCT} $$
 
-with `ScoreLog.base = 0` and no clamp.
+where
+
+$$ Q = 0.2S1 + 0.3S2 + 0.2S3, \quad U_{quality} = -1000Q $$
+
+and `ScoreLog.base = 0` with no clamp.
 
 Distance penalty decomposition:
 1. $-20$ per repeated delay occurrence beyond first use.

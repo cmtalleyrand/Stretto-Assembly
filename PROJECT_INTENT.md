@@ -1,3 +1,4 @@
+
 # Project Intent & Target Architecture
 
 This document defines the **Desired End State** of the application. All future code changes must align with these specifications.
@@ -37,7 +38,7 @@ The user requires sophisticated Chord Identification capabilities, specifically 
 **2. Dissonance (30-40% Weight)**
 **3. Harmonic Quality (Sustain Mode)**
 
-Active objective terms are additive around base 0 (`ScoreLog.base = 0`) and include compactness, polyphony density, harmonic reward, distance penalties (repeat/cluster/early-expansion), truncation, monotony, and harmonic NCT burden.
+Active scorer terms are additive around base 0 (`ScoreLog.base = 0`) and include quality utility from `S1/S2/S3`, compactness reward, polyphony density reward, harmonic reward, distance penalties (repetition/cluster/early expansion), truncation penalty, monotony penalty, and harmonic NCT penalty.
 
 ### III. Unified Pivot Logic
 1.  **Rule 6.5:** The Inversion Pivot selection must be shared between Pairwise Discovery and Algorithmic Chain search to ensure that "Candidate #5 (Inv)" in the list sounds identical to "Entry #5 (Inv)" in a generated chain.
