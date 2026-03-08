@@ -1,42 +1,31 @@
-
 # Project Intent & Target Architecture
 
-This document defines the **Desired End State** of the application. All future code changes must align with these specifications.
+## Authoritative Scope
 
-## 1. Data Pipeline Architecture
+Stretto Assembly has a strict operational objective: compute deterministic stretto structures from symbolic musical input.
 
-The application assumes **Pre-Processed / Intentional MIDI Inputs**. 
-*   **No Aggressive Correction:** The system should NOT attempt complex "Shadow Quantization" or heuristic grid alignment to fix performance errors. It assumes the input MIDI is musically correct or that any desired quantization is simple and manual.
-*   **Analysis Integrity:** While we do not auto-correct the notes, the **Analysis Reports** (Rhythm, Harmony) must still provide deep insights into the structure of the data as provided.
+### In-Scope Problems
 
+1. **Pairwise stretto discovery** under explicit timing and harmonic admissibility constraints.
+2. **Algorithmic chain generation** from admissible pairwise entries with continuity rules.
+3. **Implied harmony detection from stretto overlap states** as a first-class evaluation stage.
+4. **Export synthesis** to MIDI and ABC with explicit per-voice entry allocation.
 
-## 2. Harmonic Analysis & Arpeggiation
+## Canonical Input Contract
 
-The user requires sophisticated Chord Identification capabilities, specifically handling arpeggiation logic.
+- The canonical source representation is **ABC notation**.
+- MIDI is a secondary interoperability format and must not define default workflow assumptions.
+- Internal evaluation is discrete in ticks after parsing; therefore exact symbolic timing is required for stable overlap arithmetic.
 
-### Harmonic Modes
-1.  **Attack (Block):** Chords are identified by notes starting simultaneously (within a small tolerance).
-2.  **Sustain:** Chords are identified by the set of notes currently held down (overlapping durations).
-3.  **Arpeggio (Time Window):** Treats the whole texture as a potential arpeggio within a time window.
+## System Invariants
 
-## 3. Visual & Reporting Requirements
-*   **Tables:** All analysis outputs must be in detailed Markdown tables, not summary lists.
-*   **Spelling:** Use key-aware spelling for pitch names.
+- Delay validity and overlap predicates are deterministic functions of note onset/offset indices.
+- Pivot/inversion semantics are consistent between discovery and chain expansion.
+- Voice assignment for export is stable and explicit for each stretto entry.
+- UI defaults route directly to stretto operations without prerequisite diagnostics panels.
 
----
+## Explicit Non-Goals
 
-## 5. Stretto Logic Specification (v3.1)
-
-### I. Distance Rules
-1.  **Rule 6.1 (Unified Ceiling):** Entry Delay $Delay \le \text{SubjectLength} \times 0.66$ (66%). This applies to both Discovery and Chain menus.
-2.  **Elasticity:** $Delay_{new} \le Delay_{prev} + 1.0$.
-3.  **Expansion Reaction:** If $Delay_{new} > Delay_{prev}$, the *next* delay must be significantly smaller.
-
-### II. Scoring Indicators (Base Score: 0)
-
-**1. Polyphony (30% Weight)**
-**2. Dissonance (30-40% Weight)**
-**3. Harmonic Quality (Sustain Mode)**
-
-### III. Unified Pivot Logic
-1.  **Rule 6.5:** The Inversion Pivot selection must be shared between Pairwise Discovery and Algorithmic Chain search to ensure that "Candidate #5 (Inv)" in the list sounds identical to "Entry #5 (Inv)" in a generated chain.
+- Diagnostics-first navigation or branding.
+- Positioning Harmonic Implication Analysis (HIA) as an independent primary workflow.
+- Generic broad-spectrum harmonic-analysis tooling as the headline product function outside stretto evaluation.

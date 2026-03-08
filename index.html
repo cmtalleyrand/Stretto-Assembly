@@ -3,19 +3,20 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MIDI Track Combiner</title>
+    <title>Stretto Assembly</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              'brand-primary': '#14b8a6', // teal-500
-              'brand-secondary': '#0f766e', // teal-700
-              'gray-light': '#f3f4f6', // gray-100
-              'gray-medium': '#4b5563', // gray-600
-              'gray-dark': '#1f2937', // gray-800
-              'gray-darker': '#111827', // gray-900
+              'brand-primary': '#7dd3fc',
+              'brand-secondary': '#1d4ed8',
+              'brand-accent': '#f59e0b',
+              'gray-light': '#f8fafc',
+              'gray-medium': '#64748b',
+              'gray-dark': '#1e293b',
+              'gray-darker': '#0f172a'
             },
             animation: {
               'fade-in': 'fadeIn 0.5s ease-in-out',
@@ -37,7 +38,7 @@
     </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-<body class="bg-gray-darker text-gray-light">
+<body class="bg-gray-darker text-gray-light antialiased">
     <div id="root"></div>
     <script type="importmap">
 {
