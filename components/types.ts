@@ -349,12 +349,12 @@ export interface StrettoSearchReport {
     stats: {
         nodesVisited: number;
         timeMs: number;
-        stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted' | 'Partial';
+        stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
     };
 }
 
-export type StrettoConstraintMode = 'None' | 'Max 1' | 'Unlimited' | number;
+export type StrettoConstraintMode = 'None' | 'Unlimited' | number;
 
 export interface StrettoSearchOptions {
     ensembleTotal: number;

@@ -36,9 +36,8 @@ export default function StrettoSearchPanel({
 
     const renderConstraintSelector = (label: string, field: keyof StrettoSearchOptions, value: StrettoConstraintMode) => {
         const isNumber = typeof value === 'number';
-        const isMax1 = value === 'Max 1';
-        const numValue = isNumber ? value : (isMax1 ? 1 : 1);
-        const isCustom = isNumber || isMax1;
+        const numValue = isNumber ? value : 1;
+        const isCustom = isNumber;
 
         // Local state to allow empty string while typing
         const [inputValue, setInputValue] = useState<string>(numValue.toString());
@@ -73,13 +72,13 @@ export default function StrettoSearchPanel({
                                 setInputValue(e.target.value);
                                 const val = parseInt(e.target.value);
                                 if (!isNaN(val) && val > 0) {
-                                    handleChange(field, val === 1 ? 'Max 1' : val);
+                                    handleChange(field, val);
                                 }
                             }}
                             onBlur={() => {
                                 if (inputValue === '' || isNaN(parseInt(inputValue)) || parseInt(inputValue) < 1) {
                                     setInputValue('1');
-                                    handleChange(field, 'Max 1');
+                                    handleChange(field, 1);
                                 }
                             }}
                             className={`w-8 bg-transparent text-[10px] text-center outline-none ${isCustom ? 'text-white' : 'text-gray-500'}`}

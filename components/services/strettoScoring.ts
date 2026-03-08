@@ -1,6 +1,6 @@
 
 import { StrettoChainOption, StrettoSearchOptions, StrettoChainResult, ScoreLog } from '../../types';
-import { INTERVALS } from './strettoConstants';
+import { INTERVALS, SCORING } from './strettoConstants';
 import { analyzeStrettoHarmony } from './strettoHarmonyAnalysis';
 
 // --- Weights & Constants ---
@@ -43,9 +43,9 @@ function countNCTs(pitches: number[]): number {
     if (pitches.length === 0) return 0;
     const pcs = Array.from(new Set(pitches.map(p => p % 12)));
     const Q_len = pcs.length;
-    
+
     let maxOverlap = 0;
-    
+
     for (const template of CHORD_TEMPLATES) {
         for (let i = 0; i < 12; i++) {
             const shiftedTemplate = template.map(x => (x + i) % 12);
@@ -56,26 +56,27 @@ function countNCTs(pitches: number[]): number {
             if (overlap > maxOverlap) maxOverlap = overlap;
         }
     }
-    
+
     return Q_len - maxOverlap;
 }
 
 /**
- * Calculates the S1-S4 metrics for a generated chain.
- * REFACTORED: Uses Scan-Line algorithm on raw ticks (no 8th note quantization).
+ * Calculates the S1-S4 metrics + additive bonuses/penalties for a generated chain.
+ * Hybrid scoring: S1-S4 ratio base + structural bonuses/penalties + polyphony density.
  */
 export function calculateStrettoScore(
-    chain: StrettoChainOption[], 
-    variants: SubjectVariant[], 
-    variantIndices: number[], 
-    options: StrettoSearchOptions
+    chain: StrettoChainOption[],
+    variants: SubjectVariant[],
+    variantIndices: number[],
+    options: StrettoSearchOptions,
+    ppq: number = 480
 ): StrettoChainResult {
-    
-    // 1. Collect all unique time points (events)
+
+    const PPQ = ppq;
+
+    // 1. Collect all unique time points and place notes
     const timePoints = new Set<number>();
-    
-    // Also build a structure to quickly query active notes
-    // We'll use a flat list of "PlacedNotes" for the scan-line
+
     interface PlacedNote {
         start: number;
         end: number;
@@ -84,24 +85,10 @@ export function calculateStrettoScore(
     }
     const placedNotes: PlacedNote[] = [];
 
-    // We need PPQ to determine strong beats. Assuming 480 if not passed in options (it's not, but usually standard)
-    // We'll infer beat duration from the chain if possible, or assume 480.
-    // StrettoChainOption has startBeat. startBeat * 480 = ticks? 
-    // Actually, the generator uses a PPQ. We don't have PPQ here explicitly in arguments?
-    // The options object doesn't have PPQ. 
-    // However, `startBeat` is in beats. 
-    // Let's assume 1 Beat = 480 Ticks for the sake of S2 weighting if we don't have it.
-    // Wait, `calculateStrettoScore` is called by `searchStrettoChains` which HAS `ppq`.
-    // But `calculateStrettoScore` signature doesn't take `ppq`.
-    // We should probably add it, but to avoid breaking signature right now, we can try to infer or use a standard constant.
-    // The `startBeat` is float. 
-    // Let's assume standard 480 for internal weighting logic.
-    const PPQ = 480; 
-
     chain.forEach((e, i) => {
         const variant = variants[variantIndices[i]];
         const startTick = Math.round(e.startBeat * PPQ);
-        
+
         variant.notes.forEach(n => {
             const absStart = startTick + n.relTick;
             const absEnd = absStart + n.durationTicks;
@@ -117,28 +104,23 @@ export function calculateStrettoScore(
     });
 
     const sortedPoints = Array.from(timePoints).sort((a,b) => a-b);
-    
-    // --- 1B. Run Harmony Analysis for UI ---
-    // We still need to generate the 16th-note grid for the visualizer/analyzer
-    // We can derive this from our placedNotes
+
+    // --- 1B. Run Harmony Analysis ---
     const harmonyTimeline: Record<number, Record<number, { pitch: number, dur16: number }>> = {};
     const harmonyTicks: number[] = [];
-    
+
     const minTick = sortedPoints[0];
     const maxTick = sortedPoints[sortedPoints.length - 1];
-    const tick16 = PPQ / 4; // 120
+    const tick16 = PPQ / 4;
 
-    // Quantize to 16th grid for display analysis
     for (let t = minTick; t < maxTick; t += tick16) {
-        // Find active notes at this 16th slice (sample at start)
         const active = placedNotes.filter(n => n.start <= t && n.end > t);
         if (active.length > 0) {
-            // Normalize t to 16th index
-            const gridIndex = Math.round(t / tick16); 
+            const gridIndex = Math.round(t / tick16);
             harmonyTicks.push(gridIndex);
             harmonyTimeline[gridIndex] = {};
             active.forEach(n => {
-                harmonyTimeline[gridIndex][n.voice] = { pitch: n.pitch, dur16: 1 }; // Unit duration for grid
+                harmonyTimeline[gridIndex][n.voice] = { pitch: n.pitch, dur16: 1 };
             });
         }
     }
@@ -146,18 +128,21 @@ export function calculateStrettoScore(
     const harmonyAnalysis = analyzeStrettoHarmony(harmonyTimeline, harmonyTicks);
 
     // --- 2. Scan-Line Metric Calculation ---
-    
-    let totalPolyTime = 0;
-    let totalDissTime = 0; // S1
+
+    let totalPolyTime = 0;       // S1/S2 denominator (2+ voices)
+    let totalDissTime = 0;       // S1
     let totalWeightedDissTime = 0; // S2
-    let weightedTotalPoly = 0; // S2 Denom
-    let totalNCTTime = 0; // S3
-    
-    let totalDissEvents = 0; // S4
+    let weightedTotalPoly = 0;   // S2 Denom
+    let totalNCTTime = 0;        // S3 numerator
+    let totalPoly3PlusTime = 0;  // S3 denominator (3+ voices only)
+
+    let totalDissEvents = 0;     // S4
     let unpreparedDissEvents = 0; // S4
-    
-    // Track previous state for S4 (Preparation check)
-    // We need to track state *per interval*.
+
+    // Polyphony density tracking
+    let totalWeightedVoices = 0;
+    let totalDuration = 0;
+
     const previousStateByVoice = new Map<number, {pitch: number, isConsonantAgainstBass: boolean}>();
     let prevBass: number | null = null;
 
@@ -167,42 +152,32 @@ export function calculateStrettoScore(
         const dur = end - start;
         if (dur <= 0) continue;
 
-        // Find active notes in this interval
         const voices = placedNotes.filter(n => n.start <= start && n.end > start);
-        
-        // Update monophonic state for S4 continuity
+
+        // Accumulate polyphony density for ALL slices (including mono)
+        totalWeightedVoices += voices.length * dur;
+        totalDuration += dur;
+
         if (voices.length === 1) {
             prevBass = voices[0].pitch;
             previousStateByVoice.clear();
             previousStateByVoice.set(voices[0].voice, { pitch: voices[0].pitch, isConsonantAgainstBass: true });
             continue;
         }
-        
+
         if (voices.length < 2) continue;
 
         totalPolyTime += dur;
-        
-        // S2 Weighting: Check if this interval overlaps a strong beat
-        // Strong beat = multiples of PPQ (Quarter notes) or PPQ*2 (Half notes)?
-        // Original code: Strong if tick8 % 4 === 0 (Half note in 4/4) or tick8 % 8 === 0 (Bar)
-        // Let's stick to Beat 1 and Beat 3 in 4/4.
-        // Beat 1: tick % (PPQ * 4) === 0
-        // Beat 3: tick % (PPQ * 4) === (PPQ * 2)
-        // Simplified: Strong if tick % (PPQ * 2) === 0.
-        
-        // Does the interval [start, end) contain a strong beat?
-        // Or is the start on a strong beat?
-        // Let's use the start point for weighting to keep it simple, or integrate.
-        // Simple: Weight = 1.5 if start is strong, 1.0 otherwise.
+
         const isStrong = (start % (PPQ * 2) === 0);
         const weight = isStrong ? 1.5 : 1.0;
         const weightedDur = dur * weight;
-        
+
         weightedTotalPoly += weightedDur;
 
         const pitches = voices.map(v => v.pitch).sort((a,b)=>a-b);
         const bass = pitches[0];
-        
+
         // --- S1 & S2: Dissonance ---
         let isDiss = false;
         for(let j=0; j<pitches.length; j++) {
@@ -212,99 +187,208 @@ export function calculateStrettoScore(
                 if (int === 5 && pitches[j] === bass) isDiss = true;
             }
         }
-        
+
         if (isDiss) {
             totalDissTime += dur;
             totalWeightedDissTime += weightedDur;
         }
 
-        // --- S3: NCT ---
-        const nctCount = countNCTs(pitches);
-        if (nctCount > 0) {
-            totalNCTTime += dur;
+        // --- S3: NCT (proportional, 3+ voices only) ---
+        if (voices.length >= 3) {
+            totalPoly3PlusTime += dur;
+            const nctCount = countNCTs(pitches);
+            if (nctCount > 0) {
+                totalNCTTime += dur * (nctCount / pitches.length);
+            }
         }
 
         // --- S4: Unprepared Dissonance ---
-        // We only check this once per *event* (interval start), not integrated over time
-        // Actually, S4 counts *events*.
         voices.forEach(v => {
             if (v.pitch === bass) return;
-            
+
             const intVsBass = (v.pitch - bass + 1200) % 12;
             const isDissVsBass = INTERVALS.DISSONANT_SIMPLE.has(intVsBass) || intVsBass === 5;
-            
+
             if (isDissVsBass) {
                 totalDissEvents++;
-                
-                // P1: Must have been consonant previously
+
                 const prevState = previousStateByVoice.get(v.voice);
                 let prepared = false;
-                
+
                 if (prevState && prevState.isConsonantAgainstBass) {
-                    // P2: Single motion constraint
                     const bassMoved = (prevBass !== null && prevBass !== bass);
                     const voiceMoved = (prevState.pitch !== v.pitch);
-                    
-                    // XOR logic: Only one should move for strict preparation
+
                     if ((!voiceMoved && bassMoved) || (voiceMoved && !bassMoved)) {
                         prepared = true;
                     }
                 }
-                
+
                 if (!prepared) {
                     unpreparedDissEvents++;
                 }
             }
-            // Update state
             previousStateByVoice.set(v.voice, { pitch: v.pitch, isConsonantAgainstBass: !isDissVsBass });
         });
         prevBass = bass;
     }
 
-    // 3. Final Calculation
+    // 3. S1-S4 Final Calculation
     const S1 = totalPolyTime > 0 ? totalDissTime / totalPolyTime : 0;
     const S2 = weightedTotalPoly > 0 ? totalWeightedDissTime / weightedTotalPoly : 0;
-    const S3 = totalPolyTime > 0 ? totalNCTTime / totalPolyTime : 0;
+    const S3 = totalPoly3PlusTime > 0 ? totalNCTTime / totalPoly3PlusTime : 0;
     const S4 = totalDissEvents > 0 ? unpreparedDissEvents / totalDissEvents : 0;
 
-    const penalty = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3) + (S4 * W_S4);
-    const score = Math.max(0, Math.round(1000 * (1 - penalty)));
+    const s1s4Penalty = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3) + (S4 * W_S4);
+    let score = Math.round(1000 * (1 - s1s4Penalty));
 
-    const log: ScoreLog = { 
-        base: 1000, 
-        bonuses: [], 
+    const log: ScoreLog = {
+        base: 1000,
+        bonuses: [],
         penalties: [
             { reason: `S1: Unweighted Diss (${(S1*100).toFixed(0)}%)`, points: Math.round(S1 * 1000 * W_S1) },
             { reason: `S2: Weighted Diss (${(S2*100).toFixed(0)}%)`, points: Math.round(S2 * 1000 * W_S2) },
-            { reason: `S3: NCT Time (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * 1000 * W_S3) },
+            { reason: `S3: NCT (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * 1000 * W_S3) },
             { reason: `S4: Unprepared Diss (${(S4*100).toFixed(0)}%)`, points: Math.round(S4 * 1000 * W_S4) },
-        ], 
-        total: score 
+        ],
+        total: score
     };
 
-    // 4. Consonant End Validation (Gatekeeper A)
+    // --- 4. Harmony Reward/Penalty (3a) ---
+    if (harmonyAnalysis.reward > 0) {
+        const r = Math.round(harmonyAnalysis.reward);
+        score += r;
+        log.bonuses.push({ reason: `Harmony: full chords`, points: r });
+    }
+    if (harmonyAnalysis.penalty > 0) {
+        const p = Math.round(harmonyAnalysis.penalty);
+        score -= p;
+        log.penalties.push({ reason: `Harmony: NCT presence`, points: p });
+    }
+
+    // --- 5. Polyphony Density Bonus: 200 * (avgVoices - 2) (3d) ---
+    const avgVoices = totalDuration > 0 ? totalWeightedVoices / totalDuration : 1;
+    const polyphonyBonus = Math.round(200 * (avgVoices - 2));
+    score += polyphonyBonus;
+    if (polyphonyBonus >= 0) {
+        log.bonuses.push({ reason: `Polyphony density (avg ${avgVoices.toFixed(1)} voices)`, points: polyphonyBonus });
+    } else {
+        log.penalties.push({ reason: `Thin texture (avg ${avgVoices.toFixed(1)} voices)`, points: -polyphonyBonus });
+    }
+
+    // --- 6. Additive Bonuses/Penalties (3b) ---
+    const subjectLengthTicks = variants[0].lengthTicks;
+
+    // P_truncation: -20 per beat removed
+    let truncPenalty = 0;
+    let truncEntries = 0;
+    chain.forEach((_, idx) => {
+        const v = variants[variantIndices[idx]];
+        if (v.truncationBeats > 0) {
+            truncPenalty += v.truncationBeats * SCORING.TRUNCATION_PENALTY_PER_BEAT;
+            truncEntries++;
+        }
+    });
+    if (truncPenalty > 0) {
+        score -= truncPenalty;
+        log.penalties.push({ reason: `Truncation (${truncEntries} entries)`, points: truncPenalty });
+    }
+
+    // P_monotony: -100 if any transposition > 50% of entries
+    const transCounts = new Map<number, number>();
+    chain.forEach(e => {
+        const tc = (e.transposition % 12 + 12) % 12;
+        transCounts.set(tc, (transCounts.get(tc) || 0) + 1);
+    });
+    let monotonyApplied = false;
+    transCounts.forEach((count) => {
+        if (count > chain.length * 0.5 && !monotonyApplied) {
+            score -= SCORING.MONOTONY_PENALTY;
+            log.penalties.push({ reason: `Monotony penalty`, points: SCORING.MONOTONY_PENALTY });
+            monotonyApplied = true;
+        }
+    });
+
+    // B_compactness: +50 hyper-compact, +25 tight per entry
+    let hyperCount = 0;
+    let tightCount = 0;
+    for (let i = 1; i < chain.length; i++) {
+        const delayTicks = Math.round((chain[i].startBeat - chain[i-1].startBeat) * PPQ);
+        const ratio = delayTicks / subjectLengthTicks;
+        if (ratio < SCORING.COMPACT_HYPER_THRESH) hyperCount++;
+        else if (ratio < SCORING.COMPACT_TIGHT_THRESH) tightCount++;
+    }
+    const compactnessBonus = hyperCount * SCORING.COMPACT_HYPER_BONUS + tightCount * SCORING.COMPACT_TIGHT_BONUS;
+    if (compactnessBonus > 0) {
+        score += compactnessBonus;
+        log.bonuses.push({ reason: `Compactness (${hyperCount} hyper, ${tightCount} tight)`, points: compactnessBonus });
+    }
+
+    // B_variety: +50 per unique transposition beyond first, +30 per 3rd/6th entry
+    const uniqueTranspositions = new Set(chain.map(e => e.transposition));
+    const varietyDistBonus = Math.max(0, uniqueTranspositions.size - 1) * SCORING.DIST_VARIETY_BONUS;
+    let imperfectCount = 0;
+    chain.forEach(e => {
+        const ic = Math.abs(e.transposition % 12);
+        if ([3, 4, 8, 9].includes(ic)) imperfectCount++;
+    });
+    const varietyImperfectBonus = imperfectCount * SCORING.IMPERFECT_CONS_BONUS;
+    const totalVarietyBonus = varietyDistBonus + varietyImperfectBonus;
+    if (totalVarietyBonus > 0) {
+        score += totalVarietyBonus;
+        log.bonuses.push({ reason: `Variety (${uniqueTranspositions.size} transpositions, ${imperfectCount} imperfect)`, points: totalVarietyBonus });
+    }
+
+    // B_complexity: +100 per inversion, +10 per voice beyond 2
+    const inversionCount = chain.filter(e => e.type === 'I').length;
+    const extraVoices = Math.max(0, chain.length - 2);
+    const complexityBonus = inversionCount * SCORING.INVERSION_BONUS + extraVoices * SCORING.CHAIN_LENGTH_BONUS;
+    if (complexityBonus > 0) {
+        score += complexityBonus;
+        log.bonuses.push({ reason: `Complexity (${inversionCount} inv, ${extraVoices} extra voices)`, points: complexityBonus });
+    }
+
+    // Clamp score
+    score = Math.max(0, Math.min(2000, score));
+    log.total = score;
+
+    // --- 7. Consonant End Validation (per-voice) (4a) ---
     let isValid = true;
     if (options.requireConsonantEnd) {
-        // Check the very last interval
-        if (sortedPoints.length > 1) {
-            const lastStart = sortedPoints[sortedPoints.length - 2];
-            const activeVoices = placedNotes.filter(n => n.start <= lastStart && n.end > lastStart);
-            
-            if (activeVoices.length > 1) {
-                const pitches = activeVoices.map(v => v.pitch).sort((a,b)=>a-b);
-                const bass = pitches[0];
-                const myVoice = activeVoices.find(v => v.voice === chain[chain.length-1].voiceIndex); // Check last added voice?
-                // Actually, check *all* voices for dissonance
-                let isClean = true;
-                for(let j=0; j<pitches.length; j++) {
-                    for(let k=j+1; k<pitches.length; k++) {
-                        const int = (pitches[k] - pitches[j]) % 12;
-                        if (INTERVALS.DISSONANT_SIMPLE.has(int)) isClean = false;
-                        if (int === 5 && pitches[j] === bass) isClean = false;
-                    }
+        // Check each voice entry's end point
+        for (let ei = 0; ei < chain.length; ei++) {
+            const entry = chain[ei];
+            const variant = variants[variantIndices[ei]];
+            const entryStartTick = Math.round(entry.startBeat * PPQ);
+            const entryEndTick = entryStartTick + variant.lengthTicks;
+
+            // Find all other voices active at this entry's end tick
+            const activeAtEnd = placedNotes.filter(n =>
+                n.voice !== entry.voiceIndex &&
+                n.start <= entryEndTick - 1 && n.end > entryEndTick - 1
+            );
+
+            if (activeAtEnd.length === 0) continue;
+
+            // Find the ending voice's last note pitch
+            const entryNotes = placedNotes.filter(n =>
+                n.voice === entry.voiceIndex &&
+                n.start <= entryEndTick - 1 && n.end > entryEndTick - 1
+            );
+            if (entryNotes.length === 0) continue;
+
+            const endPitch = entryNotes[0].pitch;
+            const allPitches = [endPitch, ...activeAtEnd.map(n => n.pitch)].sort((a, b) => a - b);
+            const endBass = allPitches[0];
+
+            for (let j = 0; j < allPitches.length; j++) {
+                for (let k = j + 1; k < allPitches.length; k++) {
+                    const int = (allPitches[k] - allPitches[j]) % 12;
+                    if (INTERVALS.DISSONANT_SIMPLE.has(int)) isValid = false;
+                    if (int === 5 && allPitches[j] === endBass) isValid = false;
                 }
-                if (!isClean) isValid = false;
             }
+            if (!isValid) break;
         }
     }
 
@@ -314,9 +398,9 @@ export function calculateStrettoScore(
         warnings: [],
         score,
         scoreLog: log,
-        detectedChords: harmonyAnalysis.chords, 
+        detectedChords: harmonyAnalysis.chords,
         dissonanceRatio: S1,
-        nctRatio: S3, 
+        nctRatio: S3,
         pairDissonanceScore: S4 * 100,
         isValid
     };

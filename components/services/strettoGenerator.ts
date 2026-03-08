@@ -41,92 +41,107 @@ const PERFECT_INTERVALS = new Set([0, 7, 5]);
  * REFACTORED: Uses Scan-Line algorithm on raw ticks.
  */
 function checkCounterpointStructure(
-    variantA: SubjectVariant, 
-    variantB: SubjectVariant, 
-    delayTicks: number, 
+    variantA: SubjectVariant,
+    variantB: SubjectVariant,
+    delayTicks: number,
     transposition: number,
-    maxDissonanceRatio: number
-): { compatible: boolean, dissonanceRatio: number } {
+    maxDissonanceRatio: number,
+    ppqParam: number = 480
+): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number } {
     
     // Collect all time points
     const timePoints = new Set<number>();
     
-    interface Event {
+    interface SortedNote {
         start: number;
         end: number;
         pitch: number;
-        source: 'A' | 'B';
     }
-    const events: Event[] = [];
 
-    variantA.notes.forEach(n => {
-        const s = n.relTick;
-        const e = s + n.durationTicks;
-        timePoints.add(s); timePoints.add(e);
-        events.push({ start: s, end: e, pitch: n.pitch, source: 'A' });
-    });
+    // Pre-sort notes by start tick for sweep-line pointer advancement
+    const notesA: SortedNote[] = variantA.notes.map(n => ({
+        start: n.relTick,
+        end: n.relTick + n.durationTicks,
+        pitch: n.pitch
+    })).sort((a, b) => a.start - b.start);
 
-    variantB.notes.forEach(n => {
-        const s = n.relTick + delayTicks;
-        const e = s + n.durationTicks;
-        timePoints.add(s); timePoints.add(e);
-        events.push({ start: s, end: e, pitch: n.pitch + transposition, source: 'B' });
-    });
+    const notesB: SortedNote[] = variantB.notes.map(n => ({
+        start: n.relTick + delayTicks,
+        end: n.relTick + delayTicks + n.durationTicks,
+        pitch: n.pitch + transposition
+    })).sort((a, b) => a.start - b.start);
 
-    const sortedPoints = Array.from(timePoints).sort((a,b) => a-b);
-    
+    for (const n of notesA) { timePoints.add(n.start); timePoints.add(n.end); }
+    for (const n of notesB) { timePoints.add(n.start); timePoints.add(n.end); }
+
+    const sortedPoints = Array.from(timePoints).sort((a, b) => a - b);
+
     let prevP1: number | null = null;
     let prevP2: number | null = null;
-    
-    let dissRunLength = 0; 
+
+    let dissRunLength = 0;
     let lastIsDiss = false;
-    
+
     let overlapTicks = 0;
     let dissonantTicks = 0;
+    let strongBeatParallels = 0;
+    let weakBeatParallels = 0;
+
+    // Sweep-line pointers
+    let ptrA = 0;
+    let ptrB = 0;
 
     for (let i = 0; i < sortedPoints.length - 1; i++) {
         const start = sortedPoints[i];
-        const end = sortedPoints[i+1];
+        const end = sortedPoints[i + 1];
         const dur = end - start;
         if (dur <= 0) continue;
 
-        // Find active notes
-        const activeA = events.find(e => e.source === 'A' && e.start <= start && e.end > start);
-        const activeB = events.find(e => e.source === 'B' && e.start <= start && e.end > start);
-        
+        // Advance pointers to find active note at 'start'
+        while (ptrA < notesA.length - 1 && notesA[ptrA].end <= start) ptrA++;
+        while (ptrB < notesB.length - 1 && notesB[ptrB].end <= start) ptrB++;
+
+        const activeA = (ptrA < notesA.length && notesA[ptrA].start <= start && notesA[ptrA].end > start) ? notesA[ptrA] : null;
+        const activeB = (ptrB < notesB.length && notesB[ptrB].start <= start && notesB[ptrB].end > start) ? notesB[ptrB] : null;
+
         if (!activeA || !activeB) {
-            // Monophonic moment - reset trackers
             prevP1 = null; prevP2 = null;
             dissRunLength = 0;
             lastIsDiss = false;
             continue;
         }
-        
+
         overlapTicks += dur;
-        
+
         const p1 = activeA.pitch;
         const p2 = activeB.pitch;
         const lo = Math.min(p1, p2);
         const hi = Math.max(p1, p2);
         const interval = (hi - lo) % 12;
-        
-        // Rule 5: Parallel Perfects
+
+        // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
         if (prevP1 !== null && prevP2 !== null) {
             const p1Moved = p1 !== prevP1;
             const p2Moved = p2 !== prevP2;
-            
+
             if (p1Moved && p2Moved) {
                 if (PERFECT_INTERVALS.has(interval)) {
                     const prevLo = Math.min(prevP1, prevP2);
                     const prevHi = Math.max(prevP1, prevP2);
                     const prevInt = (prevHi - prevLo) % 12;
-                    if (prevInt === interval) return { compatible: false, dissonanceRatio: 1 };
+                    if (prevInt === interval) {
+                        if (isStrongBeat(start, ppqParam)) {
+                            strongBeatParallels++;
+                        } else {
+                            weakBeatParallels++;
+                        }
+                    }
                 }
             }
         }
         
-        // Rule 6: Dissonance (Structural)
-        let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
+        // Rule 6: Dissonance (Structural) — include P4 (interval 5) as dissonant
+        let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval) || interval === 5;
         
         if (isDiss) {
             dissonantTicks += dur;
@@ -136,24 +151,24 @@ function checkCounterpointStructure(
             else dissRunLength++;
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1 };
-            
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels };
+
             lastIsDiss = true;
         } else {
             dissRunLength = 0;
             lastIsDiss = false;
         }
-        
+
         prevP1 = p1; prevP2 = p2;
     }
-    
+
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels };
     }
-    
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0 };
+
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels };
 }
 
 // Helper: Determine beat strength
@@ -210,26 +225,34 @@ function checkMetricCompliance(
         });
 
         const sortedPoints = Array.from(points).sort((a,b) => a-b);
-        
+
+        // Pre-sort placed notes for sweep-line
+        const placedNew = newVariant.notes.map(n => ({
+            start: newStartTick + n.relTick,
+            end: newStartTick + n.relTick + n.durationTicks,
+            pitch: n.pitch
+        })).sort((a, b) => a.start - b.start);
+        const placedExist = existVariant.notes.map(n => ({
+            start: existStartTick + n.relTick,
+            end: existStartTick + n.relTick + n.durationTicks,
+            pitch: n.pitch
+        })).sort((a, b) => a.start - b.start);
+
+        let pNew = 0;
+        let pExist = 0;
         let dissRunLength = 0;
         let lastIsDiss = false;
 
-        // Iterate overlap intervals
         for (let i = 0; i < sortedPoints.length - 1; i++) {
             const start = sortedPoints[i];
             const end = sortedPoints[i+1];
-            
-            // Find active notes
-            const noteNew = newVariant.notes.find(n => {
-                const s = newStartTick + n.relTick;
-                const e = s + n.durationTicks;
-                return s <= start && e > start;
-            });
-            const noteExist = existVariant.notes.find(n => {
-                const s = existStartTick + n.relTick;
-                const e = s + n.durationTicks;
-                return s <= start && e > start;
-            });
+
+            // Advance sweep-line pointers
+            while (pNew < placedNew.length - 1 && placedNew[pNew].end <= start) pNew++;
+            while (pExist < placedExist.length - 1 && placedExist[pExist].end <= start) pExist++;
+
+            const noteNew = (pNew < placedNew.length && placedNew[pNew].start <= start && placedNew[pNew].end > start) ? placedNew[pNew] : null;
+            const noteExist = (pExist < placedExist.length && placedExist[pExist].start <= start && placedExist[pExist].end > start) ? placedExist[pExist] : null;
             
             if (!noteNew || !noteExist) {
                 dissRunLength = 0; lastIsDiss = false; continue;
@@ -286,7 +309,7 @@ export async function searchStrettoChains(
     const startTime = Date.now();
     let nodesVisited = 0;
     let maxDepth = 0;
-    let terminationReason: StrettoSearchReport['stats']['stopReason'] | 'Partial' | null = null;
+    let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
     if (baseNotes.length === 0) return { results: [], stats: { nodesVisited: 0, timeMs: 0, stopReason: 'Exhausted', maxDepthReached: 0 } };
@@ -351,7 +374,7 @@ export async function searchStrettoChains(
             validDelays.forEach(d => {
                 transpositions.forEach(t => {
                     const key = `${iA}_${iB}_${d}_${t}`;
-                    const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05);
+                    const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
                     if (res.compatible) compatTable.set(key, res.dissonanceRatio);
                 });
             });
@@ -450,23 +473,28 @@ export async function searchStrettoChains(
         }
     }
 
-    const results: StrettoChainResult[] = [];
-    const partialResults: StrettoChainResult[] = []; // Store best partials
-    const MAX_PARTIALS = 20;
-    
-    const seenSignatures = new Set<string>();
-    function getChainSignature(c: StrettoChainOption[]): string {
-        const d = [];
-        const t = [];
-        const ty = [];
+    // Deferred scoring: store unscored chains during search, score after
+    interface UnscoredChain {
+        entries: StrettoChainOption[];
+        variantIndices: number[];
+    }
+    const unscoredResults: UnscoredChain[] = [];
+    const unscoredPartials: UnscoredChain[] = [];
+
+    const seenSignatures = new Set<number>();
+    // FNV-1a inspired numeric hash for chain signatures (avoids string allocation)
+    function getChainSignature(c: StrettoChainOption[]): number {
+        let hash = 2166136261; // FNV offset basis
         for (let i = 1; i < c.length; i++) {
-            d.push(Math.round(c[i].startBeat * ppq) - Math.round(c[i-1].startBeat * ppq));
+            const d = Math.round(c[i].startBeat * ppq) - Math.round(c[i - 1].startBeat * ppq);
+            hash = ((hash ^ d) * 16777619) | 0;
         }
         for (let i = 0; i < c.length; i++) {
-            t.push((c[i].transposition % 12 + 12) % 12); // Use interval class to deduplicate functionally identical chains
-            ty.push(c[i].type);
+            const tc = (c[i].transposition % 12 + 12) % 12;
+            hash = ((hash ^ tc) * 16777619) | 0;
+            hash = ((hash ^ (c[i].type === 'I' ? 1 : 0)) * 16777619) | 0;
         }
-        return `${d.join(',')}|${t.join(',')}|${ty.join(',')}`;
+        return hash;
     }
 
     async function solve(
@@ -485,40 +513,34 @@ export async function searchStrettoChains(
             if (!terminationReason) terminationReason = 'Timeout';
             return;
         }
-        if (results.length >= MAX_RESULTS * 10) return; // Allow finding more chains before early termination
         if (nodesVisited > MAX_SEARCH_NODES) {
             if (!terminationReason) terminationReason = 'NodeLimit';
             return;
         }
 
-        // If target reached, store result
+        // If target reached, store unscored result (scoring deferred to post-search)
         if (chain.length === options.targetChainLength) {
             const sig = getChainSignature(chain);
             if (!seenSignatures.has(sig)) {
-                const final = calculateStrettoScore(chain, variants, variantIndices, options);
-                if (final.isValid) {
-                    seenSignatures.add(sig);
-                    results.push(final);
-                }
+                seenSignatures.add(sig);
+                unscoredResults.push({
+                    entries: [...chain],
+                    variantIndices: [...variantIndices]
+                });
             }
             return;
         }
 
         // --- PARTIAL RESULTS LOGIC ---
-        // If the chain is significant (>= 3 entries), consider storing it as a partial result
+        // If the chain is significant (>= 3 entries), store as partial (unscored)
         if (chain.length >= 3) {
             const sig = getChainSignature(chain);
             if (!seenSignatures.has(sig)) {
-                // Simple heuristic: if we have few partials or this is longer than the worst stored partial
-                if (partialResults.length < MAX_PARTIALS || chain.length > partialResults[partialResults.length-1].entries.length) {
-                    const final = calculateStrettoScore(chain, variants, variantIndices, options);
-                    if (final.isValid) {
-                        seenSignatures.add(sig);
-                        partialResults.push(final);
-                        partialResults.sort((a,b) => b.entries.length - a.entries.length); // Keep longest
-                        if (partialResults.length > MAX_PARTIALS) partialResults.pop();
-                    }
-                }
+                seenSignatures.add(sig);
+                unscoredPartials.push({
+                    entries: [...chain],
+                    variantIndices: [...variantIndices]
+                });
             }
         }
 
@@ -583,6 +605,9 @@ export async function searchStrettoChains(
             const absStartBeat = absStartTicks / ppq;
 
             for (const t of transpositions) {
+                // Unison gatekeeper: skip if same transposition as preceding entry
+                if (depth > 0 && t === chain[depth - 1].transposition) continue;
+
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
                     
                     // --- TRIPLE PRUNING ---
@@ -611,8 +636,7 @@ export async function searchStrettoChains(
                     const nextFree = nFree + (isFree ? 1 : 0);
                     
                     if (nextRestricted > 1 && nextRestricted >= nextFree) continue;
-                    if (options.thirdSixthMode === 'None' && isRestricted) continue;
-                    if (options.thirdSixthMode === 'Max 1' && nextRestricted > 1) continue;
+                    if (isRestricted && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
                     if (options.disallowComplexExceptions && (isInv || isTrunc) && isRestricted) continue;
 
                     let harmonicFail = false;
@@ -635,7 +659,7 @@ export async function searchStrettoChains(
                     if (harmonicFail) continue;
 
                     for (let v = 0; v < options.ensembleTotal; v++) {
-                        if (absStartTicks < voiceEndTimesTicks[v] - 2) continue; 
+                        if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
                         
                         let stratFail = false;
                         for (let existingIdx = 0; existingIdx < chain.length; existingIdx++) {
@@ -712,32 +736,45 @@ export async function searchStrettoChains(
         0, 0, 0, 1
     );
 
-    // Fallback: Use partial results if full results empty
-    let sourceResults = results;
-    let stopReason: StrettoSearchReport['stats']['stopReason'] = results.length > 0 ? 'Success' : ((terminationReason === 'Partial' ? 'Exhausted' : terminationReason) || 'Exhausted');
-    
-    if (results.length === 0 && partialResults.length > 0) {
-        sourceResults = partialResults;
-        // If we only have partial results and no hard limit was hit, we consider it 'Exhausted' (best effort)
-        if (!terminationReason) stopReason = 'Exhausted'; 
+    // --- POST-SEARCH: Score all found chains ---
+    let sourceUnscored = unscoredResults;
+    let stopReason: StrettoSearchReport['stats']['stopReason'] = unscoredResults.length > 0 ? 'Success' : (terminationReason || 'Exhausted');
+
+    // Fallback to partials if no full-length results
+    if (unscoredResults.length === 0 && unscoredPartials.length > 0) {
+        sourceUnscored = unscoredPartials;
+        if (!terminationReason) stopReason = 'Exhausted';
     }
 
-    // Grouping Logic
+    // Score all candidates (deferred from search)
+    const scoredResults: StrettoChainResult[] = [];
+    for (const uc of sourceUnscored) {
+        const scored = calculateStrettoScore(uc.entries, variants, uc.variantIndices, options, ppq);
+        if (scored.isValid) {
+            scoredResults.push(scored);
+        }
+    }
+
+    // Group by delay pattern + type sequence to avoid similar chains clogging display
+    function getGroupKey(entries: StrettoChainOption[]): string {
+        const delayPattern: number[] = [];
+        for (let i = 1; i < entries.length; i++) {
+            delayPattern.push(Math.round((entries[i].startBeat - entries[i - 1].startBeat) * ppq));
+        }
+        const typeSeq = entries.map(e => e.type).join('');
+        return `${delayPattern.join(',')}|${typeSeq}`;
+    }
+
     const groupedMap = new Map<string, StrettoChainResult[]>();
-    
-    sourceResults.forEach(res => {
-        const delays = res.entries.map(e => e.startBeat).join(',');
-        const voices = res.entries.map(e => e.voiceIndex).join(',');
-        const key = `D:${delays}|V:${voices}`;
-        
+    for (const res of scoredResults) {
+        const key = getGroupKey(res.entries);
         if (!groupedMap.has(key)) groupedMap.set(key, []);
         groupedMap.get(key)!.push(res);
-    });
+    }
 
     const finalResults: StrettoChainResult[] = [];
-    
     groupedMap.forEach((group) => {
-        group.sort((a,b) => b.score - a.score);
+        group.sort((a, b) => b.score - a.score);
         const leader = group[0];
         if (group.length > 1) {
             leader.variations = group.slice(1);
@@ -746,7 +783,7 @@ export async function searchStrettoChains(
     });
 
     return {
-        results: finalResults.sort((a,b) => b.score - a.score).slice(0, MAX_RESULTS),
+        results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),
         stats: {
             nodesVisited,
             timeMs: Date.now() - startTime,
@@ -758,7 +795,6 @@ export async function searchStrettoChains(
 
 function checkQuota(mode: StrettoConstraintMode, current: number): boolean {
     if (mode === 'None') return false;
-    if (mode === 'Max 1') return current < 1;
     if (typeof mode === 'number') return current < mode;
     return true; // Unlimited
 }
