@@ -1,0 +1,80 @@
+import assert from 'node:assert/strict';
+import { searchStrettoChains } from './strettoGenerator';
+import type { RawNote, StrettoSearchOptions } from '../../types';
+
+interface DiagnosticCase {
+  name: string;
+  options: StrettoSearchOptions;
+  expectation: (result: Awaited<ReturnType<typeof searchStrettoChains>>) => void;
+}
+
+const SIMPLE_SUBJECT: RawNote[] = [
+  { midi: 60, ticks: 0, durationTicks: 480, velocity: 0.9, name: 'C4' },
+  { midi: 62, ticks: 480, durationTicks: 480, velocity: 0.9, name: 'D4' },
+  { midi: 64, ticks: 960, durationTicks: 480, velocity: 0.9, name: 'E4' },
+  { midi: 65, ticks: 1440, durationTicks: 480, velocity: 0.9, name: 'F4' }
+];
+
+const BASE_OPTIONS: Omit<StrettoSearchOptions, 'targetChainLength' | 'inversionMode' | 'thirdSixthMode'> = {
+  ensembleTotal: 4,
+  subjectVoiceIndex: 2,
+  truncationMode: 'None',
+  truncationTargetBeats: 4,
+  useChromaticInversion: false,
+  pivotMidi: 60,
+  requireConsonantEnd: true,
+  disallowComplexExceptions: false,
+  maxPairwiseDissonance: 1,
+  scaleRoot: 0,
+  scaleMode: 'Major'
+};
+
+const DIAGNOSTIC_CASES: DiagnosticCase[] = [
+  {
+    name: 'Baseline reachable target depth succeeds (targetChainLength = 4)',
+    options: { ...BASE_OPTIONS, targetChainLength: 4, inversionMode: 1, thirdSixthMode: 1 },
+    expectation: (result) => {
+      assert.equal(result.stats.stopReason, 'Success');
+      assert.ok(result.results.length > 0, 'Expected at least one chain when target depth is modest.');
+      assert.ok(result.stats.maxDepthReached >= 4, 'Expected solver to reach target depth 4.');
+    }
+  },
+  {
+    name: 'UI default-like request times out before target depth (targetChainLength = 8)',
+    options: { ...BASE_OPTIONS, targetChainLength: 8, inversionMode: 1, thirdSixthMode: 1 },
+    expectation: (result) => {
+      assert.equal(result.stats.stopReason, 'Timeout');
+      assert.ok(result.stats.maxDepthReached < 8, 'Expected solver to fail to reach depth 8 before time limit.');
+    }
+  },
+  {
+    name: 'Even with reduced branching, structural constraints exhaust before depth 8',
+    options: { ...BASE_OPTIONS, targetChainLength: 8, inversionMode: 'None', thirdSixthMode: 'None' },
+    expectation: (result) => {
+      assert.equal(result.stats.stopReason, 'Exhausted');
+      assert.ok(result.stats.maxDepthReached < 8, 'Expected structural delay constraints to cap reachable depth below 8.');
+    }
+  }
+];
+
+async function runDiagnostics() {
+  console.log('=== STRETTO DIAGNOSTIC SUITE ===');
+
+  for (const testCase of DIAGNOSTIC_CASES) {
+    const startedAt = Date.now();
+    const result = await searchStrettoChains(SIMPLE_SUBJECT, testCase.options, 480);
+    const elapsedMs = Date.now() - startedAt;
+
+    testCase.expectation(result);
+
+    console.log(`PASS: ${testCase.name}`);
+    console.log(`  stopReason=${result.stats.stopReason} maxDepth=${result.stats.maxDepthReached} nodes=${result.stats.nodesVisited} results=${result.results.length} elapsedMs=${elapsedMs}`);
+  }
+
+  console.log('=== DIAGNOSTIC SUITE COMPLETE ===');
+}
+
+runDiagnostics().catch((error) => {
+  console.error('Diagnostic failure:', error);
+  process.exit(1);
+});
