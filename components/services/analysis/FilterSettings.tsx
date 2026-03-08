@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { MidiEventCounts, MidiEventType } from '../../types';
-import { FilterIcon } from '../Icons';
+import { FilterIcon } from '../../Icons';
 
 const eventTypeMetadata: Record<MidiEventType, { label: string; description: string }> = {
     pitchBend: { label: 'Pitch Bends', description: 'Smooth changes in pitch, often from a pitch wheel.' },

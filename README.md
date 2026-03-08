@@ -49,6 +49,20 @@ An algorithm to split polyphonic tracks (piano/guitar) into separate monophonic 
 - **Build:** Standard ES Modules (no bundler config required for editing in this environment).
 
 ### Directory Structure
+
+### Canonical Module Layout (TypeScript import authority)
+To enforce deterministic module resolution and avoid shadow-type divergence, the repository now uses a single-source rule for shared root modules:
+
+- **`App.tsx` (repository root) is canonical** and is the only authoritative app entry component imported by `index.tsx`.
+- **`types.ts` (repository root) is canonical** and is the only authoritative source for shared interfaces and discriminated unions.
+- **`components/Modal.tsx` is canonical** and is the only authoritative modal implementation.
+- `components/App.tsx`, `components/types.ts`, and `Modal.tsx` are retained strictly as **deprecated compatibility shims** that re-export canonical modules; no new imports should target them.
+
+Import policy:
+- From `components/**`, import shared types via `../types` or `../../types` as appropriate.
+- From root files (`App.tsx`, `index.tsx`, `midiAnalysis.ts`), import shared types via `./types`.
+- Never introduce a second implementation of a symbol already exported from a canonical module; use re-export adapters only for backward compatibility.
+
 - `components/`: UI Components.
   - `analysis/`: Visualization components (Reports, Charts).
   - `settings/`: Configuration panels.
