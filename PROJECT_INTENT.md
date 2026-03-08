@@ -1,23 +1,43 @@
 # Project Intent & Target Architecture
 
-## 1. Data pipeline
-- MIDI input is treated as intentional source data.
-- Analysis emphasizes diagnostics over corrective mutation.
+This document defines the **Desired End State** of the application. All future code changes must align with these specifications.
 
-## 2. Harmonic analysis modes
-1. Attack/block.
-2. Sustain.
-3. Arpeggio-window.
+## 1. Data Pipeline Architecture
 
-## 3. Stretto scoring intent
-Use base-0 additive scoring:
-\[
-Q = 0.2S1 + 0.3S2 + 0.2S3, \qquad U_{quality} = -1000Q
-\]
+The application assumes **Pre-Processed / Intentional MIDI Inputs**. 
+*   **No Aggressive Correction:** The system should NOT attempt complex "Shadow Quantization" or heuristic grid alignment to fix performance errors. It assumes the input MIDI is musically correct or that any desired quantization is simple and manual.
+*   **Analysis Integrity:** While we do not auto-correct the notes, the **Analysis Reports** (Rhythm, Harmony) must still provide deep insights into the structure of the data as provided.
 
-Then apply compactness/harmony/polyphony additions and structural penalties (distance repetition/cluster/early-expansion, truncation, monotony).
 
-`ScoreLog.base` remains `0`; no artificial clamp range should truncate ordering.
+## 2. Harmonic Analysis & Arpeggiation
 
-## 4. UX invariant
-Result ordering must remain numeric descending by `score` for both top-level chains and nested variations.
+The user requires sophisticated Chord Identification capabilities, specifically handling arpeggiation logic.
+
+### Harmonic Modes
+1.  **Attack (Block):** Chords are identified by notes starting simultaneously (within a small tolerance).
+2.  **Sustain:** Chords are identified by the set of notes currently held down (overlapping durations).
+3.  **Arpeggio (Time Window):** Treats the whole texture as a potential arpeggio within a time window.
+
+## 3. Visual & Reporting Requirements
+*   **Tables:** All analysis outputs must be in detailed Markdown tables, not summary lists.
+*   **Spelling:** Use key-aware spelling for pitch names.
+
+---
+
+## 5. Stretto Logic Specification (v3.1)
+
+### I. Distance Rules
+1.  **Rule 6.1 (Unified Ceiling):** Entry Delay $Delay \le \text{SubjectLength} \times 0.66$ (66%). This applies to both Discovery and Chain menus.
+2.  **Elasticity:** $Delay_{new} \le Delay_{prev} + 1.0$.
+3.  **Expansion Reaction:** If $Delay_{new} > Delay_{prev}$, the *next* delay must be significantly smaller.
+
+### II. Scoring Indicators (Base Score: 0)
+
+**1. Polyphony (30% Weight)**
+**2. Dissonance (30-40% Weight)**
+**3. Harmonic Quality (Sustain Mode)**
+
+Active objective terms are additive around base 0 (`ScoreLog.base = 0`) and include compactness, polyphony density, harmonic reward, distance penalties (repeat/cluster/early-expansion), truncation, monotony, and harmonic NCT burden.
+
+### III. Unified Pivot Logic
+1.  **Rule 6.5:** The Inversion Pivot selection must be shared between Pairwise Discovery and Algorithmic Chain search to ensure that "Candidate #5 (Inv)" in the list sounds identical to "Entry #5 (Inv)" in a generated chain.
