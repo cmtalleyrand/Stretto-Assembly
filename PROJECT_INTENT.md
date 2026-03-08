@@ -1,35 +1,23 @@
 # Project Intent & Target Architecture
 
-This document specifies design invariants for future modifications.
-
 ## 1. Data pipeline
-- Inputs are assumed intentionally prepared MIDI.
-- No aggressive auto-correction should alter compositional intent.
-- Analysis layers report structure diagnostically rather than mutating source notes.
+- MIDI input is treated as intentional source data.
+- Analysis emphasizes diagnostics over corrective mutation.
 
 ## 2. Harmonic analysis modes
-1. Attack/block mode.
-2. Sustain mode.
-3. Arpeggio window mode.
+1. Attack/block.
+2. Sustain.
+3. Arpeggio-window.
 
-## 3. Stretto scoring intent (base-0 utility model)
-The stretto optimizer must score candidates using a zero-centered utility baseline:
-
+## 3. Stretto scoring intent
+Use base-0 additive scoring:
 \[
-U_{quality}=-1000Q, \quad Q=0.2S1+0.3S2+0.2S3+0.3S4
+Q = 0.2S1 + 0.3S2 + 0.2S3, \qquad U_{quality} = -1000Q
 \]
 
-Then apply additive structural/harmonic deltas, with `ScoreLog.base = 0` and final clamping to `[-1000, 1000]`.
+Then apply compactness/harmony/polyphony additions and structural penalties (distance repetition/cluster/early-expansion, truncation, monotony).
 
-### Worked ranking illustration
-Given three candidates with additive nets `{+180,+90,+260}` and quality penalties `{0.20,0.31,0.43}`:
-- `A`: `U=-200`, additive `+980`, total `780`
-- `B`: `U=-310`, additive `+780`, total `470`
-- `C`: `U=-430`, additive `+830`, total `400`
+`ScoreLog.base` remains `0`; no artificial clamp range should truncate ordering.
 
-Ordering remains `A > B > C`; quality dominates while additive terms separate nearby candidates.
-
-## 4. UX/reporting requirements
-- Keep score ordering numerically descending (higher is better).
-- Preserve deterministic behavior for regression fixtures.
-- Maintain transparent score decomposition in tooltip/log output.
+## 4. UX invariant
+Result ordering must remain numeric descending by `score` for both top-level chains and nested variations.

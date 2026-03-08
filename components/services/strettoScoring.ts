@@ -7,7 +7,6 @@ import { analyzeStrettoHarmony } from './strettoHarmonyAnalysis';
 const W_S1 = 0.2; // Unweighted Dissonance
 const W_S2 = 0.3; // Weighted Dissonance
 const W_S3 = 0.2; // NCT Ratio
-const W_S4 = 0.3; // Unprepared Dissonance
 
 // Chord Templates (Pitch Class Sets) for Metric S3
 const CHORD_TEMPLATES: number[][] = [
@@ -39,6 +38,52 @@ export interface SubjectVariant {
     lengthTicks: number;
 }
 
+
+interface DelayPenaltyBreakdown {
+    total: number;
+    items: ScoreLog['penalties'];
+}
+
+export function computeDelayPenaltyBreakdown(delays: number[], chainLength: number): DelayPenaltyBreakdown {
+    let total = 0;
+    const items: ScoreLog['penalties'] = [];
+
+    const delayCounts = new Map<number, number>();
+    delays.forEach((delay) => {
+        const c = delayCounts.get(delay) ?? 0;
+        delayCounts.set(delay, c + 1);
+    });
+    delayCounts.forEach((count, delay) => {
+        if (count > 1) {
+            const repeatedPenalty = (count - 1) * SCORING.DIST_REPEAT_PENALTY;
+            total += repeatedPenalty;
+            items.push({ reason: `P_distance: repeated delay ${delay.toFixed(2)} (${count}x)`, points: repeatedPenalty });
+        }
+    });
+
+    for (let i = 0; i < delays.length; i++) {
+        let localClusterCount = 0;
+        if (i > 0 && Math.abs(delays[i] - delays[i - 1]) <= 0.5) localClusterCount++;
+        if (i < delays.length - 1 && Math.abs(delays[i] - delays[i + 1]) <= 0.5) localClusterCount++;
+        if (localClusterCount > 0) {
+            const clusterPenalty = localClusterCount * SCORING.DIST_CLUSTER_PENALTY;
+            total += clusterPenalty;
+            items.push({ reason: `P_distance: clustered delay ${delays[i].toFixed(2)} (adjacent ±0.5 beat)`, points: clusterPenalty });
+        }
+    }
+
+    const finalThirdStartEntry = Math.ceil((2 * chainLength) / 3);
+    for (let i = 1; i < delays.length; i++) {
+        const entryIndex = i + 1;
+        if (entryIndex < finalThirdStartEntry && delays[i] > delays[i - 1]) {
+            total += SCORING.EARLY_EXPANSION_PENALTY;
+            items.push({ reason: `P_distance: early expansion before final third (entry ${entryIndex + 1})`, points: SCORING.EARLY_EXPANSION_PENALTY });
+        }
+    }
+
+    return { total, items };
+}
+
 function countNCTs(pitches: number[]): number {
     if (pitches.length === 0) return 0;
     const pcs = Array.from(new Set(pitches.map(p => p % 12)));
@@ -61,8 +106,8 @@ function countNCTs(pitches: number[]): number {
 }
 
 /**
- * Calculates the S1-S4 metrics + additive bonuses/penalties for a generated chain.
- * Hybrid scoring: S1-S4 ratio base + structural bonuses/penalties + polyphony density.
+ * Calculates the S1-S3 metrics + additive bonuses/penalties for a generated chain.
+ * Hybrid scoring: S1-S3 utility + structural bonuses/penalties + polyphony density.
  */
 export function calculateStrettoScore(
     chain: StrettoChainOption[],
@@ -136,15 +181,11 @@ export function calculateStrettoScore(
     let totalNCTTime = 0;        // S3 numerator
     let totalPoly3PlusTime = 0;  // S3 denominator (3+ voices only)
 
-    let totalDissEvents = 0;     // S4
-    let unpreparedDissEvents = 0; // S4
 
     // Polyphony density tracking
     let totalWeightedVoices = 0;
     let totalDuration = 0;
 
-    const previousStateByVoice = new Map<number, {pitch: number, isConsonantAgainstBass: boolean}>();
-    let prevBass: number | null = null;
 
     for (let i = 0; i < sortedPoints.length - 1; i++) {
         const start = sortedPoints[i];
@@ -158,12 +199,7 @@ export function calculateStrettoScore(
         totalWeightedVoices += voices.length * dur;
         totalDuration += dur;
 
-        if (voices.length === 1) {
-            prevBass = voices[0].pitch;
-            previousStateByVoice.clear();
-            previousStateByVoice.set(voices[0].voice, { pitch: voices[0].pitch, isConsonantAgainstBass: true });
-            continue;
-        }
+        if (voices.length === 1) continue;
 
         if (voices.length < 2) continue;
 
@@ -201,48 +237,15 @@ export function calculateStrettoScore(
                 totalNCTTime += dur * (nctCount / pitches.length);
             }
         }
-
-        // --- S4: Unprepared Dissonance ---
-        voices.forEach(v => {
-            if (v.pitch === bass) return;
-
-            const intVsBass = (v.pitch - bass + 1200) % 12;
-            const isDissVsBass = INTERVALS.DISSONANT_SIMPLE.has(intVsBass) || intVsBass === 5;
-
-            if (isDissVsBass) {
-                totalDissEvents++;
-
-                const prevState = previousStateByVoice.get(v.voice);
-                let prepared = false;
-
-                if (prevState && prevState.isConsonantAgainstBass) {
-                    const bassMoved = (prevBass !== null && prevBass !== bass);
-                    const voiceMoved = (prevState.pitch !== v.pitch);
-
-                    if ((!voiceMoved && bassMoved) || (voiceMoved && !bassMoved)) {
-                        prepared = true;
-                    }
-                }
-
-                if (!prepared) {
-                    unpreparedDissEvents++;
-                }
-            }
-            previousStateByVoice.set(v.voice, { pitch: v.pitch, isConsonantAgainstBass: !isDissVsBass });
-        });
-        prevBass = bass;
     }
 
-    // 3. Final Calculation: S1-S4 quality penalty (proportional)
+    // 3. Final Calculation: S1-S3 quality penalty (proportional)
     const S1 = totalPolyTime > 0 ? totalDissTime / totalPolyTime : 0;
     const S2 = weightedTotalPoly > 0 ? totalWeightedDissTime / weightedTotalPoly : 0;
     const S3 = totalPoly3PlusTime > 0 ? totalNCTTime / totalPoly3PlusTime : 0;
-    const S4 = totalDissEvents > 0 ? unpreparedDissEvents / totalDissEvents : 0;
 
-    const qualityPenaltyFraction = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3) + (S4 * W_S4);
-    const U_quality = Math.round(
-        SCORING.QUALITY_UTILITY_SCALE * (SCORING.QUALITY_NEUTRAL_PENALTY - qualityPenaltyFraction)
-    );
+    const qualityPenaltyFraction = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3);
+    const U_quality = Math.round(SCORING.QUALITY_UTILITY_SCALE * qualityPenaltyFraction);
 
     let score = U_quality;
 
@@ -251,13 +254,11 @@ export function calculateStrettoScore(
         { reason: `S1: Unweighted Diss (${(S1*100).toFixed(0)}%)`, points: Math.round(S1 * SCORING.QUALITY_COMPONENT_SCALE * W_S1) },
         { reason: `S2: Weighted Diss (${(S2*100).toFixed(0)}%)`, points: Math.round(S2 * SCORING.QUALITY_COMPONENT_SCALE * W_S2) },
         { reason: `S3: NCT Time (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * SCORING.QUALITY_COMPONENT_SCALE * W_S3) },
-        { reason: `S4: Unprepared Diss (${(S4*100).toFixed(0)}%)`, points: Math.round(S4 * SCORING.QUALITY_COMPONENT_SCALE * W_S4) },
     ];
 
     // --- 3B. Additive Bonuses & Penalties ---
 
     const subjectLengthBeats = variants[0].lengthTicks / PPQ;
-    const subjectLengthTicks = variants[0].lengthTicks;
 
     // B_compactness: reward hyper-stretto entries
     for (let i = 1; i < chain.length; i++) {
@@ -272,38 +273,11 @@ export function calculateStrettoScore(
         }
     }
 
-    // B_variety: reward interval diversity between successive entries
-    const transpositionLinks: number[] = [];
-    for (let i = 1; i < chain.length; i++) {
-        transpositionLinks.push(chain[i].transposition - chain[i-1].transposition);
-    }
-    const uniqueIntervals = new Set(transpositionLinks);
-    if (uniqueIntervals.size > 1) {
-        const varietyBonus = (uniqueIntervals.size - 1) * SCORING.DIST_VARIETY_BONUS;
-        score += varietyBonus;
-        bonuses.push({ reason: `B_variety: ${uniqueIntervals.size} unique intervals`, points: varietyBonus });
-    }
-
-    // B_variety (imperfect consonance): +30 per 3rd/6th entry
-    let imperfectCount = 0;
-    chain.forEach(e => {
-        const ic = Math.abs(e.transposition % 12);
-        if ([3, 4, 8, 9].includes(ic)) imperfectCount++;
-    });
-    if (imperfectCount > 0) {
-        const imperfectBonus = imperfectCount * SCORING.IMPERFECT_CONS_BONUS;
-        score += imperfectBonus;
-        bonuses.push({ reason: `B_variety: ${imperfectCount} imperfect consonance entries`, points: imperfectBonus });
-    }
-
-    // B_complexity: +100 per inversion, +10 per voice beyond 2
-    const inversionCount = chain.filter(e => e.type === 'I').length;
-    const extraVoices = Math.max(0, chain.length - 2);
-    const complexityBonus = inversionCount * SCORING.INVERSION_BONUS + extraVoices * SCORING.CHAIN_LENGTH_BONUS;
-    if (complexityBonus > 0) {
-        score += complexityBonus;
-        bonuses.push({ reason: `B_complexity (${inversionCount} inv, ${extraVoices} extra voices)`, points: complexityBonus });
-    }
+    // P_distance: repeated delays, clustered delays, and early expansions
+    const delays = chain.slice(1).map((entry, i) => entry.startBeat - chain[i].startBeat);
+    const delayPenalty = computeDelayPenaltyBreakdown(delays, chain.length);
+    score -= delayPenalty.total;
+    penalties.push(...delayPenalty.items);
 
     // P_truncation: penalise beats removed
     for (let i = 0; i < chain.length; i++) {
@@ -352,8 +326,6 @@ export function calculateStrettoScore(
         penalties.push({ reason: `Thin texture (avg ${avgVoices.toFixed(1)} voices)`, points: -polyphonyBonus });
     }
 
-    // Clamp score
-    score = Math.max(SCORING.SCORE_MIN, Math.min(SCORING.SCORE_MAX, score));
 
     const log: ScoreLog = {
         base: 0,
@@ -408,7 +380,7 @@ export function calculateStrettoScore(
         detectedChords: harmonyAnalysis.chords,
         dissonanceRatio: S1,
         nctRatio: S3,
-        pairDissonanceScore: S4 * 100,
+        pairDissonanceScore: 0,
         isValid
     };
 }

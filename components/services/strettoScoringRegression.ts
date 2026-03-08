@@ -1,56 +1,53 @@
 import assert from 'node:assert/strict';
-import { SCORING } from './strettoConstants';
+import { computeDelayPenaltyBreakdown } from './strettoScoring';
 
-interface ScoreFixture {
-  id: string;
-  qualityPenaltyFraction: number;
-  additiveDelta: number;
+function testRepeatedDelayPenalty() {
+  const delays = [1, 1, 1.5, 2];
+  const breakdown = computeDelayPenaltyBreakdown(delays, 5);
+  const repeatedOnly = breakdown.items
+    .filter((item) => item.reason.startsWith('P_distance: repeated delay'))
+    .reduce((sum, item) => sum + item.points, 0);
+
+  assert.equal(repeatedOnly, 20, 'Expected one repeated-delay penalty event at 20 points.');
 }
 
-const FIXTURES: ScoreFixture[] = [
-  { id: 'A_pristine_dense', qualityPenaltyFraction: 0.08, additiveDelta: 120 },
-  { id: 'B_clean_compact', qualityPenaltyFraction: 0.15, additiveDelta: 260 },
-  { id: 'C_balanced', qualityPenaltyFraction: 0.27, additiveDelta: 180 },
-  { id: 'D_harmonic_risk', qualityPenaltyFraction: 0.35, additiveDelta: 170 },
-  { id: 'E_noisy_but_complex', qualityPenaltyFraction: 0.42, additiveDelta: 150 },
-  { id: 'F_sparse', qualityPenaltyFraction: 0.48, additiveDelta: 40 },
-  { id: 'G_poor_quality', qualityPenaltyFraction: 0.63, additiveDelta: -90 },
-  { id: 'H_extreme_penalties', qualityPenaltyFraction: 0.82, additiveDelta: -310 },
-];
+function testClusterPenaltyCanAccumulateAtCenter() {
+  const delays = [1.0, 1.5, 1.0];
+  const breakdown = computeDelayPenaltyBreakdown(delays, 4);
+  const clusteredOnly = breakdown.items
+    .filter((item) => item.reason.startsWith('P_distance: clustered delay'))
+    .reduce((sum, item) => sum + item.points, 0);
 
-function legacyScore(f: ScoreFixture): number {
-  const quality = Math.round(1000 * (1 - f.qualityPenaltyFraction));
-  const raw = quality + f.additiveDelta;
-  return Math.max(0, Math.min(2000, raw));
+  // left endpoint: 10, center: 20 (both sides within 0.5), right endpoint: 10
+  assert.equal(clusteredOnly, 40, 'Cluster penalty aggregation failed for ±0.5-neighborhood rule.');
 }
 
-function baseZeroScore(f: ScoreFixture): number {
-  const U_quality = Math.round(
-    SCORING.QUALITY_UTILITY_SCALE * (SCORING.QUALITY_NEUTRAL_PENALTY - f.qualityPenaltyFraction)
-  );
-  const raw = U_quality + f.additiveDelta;
-  return Math.max(SCORING.SCORE_MIN, Math.min(SCORING.SCORE_MAX, raw));
+function testEarlyExpansionPenaltyBeforeFinalThird() {
+  const delays = [0.5, 1.0, 0.75, 0.8];
+  const breakdown = computeDelayPenaltyBreakdown(delays, 5);
+  const expansionOnly = breakdown.items
+    .filter((item) => item.reason.startsWith('P_distance: early expansion'))
+    .reduce((sum, item) => sum + item.points, 0);
+
+  assert.equal(expansionOnly, 40, 'Expected one early-expansion penalty before final third threshold.');
 }
 
-function rank(fixtures: ScoreFixture[], scorer: (f: ScoreFixture) => number): string[] {
-  return [...fixtures].sort((a, b) => scorer(b) - scorer(a)).map((f) => f.id);
+function testNoEarlyExpansionPenaltyInFinalThird() {
+  const delays = [1.0, 0.5, 0.5, 1.25];
+  const breakdown = computeDelayPenaltyBreakdown(delays, 5);
+  const expansionOnly = breakdown.items
+    .filter((item) => item.reason.startsWith('P_distance: early expansion'))
+    .reduce((sum, item) => sum + item.points, 0);
+
+  assert.equal(expansionOnly, 0, 'Expansion in final third must not be penalized by early-expansion rule.');
 }
 
 function runRegression() {
-  const oldRanking = rank(FIXTURES, legacyScore);
-  const newRanking = rank(FIXTURES, baseZeroScore);
-
-  assert.deepEqual(newRanking, oldRanking, 'Ranking inversion detected between legacy and base-0 formulations.');
-
-  for (const fixture of FIXTURES) {
-    const oldScore = legacyScore(fixture);
-    const newScore = baseZeroScore(fixture);
-    assert.equal(newScore, oldScore - 1000, `Affine shift invariant failed for ${fixture.id}.`);
-  }
-
-  console.log('PASS: stretto scoring regression preserved ranking monotonicity for fixture set.');
-  console.log(`Legacy ranking: ${oldRanking.join(' > ')}`);
-  console.log(`Base-0 ranking: ${newRanking.join(' > ')}`);
+  testRepeatedDelayPenalty();
+  testClusterPenaltyCanAccumulateAtCenter();
+  testEarlyExpansionPenaltyBeforeFinalThird();
+  testNoEarlyExpansionPenaltyInFinalThird();
+  console.log('PASS: stretto distance-penalty regression suite.');
 }
 
 runRegression();
