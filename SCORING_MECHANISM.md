@@ -1,117 +1,68 @@
-
-# Stretto Scoring Mechanism Specification v1.1
+# Stretto Scoring Mechanism Specification v1.2
 
 ## Objective
-To algorithmically rank Stretto Chain candidates so that the most musically significant, valid, and interesting results appear at the top of the list.
+Rank valid stretto-chain candidates using a metric utility term centered at zero, then apply structural/harmonic additive adjustments.
 
-## 1. Validity Constraints (The "Gatekeepers")
-Before a candidate is scored, it must pass these hard checks. If it fails, it is discarded immediately.
+## 1) Hard validity gate
+Candidates are discarded if `requireConsonantEnd` is enabled and any entry terminates in a dissonant verticality.
 
-### A. Consonant Termination (New)
-*   **Rule:** The last note of every voice entry must form a consonance (P1, m3, M3, P5, m6, M6, P8) with at least one other active voice.
-*   **Purpose:** Excludes "pure unresolved dissonances" where a voice trails off on a clashing note.
-*   **Config:** Enabled by default (Toggle: `Require Consonant End`).
+## 2) Base-0 scoring equation
+Let:
+- `S1`: unweighted dissonant-time ratio,
+- `S2`: weighted dissonant-time ratio (strong-beat weight 1.5),
+- `S3`: NCT-time ratio,
+- `S4`: unprepared-dissonance event ratio.
 
-### B. No Unison Chains
-*   **Rule:** A voice cannot enter at the exact same transposition interval as the immediately preceding voice.
-*   **Purpose:** Prevents "Unison stacking" (e.g., Voice 1 at P1, Voice 2 at P1) which creates clumps rather than counterpoint.
+With weights `(W1,W2,W3,W4)=(0.2,0.3,0.2,0.3)`:
 
----
+\[
+Q = W_1 S_1 + W_2 S_2 + W_3 S_3 + W_4 S_4
+\]
 
-## 2. The Scoring Formula
+Define quality utility (base-0):
 
-Candidates that pass validity are ranked using a **Base Score** of 1000.
+\[
+U_{quality} = -1000 \cdot Q
+\]
 
-$$ S_{total} = 1000 - P_{errors} - P_{truncation} - P_{monotony} + B_{compactness} + B_{variety} + B_{complexity} $$
+Final score:
 
-### Penalties ($P$)
+\[
+S_{total} = U_{quality} + B_{compactness} + B_{variety} + B_{complexity} + B_{polyphony} + R_{harmony} - P_{truncation} - P_{monotony} - P_{harmonyNCT}
+\]
 
-#### A. Contrapuntal Errors ($P_{errors}$)
-*   **Parallel Perfects (5ths/8ves):**
-    *   **Fatal (Strong Beat):** $-500$ points.
-    *   **Warning (Weak Beat):** $-100$ points.
-*   **Dissonance Runs:**
-    *   Consecutive dissonant beats without resolution: $-150$ points.
+Then clamp to `[-1000, 1000]`.
 
-#### B. Truncation ($P_{truncation}$)
-*   **Cost:** $-20$ points per *beat* of the subject removed.
+> This is an affine reparameterization of the prior base-1000 form, preserving rank monotonicity under the matched clamp transform.
 
-#### C. Monotony / Clumping ($P_{monotony}$)
-*   **Rule:** We want a range of intervals, not clumps of the same one. // and distsnces!!!
-*   **Cost:** $-100$ points if any single interval type (e.g., "+P5") makes up more than 50% of the entry relationships.
+## 3) Additive terms
+- **Compactness:** `+50` (hyper, delay < 25% subject), `+25` (tight, delay < 50%).
+- **Variety:** `+50` per unique inter-entry transposition distance beyond first.
+- **Imperfect-consonance variety:** `+30` per entry at 3rd/6th class.
+- **Complexity:** `+100` per inversion, `+10` per voice beyond 2.
+- **Truncation:** `-20` per removed beat.
+- **Monotony:** `-100` if one transposition class exceeds 50% of entries.
+- **Harmony analyzer:** reward full-chord sustain, penalize NCT prevalence.
+- **Polyphony density:** `200 * (avgVoices - 2)`.
 
-### Bonuses ($B$)
+## 4) Worked examples
+### Example A (high quality)
+- `Q = 0.18`  
+- `U_quality = -1000*0.18=-180`
+- Additive net `+210`
+- `S_total = 30`
 
-#### A. Compactness ($B_{compactness}$)
-Rewards "Hyper-Stretto" (entries that occur very soon after the previous one).
-*   **Formula:** For each entry $e$:
-    *   If $Delay_e < 25\%$ of Subject Length: $+50$ points.
-    *   If $Delay_e < 50\%$ of Subject Length: $+25$ points.
+### Example B (borderline quality)
+- `Q = 0.44`
+- `U_quality = -440`
+- Additive net `+430`
+- `S_total = -10`
 
-#### B. Interval Variety ($B_{variety}$)
-Rewards using a diverse palette of intervals (e.g., mixing 5ths, Octaves, and 3rds) rather than just stacking one type.
-*   **Unique Count Bonus:** $+40$ points for every *unique* transposition interval used in the chain beyond the first.
-    *   *Example:* A chain using `{0, +7, +12}` (P1, P5, P8) gets $+80$ points. A chain using `{0, +7, +7}` gets $0$ points.
-*   **Imperfect Consonance:** $+30$ points for entries at 3rds or 6ths.
+### Example C (poor quality, dense penalties)
+- `Q = 0.74`
+- `U_quality = -740`
+- Additive net `-130`
+- `S_total = -870`
 
-#### C. Complexity ($B_{complexity}$)
-*   **Inversion:** $+100$ points per inverted voice.
-*   **Length:** $+10$ points per extra voice beyond 2. // temove
-
-
----
-
-## 3. Implementation Logic
-
-```typescript
-function calculateChainScore(chain: StrettoChainResult): number {
-    let score = 1000;
-
-    // 1. Penalties
-    score -= (chain.warnings.length * 100); 
-
-    // 2. Truncation
-    chain.entries.forEach(e => {
-        // ... calc missing beats ...
-        score -= (missingBeats * 20);
-    });
-
-    // 3. Compactness
-    chain.entries.forEach((e, i) => {
-        if (i === 0) return;
-        const delay = e.startBeat - chain.entries[i-1].startBeat;
-        // ... calc ratio ...
-        if (ratio <= 0.25) score += 50;
-    });
-
-    // 4. Interval Variety & Clumping
-    const intervals = new Set<number>();
-    const intervalCounts: Record<number, number> = {};
-    
-    chain.entries.forEach((e, i) => {
-        if (i === 0) return;
-        const relInt = e.transposition - chain.entries[i-1].transposition;
-        intervals.add(relInt);
-        intervalCounts[relInt] = (intervalCounts[relInt] || 0) + 1;
-    });
-
-    // Variety Bonus
-    const uniqueCount = intervals.size;
-    if (uniqueCount > 1) {
-        score += (uniqueCount - 1) * 40;
-    }
-
-    // Clumping Penalty
-    const totalLinks = chain.entries.length - 1;
-    if (totalLinks > 2) {
-        for (const k in intervalCounts) {
-            if (intervalCounts[k] > totalLinks * 0.5) {
-                score -= 100; // Penalty for overuse of one interval
-                break;
-            }
-        }
-    }
-
-    return Math.max(0, score);
-}
-```
+## 5) Score log semantics
+`ScoreLog.base = 0`. Metric S1-S4 contributions are logged as penalty magnitudes; all bonuses/penalties are additive deltas around zero.

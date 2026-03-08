@@ -19,6 +19,8 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
         return <div className="text-center text-gray-500 py-10">No chains found yet. Run the search to begin.</div>;
     }
 
+    const sortedResults = [...results].sort((a, b) => b.score - a.score);
+
     const toggleExpand = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
         setExpandedIds(prev => {
@@ -122,7 +124,7 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
 
     return (
         <div className="overflow-y-auto max-h-[500px] pb-20">
-            {results.map((res, i) => {
+            {sortedResults.map((res, i) => {
                 const hasVariations = res.variations && res.variations.length > 0;
                 const isExpanded = expandedIds.has(res.id);
                 const isSelected = selectedId === res.id;
@@ -186,7 +188,7 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                         {/* Variations Sub-list */}
                         {hasVariations && isExpanded && (
                             <div className="bg-black/30 border-t border-gray-800 pl-4 py-1">
-                                {res.variations!.map((v, vIdx) => {
+                                {[...res.variations!].sort((a, b) => b.score - a.score).map((v, vIdx) => {
                                     const isVarSelected = selectedId === v.id;
                                     return (
                                         <div 

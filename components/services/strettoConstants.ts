@@ -2,6 +2,14 @@
 // Centralized constants for Stretto Generator
 
 export const SCORING = {
+    // 0. Utility Baseline (base-0 scoring)
+    // U_quality = QUALITY_UTILITY_SCALE * (QUALITY_NEUTRAL_PENALTY - qualityPenaltyFraction)
+    QUALITY_NEUTRAL_PENALTY: 0,
+    QUALITY_UTILITY_SCALE: 1000,
+    QUALITY_COMPONENT_SCALE: 1000,
+    SCORE_MIN: -1000,
+    SCORE_MAX: 1000,
+
     // 1. Polyphony
     // Formula: 300 * (Average Active Voices - 1.5)
     POLYPHONY_BASE_MULT: 300,
@@ -42,6 +50,10 @@ export const SCORING = {
     HARMONY_MIN_DURATION_16THS: 2, // 8th note (assuming 4 16ths per beat)
     HARMONY_FULL_CHORD_REWARD: 20, // Per beat of full chord
     HARMONY_NCT_PENALTY_MULT: 10, // Per beat of NCT
+
+    // 7. Polyphony density
+    POLYPHONY_DENSITY_MULT: 200,
+    POLYPHONY_DENSITY_OFFSET: 2,
 };
 
 export const INTERVALS = {

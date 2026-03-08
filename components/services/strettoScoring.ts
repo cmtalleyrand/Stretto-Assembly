@@ -240,14 +240,18 @@ export function calculateStrettoScore(
     const S4 = totalDissEvents > 0 ? unpreparedDissEvents / totalDissEvents : 0;
 
     const qualityPenaltyFraction = (S1 * W_S1) + (S2 * W_S2) + (S3 * W_S3) + (S4 * W_S4);
-    let score = Math.round(1000 * (1 - qualityPenaltyFraction));
+    const U_quality = Math.round(
+        SCORING.QUALITY_UTILITY_SCALE * (SCORING.QUALITY_NEUTRAL_PENALTY - qualityPenaltyFraction)
+    );
+
+    let score = U_quality;
 
     const bonuses: ScoreLog['bonuses'] = [];
     const penalties: ScoreLog['penalties'] = [
-        { reason: `S1: Unweighted Diss (${(S1*100).toFixed(0)}%)`, points: Math.round(S1 * 1000 * W_S1) },
-        { reason: `S2: Weighted Diss (${(S2*100).toFixed(0)}%)`, points: Math.round(S2 * 1000 * W_S2) },
-        { reason: `S3: NCT Time (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * 1000 * W_S3) },
-        { reason: `S4: Unprepared Diss (${(S4*100).toFixed(0)}%)`, points: Math.round(S4 * 1000 * W_S4) },
+        { reason: `S1: Unweighted Diss (${(S1*100).toFixed(0)}%)`, points: Math.round(S1 * SCORING.QUALITY_COMPONENT_SCALE * W_S1) },
+        { reason: `S2: Weighted Diss (${(S2*100).toFixed(0)}%)`, points: Math.round(S2 * SCORING.QUALITY_COMPONENT_SCALE * W_S2) },
+        { reason: `S3: NCT Time (${(S3*100).toFixed(0)}%)`, points: Math.round(S3 * SCORING.QUALITY_COMPONENT_SCALE * W_S3) },
+        { reason: `S4: Unprepared Diss (${(S4*100).toFixed(0)}%)`, points: Math.round(S4 * SCORING.QUALITY_COMPONENT_SCALE * W_S4) },
     ];
 
     // --- 3B. Additive Bonuses & Penalties ---
@@ -340,7 +344,7 @@ export function calculateStrettoScore(
 
     // --- 5. Polyphony Density Bonus: 200 * (avgVoices - 2) ---
     const avgVoices = totalDuration > 0 ? totalWeightedVoices / totalDuration : 1;
-    const polyphonyBonus = Math.round(200 * (avgVoices - 2));
+    const polyphonyBonus = Math.round(SCORING.POLYPHONY_DENSITY_MULT * (avgVoices - SCORING.POLYPHONY_DENSITY_OFFSET));
     score += polyphonyBonus;
     if (polyphonyBonus >= 0) {
         bonuses.push({ reason: `Polyphony density (avg ${avgVoices.toFixed(1)} voices)`, points: polyphonyBonus });
@@ -349,10 +353,10 @@ export function calculateStrettoScore(
     }
 
     // Clamp score
-    score = Math.max(0, Math.min(2000, score));
+    score = Math.max(SCORING.SCORE_MIN, Math.min(SCORING.SCORE_MAX, score));
 
     const log: ScoreLog = {
-        base: 1000,
+        base: 0,
         bonuses,
         penalties,
         total: score
