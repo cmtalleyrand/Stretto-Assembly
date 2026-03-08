@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "tsc --noEmit",
     "diagnose:stretto": "node --import tsx components/services/strettoDiagnostics.ts",
-    "diagnose:stretto:full": "STRETTO_DIAGNOSTIC_FULL=1 node --import tsx components/services/strettoDiagnostics.ts"
+    "diagnose:stretto:full": "STRETTO_DIAGNOSTIC_FULL=1 node --import tsx components/services/strettoDiagnostics.ts",
+    "test:stretto:scoring-regression": "node --import tsx components/services/strettoScoringRegression.ts"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",

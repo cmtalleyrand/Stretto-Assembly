@@ -1,47 +1,33 @@
-
 // Centralized constants for Stretto Generator
 
 export const SCORING = {
-    // 1. Polyphony
-    // Formula: 300 * (Average Active Voices - 1.5)
-    POLYPHONY_BASE_MULT: 300,
-    POLYPHONY_OFFSET: 1.5,
+    // 0. Utility Baseline (base-0 scoring)
+    // U_quality = QUALITY_UTILITY_SCALE * qualityPenaltyFraction
+    QUALITY_UTILITY_SCALE: -1000,
+    QUALITY_COMPONENT_SCALE: 1000,
 
-    // 2. Dissonance (Proportional)
-    DISS_WEIGHT_BASS: 1.0,
-    DISS_WEIGHT_UPPER: 0.8,
-    
-    // New Proportional Logic: Start penalty at 45%
-    DISS_PENALTY_START: 0.45, 
-    DISS_PENALTY_SLOPE: 2000, 
-    
-    BUCKET_SWEET_MIN: 0.2,
-    BUCKET_SWEET_MAX: 0.4,
-    BUCKET_SWEET_SCORE: 300,
-    
-    // 3. Distance / Rhythm
-    // NOTE: Clumping/Expansion are now HARD CONSTRAINTS in the generator logic.
-    DIST_VARIETY_BONUS: 50,        // Per unique distance > 1
-    
-    // 4. Compactness (Bonuses)
+    // 1. Distance / Rhythm
     COMPACT_HYPER_THRESH: 0.25,
     COMPACT_HYPER_BONUS: 50,
     COMPACT_TIGHT_THRESH: 0.50,
     COMPACT_TIGHT_BONUS: 25,
+    DIST_REPEAT_PENALTY: 20,
+    DIST_CLUSTER_PENALTY: 10,
+    EARLY_EXPANSION_PENALTY: 40,
 
-    // 5. Structure
-    INVERSION_BONUS: 100,
-    CHAIN_LENGTH_BONUS: 10,
+    // 2. Structure
     TRUNCATION_PENALTY_PER_BEAT: 20,
-    WARNING_PENALTY: 100,
-    MONOTONY_PENALTY: 100, // Interval repetition
-    IMPERFECT_CONS_BONUS: 30, // 3rds/6ths
+    MONOTONY_PENALTY: 100,
 
-    // 6. Harmonic Quality (New)
+    // 3. Harmonic Quality
     HARMONY_ACTIVATION_VOICES: 3,
     HARMONY_MIN_DURATION_16THS: 2, // 8th note (assuming 4 16ths per beat)
     HARMONY_FULL_CHORD_REWARD: 20, // Per beat of full chord
     HARMONY_NCT_PENALTY_MULT: 10, // Per beat of NCT
+
+    // 4. Polyphony density
+    POLYPHONY_DENSITY_MULT: 200,
+    POLYPHONY_DENSITY_OFFSET: 2,
 };
 
 export const INTERVALS = {
@@ -93,5 +79,4 @@ export const CHORD_SHAPES = [
     { name: 'mM7', intervals: [0, 3, 7, 11] },
 ];
 
-// Added Maj6 and m6 as consonant (often treated as stable in non-strict/jazz contexts, or per user request)
 export const CONSONANT_QUALITIES = new Set(['Maj', 'Min', 'Aug', '5', 'Maj6', 'm6']);

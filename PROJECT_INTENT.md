@@ -26,6 +26,7 @@ Stretto Assembly has a strict operational objective: compute deterministic stret
 
 ## Explicit Non-Goals
 
-- Diagnostics-first navigation or branding.
-- Positioning Harmonic Implication Analysis (HIA) as an independent primary workflow.
-- Generic broad-spectrum harmonic-analysis tooling as the headline product function outside stretto evaluation.
+Active scorer terms are additive around base 0 (`ScoreLog.base = 0`) and include quality utility from `S1/S2/S3`, compactness reward, polyphony density reward, harmonic reward, distance penalties (repetition/cluster/early expansion), truncation penalty, monotony penalty, and harmonic NCT penalty.
+
+### III. Unified Pivot Logic
+1.  **Rule 6.5:** The Inversion Pivot selection must be shared between Pairwise Discovery and Algorithmic Chain search to ensure that "Candidate #5 (Inv)" in the list sounds identical to "Entry #5 (Inv)" in a generated chain.

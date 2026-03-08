@@ -1,5 +1,5 @@
 
-# Stretto Generator Rules & Logic (v4.3 Strict)
+# Stretto Generator Rules & Logic (v4.8 Strict)
 
 This document defines the strict set of rules, constraints, and scoring mechanisms used by the Stretto Assembly algorithm.
 
@@ -20,8 +20,11 @@ The algorithm strictly enforces vertical ordering:
 ### C. Voice Allocation
 1.  **Re-entry:** Any voice becomes available for re-entry 1 beat before its final note ends.
 
-## 2. Scoring Metrics (S1-S4)
-Candidates that pass the Hard Constraints are ranked by a composite score derived from these four strict metrics.
+### D. Optional Consonant Termination
+If `requireConsonantEnd` is enabled, dissonant endpoints invalidate the chain.
+
+## 2. Scoring Metrics (S1-S3)
+Candidates that pass the Hard Constraints are ranked by a composite score derived from these three strict metrics.
 
 ### Metric S1: Dissonance Ratio (Unweighted)
 The fraction of polyphonic duration that contains any dissonance.
@@ -34,17 +37,28 @@ Similar to S1, but dissonances occurring on **Strong Beats** are penalized more 
 
 ### Metric S3: Non-Chord Tone (NCT) Ratio
 Measures harmonic stability by fitting vertical slices to a strict **Chord Template Library** (Triads, 7ths, Aug6).
-*   **Formula:** $\sum (TotalPitches - ChordTones) / (TotalPolyphonicBeats * AvgVoiceCount)$
+*   **Formula:** proportional NCT burden over slices with at least 3 active voices.
 *   **Ideal:** Lower indicates cleaner, more triadic harmony.
 
-### Metric S4: Unprepared Dissonance Ratio
-A rigorous contrapuntal check. A dissonance is only "forgiven" if it is **Prepared**.
-*   **Preparation Rule (P1):** The voice must have been consonant against the bass in the previous time step.
-*   **Motion Rule (P2):** The dissonance must arise from a single voice moving (or the bass moving), not simultaneous leaps into a clash.
-*   **Formula:** $UnpreparedEvents / TotalDissonantEvents$
-*   **Ideal:** 0.0 (All dissonances are prepared suspensions or passing tones).
+Metric S4 (Unprepared Dissonance Ratio) is intentionally excluded from the active scorer.
 
-## 3. Analysis Definitions
+## 3. Scoring Composition
+For feasible chains:
+
+$$ S(C)=U_{quality}+B_{compactness}+B_{polyphony}+R_{harmony}-P_{distance}-P_{truncation}-P_{monotony}-P_{harmonyNCT} $$
+
+where
+
+$$ Q = 0.2S1 + 0.3S2 + 0.2S3, \quad U_{quality} = -1000Q $$
+
+and `ScoreLog.base = 0` with no clamp.
+
+Distance penalty decomposition:
+1. $-20$ per repeated delay occurrence beyond first use.
+2. $-10$ per adjacent delay within $0.5$ beat (left/right counted independently).
+3. $-40$ per expansion before the final third of entries.
+
+## 4. Analysis Definitions
 
 ### Consonance vs. Dissonance
 *   **Consonant:** P1, m3, M3, P5, m6, M6, P8.
@@ -53,3 +67,10 @@ A rigorous contrapuntal check. A dissonance is only "forgiven" if it is **Prepar
 
 ### Parallel Motion Check
 Both voices moving into a Perfect 5th or Octave interval from another Perfect interval of the same class is a fatal error.
+
+## 5. Explicitly Removed Legacy Additions
+* per-unique-distance reward,
+* inversion bonus,
+* chain-length bonus,
+* imperfect-consonance bonus,
+* score clamping.

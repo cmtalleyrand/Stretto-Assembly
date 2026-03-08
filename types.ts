@@ -325,7 +325,7 @@ export interface ScoreLogItem {
 }
 
 export interface ScoreLog {
-    base: number;
+    base: number; // Base utility anchor (0 in current scorer)
     penalties: ScoreLogItem[];
     bonuses: ScoreLogItem[];
     total: number;
