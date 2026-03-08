@@ -97,7 +97,7 @@ export interface ConversionOptions {
     noteTimeScale: number;
     inversionMode: InversionMode;
     
-    // Shadow Grid Options
+    // Rhythm Processing Options
     primaryRhythm: RhythmRule;
     secondaryRhythm: RhythmRule;
     
