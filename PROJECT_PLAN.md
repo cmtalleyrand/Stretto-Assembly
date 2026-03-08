@@ -3,7 +3,7 @@
 
 ## Phase 1: Data Structures & Segmentation Logic (Completed)
 ## Phase 2: Ornament Recognition Overhaul (Completed)
-## Phase 3: The Shadow Quantizer (Completed)
+## Phase 3: Quantization Engine Overhaul (Completed)
 ## Phase 4: Structural Voice Separation & Stretto Discovery (Completed)
 
 ## Phase 5: Assembly Optimization & LLM Integration (In Progress)
