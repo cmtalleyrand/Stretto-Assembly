@@ -49,7 +49,7 @@ export default function AnalysisSettings({
             name: `Section ${String.fromCharCode(65 + sections.length)}`,
             startMeasure: newStart,
             endMeasure: newStart + 4,
-            harmonyMode: 'hia_v2', // Default updated to HIA v2.2
+            harmonyMode: 'sustain',
             pitchStatsMode: 'frequency',
             chordTolerance: '1/32', 
             chordMinDuration: 'off',
@@ -237,7 +237,7 @@ export default function AnalysisSettings({
                                         <option value="sustain">Sustain (Overlap)</option>
                                         <option value="hybrid">Hybrid (Legacy)</option>
                                         <option value="arpeggio_window">Arpeggio (Time Window)</option>
-                                        <option value="hia_v2">Harmonic Implication (HIA v2.2)</option>
+                                        <option value="hia_v2">HIA v2.2 (Optional Diagnostic)</option>
                                     </select>
                                 </div>
 
@@ -265,8 +265,8 @@ export default function AnalysisSettings({
                                 {section.harmonyMode === 'hia_v2' ? (
                                     <div className="w-full flex items-center justify-between">
                                         <div className="text-xs text-brand-primary font-mono flex items-center gap-2">
-                                            <span className="font-bold">HIA v2.2 Active:</span>
-                                            <span className="text-gray-400">Advanced Salience Weighted Viterbi Optimization</span>
+                                            <span className="font-bold">Optional HIA Diagnostic Active:</span>
+                                            <span className="text-gray-400">Advanced salience-weighted Viterbi trace mode</span>
                                         </div>
                                         <label className="flex items-center cursor-pointer">
                                             <input 

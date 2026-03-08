@@ -7,6 +7,7 @@ import { searchStrettoChains } from './services/strettoGenerator';
 import { getStrictPitchName } from './services/midiSpelling';
 import { downloadStrettoCandidate, downloadStrettoSelection } from './services/strettoExport';
 import { Spinner, DocumentTextIcon } from './Icons';
+import FileUpload from './FileUpload';
 import { playSequence, stopPlayback } from './midiPlaybackService';
 import { useStrettoAssembly } from '../hooks/useStrettoAssembly';
 import { predictKey } from './services/analysis/keyPrediction'; // Robust key finding
@@ -23,6 +24,11 @@ interface StrettoViewProps {
     ts: { num: number, den: number };
     voiceNames?: Record<number, string>;
     setVoiceNames?: (names: Record<number, string>) => void;
+    onMidiUpload: (file: File) => void;
+    isMidiLoading: boolean;
+    midiTracks: { id: number; name: string; noteCount: number }[];
+    selectedMidiTrackId: number | null;
+    onSelectMidiTrack: (trackId: number) => void;
 }
 
 interface SavedSubject {
@@ -31,8 +37,19 @@ interface SavedSubject {
     data: string;
 }
 
-export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, setVoiceNames }: StrettoViewProps) {
-    const [mode, setMode] = useState<'midi' | 'abc'>(initialNotes.length > 0 ? 'midi' : 'abc');
+export default function StrettoView({
+    notes: initialNotes,
+    ppq,
+    ts,
+    voiceNames,
+    setVoiceNames,
+    onMidiUpload,
+    isMidiLoading,
+    midiTracks,
+    selectedMidiTrackId,
+    onSelectMidiTrack
+}: StrettoViewProps) {
+    const [mode, setMode] = useState<'midi' | 'abc'>('abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
     const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain'); 
     
@@ -365,33 +382,63 @@ export default function StrettoView({ notes: initialNotes, ppq, ts, voiceNames, 
             </div>
 
             {mode === 'abc' && (
-                <div className="mb-6 space-y-4">
-                    <div className="flex justify-between items-center">
-                        <label className="block text-sm text-gray-400 font-bold uppercase tracking-wider">Subject ABC</label>
-                        <button onClick={() => setShowLibrary(!showLibrary)} className="text-xs bg-gray-800 hover:bg-gray-700 text-brand-primary border border-brand-primary/30 px-3 py-1 rounded flex items-center gap-2 transition-colors">
-                            <DocumentTextIcon className="w-3 h-3" /> {showLibrary ? "Hide Library" : "Subject Library"}
-                        </button>
-                    </div>
-                    {showLibrary && (
-                        <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 animate-fade-in">
-                            <div className="flex gap-2 mb-4 border-b border-gray-700 pb-4">
-                                <input type="text" placeholder="Subject Name..." value={saveName} onChange={(e) => setSaveName(e.target.value)} className="flex-grow bg-gray-900 border border-gray-600 rounded px-3 py-1 text-sm text-white outline-none" />
-                                <button onClick={handleSaveSubject} disabled={!saveName.trim()} className="bg-brand-primary hover:bg-brand-secondary text-white px-4 py-1 rounded text-sm font-bold transition-colors disabled:bg-gray-600">Save</button>
-                            </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
-                                {savedSubjects.length > 0 ? savedSubjects.map(s => (
-                                    <div key={s.id} className="flex justify-between items-center bg-gray-900 p-2 rounded border border-gray-700 group">
-                                        <span className="text-sm font-bold text-gray-300 truncate mr-2">{s.name}</span>
-                                        <div className="flex gap-1 opacity-50 group-hover:opacity-100">
-                                            <button onClick={() => handleLoadSubject(s.data)} className="text-[10px] bg-brand-secondary/50 px-2 py-0.5 rounded">Load</button>
-                                            <button onClick={() => handleDeleteSubject(s.id)} className="text-[10px] bg-red-900/50 px-2 py-0.5 rounded">×</button>
-                                        </div>
-                                    </div>
-                                )) : <p className="text-xs text-gray-500 col-span-full text-center py-2">Library empty.</p>}
-                            </div>
+                <div className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+                    <div className="lg:col-span-2 space-y-4">
+                        <div className="flex justify-between items-center">
+                            <label className="block text-sm text-gray-400 font-bold uppercase tracking-wider">Subject ABC</label>
+                            <button onClick={() => setShowLibrary(!showLibrary)} className="text-xs bg-gray-800 hover:bg-gray-700 text-brand-primary border border-brand-primary/30 px-3 py-1 rounded flex items-center gap-2 transition-colors">
+                                <DocumentTextIcon className="w-3 h-3" /> {showLibrary ? "Hide Library" : "Subject Library"}
+                            </button>
                         </div>
-                    )}
-                    <textarea value={abcInput} onChange={e => setAbcInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white font-mono h-24 outline-none focus:border-brand-primary" />
+                        {showLibrary && (
+                            <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 animate-fade-in">
+                                <div className="flex gap-2 mb-4 border-b border-gray-700 pb-4">
+                                    <input type="text" placeholder="Subject Name..." value={saveName} onChange={(e) => setSaveName(e.target.value)} className="flex-grow bg-gray-900 border border-gray-600 rounded px-3 py-1 text-sm text-white outline-none" />
+                                    <button onClick={handleSaveSubject} disabled={!saveName.trim()} className="bg-brand-primary hover:bg-brand-secondary text-white px-4 py-1 rounded text-sm font-bold transition-colors disabled:bg-gray-600">Save</button>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto">
+                                    {savedSubjects.length > 0 ? savedSubjects.map(s => (
+                                        <div key={s.id} className="flex justify-between items-center bg-gray-900 p-2 rounded border border-gray-700 group">
+                                            <span className="text-sm font-bold text-gray-300 truncate mr-2">{s.name}</span>
+                                            <div className="flex gap-1 opacity-50 group-hover:opacity-100">
+                                                <button onClick={() => handleLoadSubject(s.data)} className="text-[10px] bg-brand-secondary/50 px-2 py-0.5 rounded">Load</button>
+                                                <button onClick={() => handleDeleteSubject(s.id)} className="text-[10px] bg-red-900/50 px-2 py-0.5 rounded">×</button>
+                                            </div>
+                                        </div>
+                                    )) : <p className="text-xs text-gray-500 col-span-full text-center py-2">Library empty.</p>}
+                                </div>
+                            </div>
+                        )}
+                        <textarea value={abcInput} onChange={e => setAbcInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white font-mono h-40 outline-none focus:border-brand-primary" />
+                    </div>
+
+                    <aside className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 space-y-3">
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Optional MIDI Seed</h3>
+                        <p className="text-[11px] text-gray-400 leading-relaxed">
+                            Keep ABC as canonical subject input. Use MIDI import only to seed an alternate subject and compare stretto feasibility.
+                        </p>
+                        <FileUpload onFileUpload={onMidiUpload} isLoading={isMidiLoading} compact />
+
+                        <div>
+                            <label className="block text-[11px] font-bold text-gray-400 uppercase mb-1">Imported Track</label>
+                            <select
+                                value={selectedMidiTrackId ?? ''}
+                                onChange={(e) => onSelectMidiTrack(Number(e.target.value))}
+                                disabled={midiTracks.length === 0}
+                                className="w-full bg-gray-900 border border-gray-700 rounded px-2 py-2 text-xs text-gray-200 disabled:opacity-60"
+                            >
+                                {midiTracks.length === 0 ? (
+                                    <option value="">No MIDI tracks loaded</option>
+                                ) : (
+                                    midiTracks.map((track) => (
+                                        <option key={track.id} value={track.id}>
+                                            {track.name} · {track.noteCount} notes
+                                        </option>
+                                    ))
+                                )}
+                            </select>
+                        </div>
+                    </aside>
                 </div>
             )}
 

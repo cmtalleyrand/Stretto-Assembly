@@ -4,9 +4,10 @@ import { UploadIcon, Spinner } from './Icons';
 interface FileUploadProps {
   onFileUpload: (file: File) => void;
   isLoading: boolean;
+  compact?: boolean;
 }
 
-export default function FileUpload({ onFileUpload, isLoading }: FileUploadProps) {
+export default function FileUpload({ onFileUpload, isLoading, compact = false }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -47,10 +48,11 @@ export default function FileUpload({ onFileUpload, isLoading }: FileUploadProps)
   };
 
   const dragOverClass = isDragging ? 'border-brand-primary bg-gray-dark' : 'border-gray-medium';
+  const sizeClass = compact ? 'p-4' : 'p-8 sm:p-12';
 
   return (
     <div
-      className={`relative w-full p-8 sm:p-12 border-2 border-dashed ${dragOverClass} rounded-2xl cursor-pointer transition-all duration-300 ease-in-out hover:border-brand-primary hover:bg-gray-dark/50 animate-fade-in`}
+      className={`relative w-full ${sizeClass} border-2 border-dashed ${dragOverClass} rounded-2xl cursor-pointer transition-all duration-300 ease-in-out hover:border-brand-primary hover:bg-gray-dark/50 animate-fade-in`}
       onDragEnter={handleDragIn}
       onDragLeave={handleDragOut}
       onDragOver={handleDrag}
@@ -68,16 +70,16 @@ export default function FileUpload({ onFileUpload, isLoading }: FileUploadProps)
       <div className="flex flex-col items-center justify-center text-center space-y-4">
         {isLoading ? (
           <>
-            <Spinner className="w-12 h-12 text-brand-primary" />
-            <p className="text-lg font-semibold text-gray-300">Parsing MIDI...</p>
+            <Spinner className={`${compact ? 'w-8 h-8' : 'w-12 h-12'} text-brand-primary`} />
+            <p className={`${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-300`}>Parsing MIDI...</p>
           </>
         ) : (
           <>
-            <UploadIcon className="w-12 h-12 text-gray-medium group-hover:text-brand-primary transition-colors" />
-            <p className="text-lg font-semibold text-gray-300">
+            <UploadIcon className={`${compact ? 'w-8 h-8' : 'w-12 h-12'} text-gray-medium group-hover:text-brand-primary transition-colors`} />
+            <p className={`${compact ? 'text-sm' : 'text-lg'} font-semibold text-gray-300`}>
               Drag & drop a MIDI file here
             </p>
-            <p className="text-gray-400">or click to select a file</p>
+            <p className={`${compact ? 'text-xs' : 'text-base'} text-gray-400`}>or click to select a file</p>
             <p className="text-xs text-gray-500 mt-2">.mid or .midi files only</p>
           </>
         )}

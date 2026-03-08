@@ -70,7 +70,7 @@ function getHarmonyMethodology(mode: string, section: AnalysisSection): string {
         case 'arpeggio_window':
             return `ARPEGGIO (Time-Based): Chords derived from notes within a ${section.arpeggioWindowVal} window.`;
         case 'hia_v2':
-            return `HIA v2.2: Harmonic Implication Algorithm with Salience Weighting and Suspension Exclusion.`;
+            return `Optional Diagnostic (HIA v2.2): Harmonic Implication with salience weighting and suspension exclusion.`;
         case 'hybrid':
             const conf = section.hybridConfig || { voiceRoles: {}, arpStrategy: 'note_based', arpHistoryCount: 4, arpHistoryTime: '1/2' };
             const strat = conf.arpStrategy === 'note_based' ? `Last ${conf.arpHistoryCount} notes` : `Window ${conf.arpHistoryTime}`;

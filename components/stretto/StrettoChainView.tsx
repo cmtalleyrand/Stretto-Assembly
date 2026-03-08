@@ -125,7 +125,12 @@ export default function StrettoChainView({
                             </div>
                         )}
                     </div>
-                    {searchReport && searchReport.stats.stopReason === 'Exhausted' && (
+                    {searchReport && searchReport.stats.stopReason === 'Exhausted' && searchReport.stats.maxDepthReached > 0 && (
+                        <div className="bg-orange-900/30 border-b border-orange-800 p-2 text-[10px] text-orange-200">
+                            <strong>Partial Depth Results:</strong> Full chains of {searchOptions.targetChainLength} entries were not found. Showing deepest valid chains discovered before exhaustion (Max depth: {searchReport.stats.maxDepthReached}).
+                        </div>
+                    )}
+                    {searchReport && searchReport.stats.stopReason === 'Exhausted' && searchReport.stats.maxDepthReached === 0 && (
                         <div className="bg-red-900/30 border-b border-red-800 p-2 text-[10px] text-red-200">
                             <strong>Search Exhausted:</strong> No valid chains found. Try relaxing rules.
                         </div>

@@ -81,7 +81,7 @@ export function generateHIAAuditLog(chords: ChordEvent[]): string {
     if (!chords || chords.length === 0) return "";
 
     // --- PART 1: SUMMARY TABLE ---
-    let report = `HIA v2.2 Audit Summary\n\n`;
+    let report = `Optional Diagnostic: HIA v2.2 Audit Summary\n\n`;
     report += `| Time | Winning Chord | Step Score | Path Score | Top Alternatives |\n`;
     report += `| :--- | :--- | :--- | :--- | :--- |\n`;
 
