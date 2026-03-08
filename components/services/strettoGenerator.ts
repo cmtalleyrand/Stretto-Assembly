@@ -178,6 +178,7 @@ function isStrongBeat(tick: number, ppq: number): boolean {
     return (tick % (ppq * 2)) === 0;
 }
 
+
 /**
  * PHASE 5 CHECK: Metric Compliance
  * REFACTORED: Uses Scan-Line algorithm on raw ticks.
@@ -191,9 +192,33 @@ function checkMetricCompliance(
     ppq: number,
     metricOffset: number = 0
 ): boolean {
-    
+
     const newStartTick = Math.round(newEntry.startBeat * ppq);
-    
+
+    // Pre-build a flat list of (startTick, endTick, absolutePitch) for every note in every
+    // voice (new entry + entire chain). Built once here so the P4-vs-bass lookup inside the
+    // pairwise loop is a single linear scan over a cached array rather than a repeated
+    // re-traversal of the chain.  Treating P4 as dissonant against the bass prunes branches:
+    // when the bass-P4 makes `isDiss = true`, the existing dissonance-run counter fires and
+    // returns false immediately, cutting that branch from the search tree.
+    type NoteEvent = [number, number, number]; // [start, end, pitch]
+    const allNoteEvents: NoteEvent[] = [];
+    for (const n of newVariant.notes) {
+        allNoteEvents.push([newStartTick + n.relTick, newStartTick + n.relTick + n.durationTicks, n.pitch + newEntry.transposition]);
+    }
+    for (let k = 0; k < chain.length; k++) {
+        const eStart = Math.round(chain[k].startBeat * ppq);
+        for (const n of variants[variantIndices[k]].notes) {
+            allNoteEvents.push([eStart + n.relTick, eStart + n.relTick + n.durationTicks, n.pitch + chain[k].transposition]);
+        }
+    }
+    // Returns the lowest absolute pitch active at `tick` across all voices, or Infinity if none.
+    const overallBassAt = (tick: number): number => {
+        let min = Infinity;
+        for (const [s, e, p] of allNoteEvents) { if (s <= tick && e > tick && p < min) min = p; }
+        return min;
+    };
+
     // Check against every existing voice
     for (let k = 0; k < chain.length; k++) {
         const existEntry = chain[k];
@@ -263,8 +288,14 @@ function checkMetricCompliance(
             const lo = Math.min(p1, p2);
             const hi = Math.max(p1, p2);
             const interval = (hi - lo) % 12;
-            
+
             let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
+
+            // P4 (5 semitones) is consonant between upper voices but dissonant above the bass.
+            // Use the precomputed allNoteEvents to find the lowest active pitch at this tick.
+            // If the lower note of the P4 IS the bass, mark it dissonant so the run-limit
+            // check below can prune the branch immediately.
+            if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
             // Corrected Metric Check using Absolute Grid alignment
             const isStrong = isStrongBeat(start + metricOffset, ppq);
@@ -480,21 +511,23 @@ export async function searchStrettoChains(
     }
     const unscoredResults: UnscoredChain[] = [];
     const unscoredPartials: UnscoredChain[] = [];
+    const MAX_PARTIALS = 500; // Cap partial buffer to avoid OOM in difficult searches
+    const seenPartialSigs = new Set<string>();
 
-    const seenSignatures = new Set<number>();
-    // FNV-1a inspired numeric hash for chain signatures (avoids string allocation)
-    function getChainSignature(c: StrettoChainOption[]): number {
-        let hash = 2166136261; // FNV offset basis
+    const seenSignatures = new Set<string>();
+    // Collision-free structural string key for deduplication
+    function getChainSignature(c: StrettoChainOption[]): string {
+        let sig = '';
         for (let i = 1; i < c.length; i++) {
-            const d = Math.round(c[i].startBeat * ppq) - Math.round(c[i - 1].startBeat * ppq);
-            hash = ((hash ^ d) * 16777619) | 0;
+            sig += (Math.round(c[i].startBeat * ppq) - Math.round(c[i - 1].startBeat * ppq));
+            sig += ',';
         }
+        sig += '|';
         for (let i = 0; i < c.length; i++) {
-            const tc = (c[i].transposition % 12 + 12) % 12;
-            hash = ((hash ^ tc) * 16777619) | 0;
-            hash = ((hash ^ (c[i].type === 'I' ? 1 : 0)) * 16777619) | 0;
+            sig += ((c[i].transposition % 12 + 12) % 12);
+            sig += c[i].type;
         }
-        return hash;
+        return sig;
     }
 
     async function solve(
@@ -532,11 +565,12 @@ export async function searchStrettoChains(
         }
 
         // --- PARTIAL RESULTS LOGIC ---
-        // If the chain is significant (>= 3 entries), store as partial (unscored)
-        if (chain.length >= 3) {
+        // If the chain is significant (>= 3 entries), store as partial (unscored).
+        // Bounded to MAX_PARTIALS to prevent OOM in difficult searches.
+        if (chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {
             const sig = getChainSignature(chain);
-            if (!seenSignatures.has(sig)) {
-                seenSignatures.add(sig);
+            if (!seenPartialSigs.has(sig)) {
+                seenPartialSigs.add(sig);
                 unscoredPartials.push({
                     entries: [...chain],
                     variantIndices: [...variantIndices]
@@ -605,11 +639,11 @@ export async function searchStrettoChains(
             const absStartBeat = absStartTicks / ppq;
 
             for (const t of transpositions) {
-                // Unison gatekeeper: skip if same transposition as preceding entry
-                if (depth > 0 && t === chain[depth - 1].transposition) continue;
+                // Gatekeeper B: voice cannot enter at same transposition as the immediately preceding voice
+                if (t === chain[chain.length - 1].transposition) continue;
 
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-                    
+
                     // --- TRIPLE PRUNING ---
                     if (depth >= 2) {
                         const vA = variantIndices[depth-2];
