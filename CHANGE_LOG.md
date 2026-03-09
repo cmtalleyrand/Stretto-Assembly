@@ -10,3 +10,9 @@
 ## [Stretto Lab Filter & UX Overhaul]
 - **Grid UI:** Redesigned the Discovery list to use integrated table header sorting.
 - **Power Filters:** Replaced single-select dropdowns with multi-select toggle groups for Intervals, Delays, and Entry Pitches.
+
+## [Assembly Context + Export Hardening]
+- **Prompt Context Upgrade:** Gemini assembly requests now include explicit discovery-filter context (selected intervals, delays, entry pitch classes, dissonance cap, resolved-ending constraint, and visible subset cardinality) so generated assemblies preserve user-imposed candidate constraints.
+- **Filter Telemetry Bridge:** Discovery grid now emits a typed filter-context payload to upstream orchestration, enabling deterministic prompt conditioning without re-computing UI state.
+- **MIDI Export Hardening:** Multi-track export now handles empty-voice candidates safely, enforces deterministic per-track note ordering, and assigns instrument metadata consistently for bundled candidate exports.
+

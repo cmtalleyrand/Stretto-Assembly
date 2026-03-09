@@ -1,13 +1,17 @@
 
 import { useState, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
-import { StrettoCandidate, RawNote } from '../types';
+import { StrettoCandidate, RawNote, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc } from '../components/services/abcBridge';
 
 interface UseStrettoAssemblyProps {
     notes: RawNote[];
     ppq: number;
     ts?: { num: number, den: number };
+}
+
+interface AssemblyFilterContextPayload {
+    filterContext?: StrettoListFilterContext | null;
 }
 
 export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts }: UseStrettoAssemblyProps) => {
@@ -19,7 +23,8 @@ export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts }: UseStrettoA
 
     const runAssembly = useCallback(async (
         candidates: StrettoCandidate[], 
-        abcInput: string
+        abcInput: string,
+        payload?: AssemblyFilterContextPayload
     ) => {
         if (candidates.length === 0) {
             alert("Please select at least one stretto candidate.");
@@ -68,6 +73,19 @@ V:1 name="Subject"
             const startBeat = r.delayBeats;
             return `Voice ${i+2}: Transpose ${r.intervalLabel}. START BEAT: ${startBeat} (This voice enters ${startBeat} beats after the beginning of the piece).`;
         }).join('\n');
+
+        const filterContext = payload?.filterContext;
+        const filterContextText = filterContext ? [
+            'Discovery Filter Context (hard constraints from user intent):',
+            `- Visible candidate subset size: ${filterContext.visibleCount}/${filterContext.totalCount}`,
+            `- Selected intervals: ${filterContext.selectedIntervals.length > 0 ? filterContext.selectedIntervals.join(', ') : 'ALL'}`,
+            `- Selected delays: ${filterContext.selectedDelays.length > 0 ? filterContext.selectedDelays.join(', ') : 'ALL'}`,
+            `- Selected entry pitch classes: ${filterContext.selectedPitches.length > 0 ? filterContext.selectedPitches.join(', ') : 'ALL'}`,
+            `- Dissonance cap (%): ${filterContext.maxDissonance}`,
+            `- Require resolved ending: ${filterContext.onlyResolved ? 'YES' : 'NO'}`,
+            `- Discovery sorting context: ${filterContext.sortKey} (${filterContext.sortDir})`,
+            'Constraint: preserve the supplied candidate order exactly; do not introduce unlisted transformations or delays.'
+        ].join('\n') : 'Discovery Filter Context: not provided.';
         
         let currentInput = `Subject ABC: ${abcInput}
 
@@ -75,7 +93,9 @@ Configuration (Total ${totalEntries} Voices):
 Voice 1: Original Subject (P1). START BEAT: 0.
 ${candidateList}
 
-Generate the ABC now. Ensure simultaneous playback (polyphony) by padding the start of voices with correct rests (z).`;
+Generate the ABC now. Ensure simultaneous playback (polyphony) by padding the start of voices with correct rests (z).
+
+${filterContextText}`;
 
         try {
             for (let i = 1; i <= 3; i++) {

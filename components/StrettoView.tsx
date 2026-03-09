@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade } from '../types';
+import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
 import { searchStrettoChains } from './services/strettoGenerator'; 
@@ -69,6 +69,7 @@ export default function StrettoView({
     const [searchRes, setSearchRes] = useState<SearchResolution>('full');
     const [selectedCandidate, setSelectedCandidate] = useState<StrettoCandidate | null>(null);
     const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+    const [discoveryFilterContext, setDiscoveryFilterContext] = useState<StrettoListFilterContext | null>(null);
     
     // Master Transposition State (Post-processing)
     const [masterTransposition, setMasterTransposition] = useState<number>(0);
@@ -124,6 +125,7 @@ export default function StrettoView({
         setChainResults([]);
         setSelectedChain(null);
         setSearchReport(null);
+        setDiscoveryFilterContext(null);
     }, [subjectNotes]);
 
     // Intelligent Pivot Initialization using Key Prediction or ABC Context
@@ -466,11 +468,12 @@ export default function StrettoView({
                             selectedId={selectedCandidate?.id || null} 
                             onSelect={setSelectedCandidate} 
                             checkedIds={checkedIds} 
-                            onToggleCheck={toggleCheck} 
+                            onToggleCheck={toggleCheck}
+                            onFilterContextChange={setDiscoveryFilterContext}
                         />
                         <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle)} />
                     </div>
-                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput)} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
+                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
                 </>
             ) : (
                 <StrettoChainView 

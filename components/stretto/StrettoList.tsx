@@ -1,8 +1,9 @@
 
-import React, { useState, useMemo } from 'react';
-import { StrettoCandidate, StrettoGrade } from '../../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { StrettoCandidate, StrettoGrade, StrettoListFilterContext, StrettoListSortKey } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { DocumentTextIcon } from '../Icons';
+import { normalizeLexical, normalizeNumericStrings } from './filterContextNormalization';
 
 interface StrettoListProps {
     candidates: StrettoCandidate[];
@@ -13,13 +14,15 @@ interface StrettoListProps {
     onSelect: (candidate: StrettoCandidate) => void;
     checkedIds: Set<string>;
     onToggleCheck: (id: string) => void;
+    onFilterContextChange?: (context: StrettoListFilterContext) => void;
 }
 
-type SortKey = 'grade' | 'delay' | 'interval' | 'dissonance' | 'nct' | 'intensity' | 'entry' | 'errors';
+
+type SortKey = StrettoListSortKey;
 
 export default function StrettoList({ 
     candidates, processedResults, gradeFilter, setGradeFilter, 
-    selectedId, onSelect, checkedIds, onToggleCheck 
+    selectedId, onSelect, checkedIds, onToggleCheck, onFilterContextChange
 }: StrettoListProps) {
     const [sortKey, setSortKey] = useState<SortKey>('grade');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -118,6 +121,32 @@ export default function StrettoList({
         });
         return res;
     }, [finalFilteredResults, sortKey, sortDir]);
+
+    useEffect(() => {
+        if (!onFilterContextChange) return;
+        onFilterContextChange({
+            selectedPitches: normalizeLexical(selectedPitches),
+            selectedIntervals: normalizeLexical(selectedIntervals),
+            selectedDelays: normalizeNumericStrings(selectedDelays),
+            maxDissonance,
+            onlyResolved,
+            visibleCount: sortedResults.length,
+            totalCount: processedResults.length,
+            sortKey,
+            sortDir,
+        });
+    }, [
+        onFilterContextChange,
+        selectedPitches,
+        selectedIntervals,
+        selectedDelays,
+        maxDissonance,
+        onlyResolved,
+        sortedResults.length,
+        processedResults.length,
+        sortKey,
+        sortDir,
+    ]);
 
     const handleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
