@@ -17,6 +17,7 @@ export const SCORING = {
 
     // 2. Structure
     TRUNCATION_PENALTY_PER_BEAT: 20,
+    MISSING_CHAIN_STEP_PENALTY: 200,
     MONOTONY_PENALTY: 100,
 
     // 3. Harmonic Quality

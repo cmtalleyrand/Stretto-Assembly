@@ -289,6 +289,14 @@ export function calculateStrettoScore(
         }
     }
 
+    // P_missing_steps: penalize short fallback chains relative to configured target length
+    const missingStepCount = Math.max(0, options.targetChainLength - chain.length);
+    if (missingStepCount > 0) {
+        const missingStepPenalty = missingStepCount * SCORING.MISSING_CHAIN_STEP_PENALTY;
+        score -= missingStepPenalty;
+        penalties.push({ reason: `P_missing_steps: ${missingStepCount} missing step(s)`, points: missingStepPenalty });
+    }
+
     // P_monotony: -100 if any transposition > 50% of entries
     const transCounts = new Map<number, number>();
     chain.forEach(e => {
