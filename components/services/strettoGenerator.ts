@@ -638,7 +638,19 @@ export async function searchStrettoChains(
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
+            // Within this node's transposition enumeration, try the first representative
+            // of each t2norm class before its octave duplicates. The seenClasses set is
+            // local to this (chain, delayTicks) pair — no global state, no cross-branch bleed.
+            const seenClasses = new Set<number>();
+            const fresh: number[] = [], deferred: number[] = [];
             for (const t of transpositions) {
+                const tClass = ((t - chain[chain.length - 1].transposition) % 12 + 12) % 12;
+                (seenClasses.has(tClass) ? deferred : fresh).push(t);
+                seenClasses.add(tClass);
+            }
+            const orderedTranspositions = [...fresh, ...deferred];
+
+            for (const t of orderedTranspositions) {
                 // Gatekeeper B: voice cannot enter at same transposition as the immediately preceding voice
                 if (t === chain[chain.length - 1].transposition) continue;
 
