@@ -4,7 +4,7 @@ import { ConversionOptions, MidiEventType, PianoRollTrackData } from '../../type
 import { quantizeNotes, performInversion, performModalConversion, pruneOverlaps } from './midiTransform';
 import { distributeToVoices } from './midiVoices';
 
-export function copyAndTransformTrackEvents(sourceTrack: Track, destinationTrack: Track, options: ConversionOptions, eventsToDelete: Set<MidiEventType>, header: Midi['header']) {
+function copyAndTransformTrackEventsInternal(sourceTrack: Track, destinationTrack: Track, options: ConversionOptions, eventsToDelete: Set<MidiEventType>, header: Midi['header']) {
     let timeScale = options.noteTimeScale;
     if (options.tempoChangeMode === 'time' && options.originalTempo > 0 && options.tempo > 0) {
         timeScale *= options.originalTempo / options.tempo;
@@ -54,6 +54,25 @@ export function copyAndTransformTrackEvents(sourceTrack: Track, destinationTrack
         ((sourceTrack as any).programChanges || []).forEach((pc: any) => { (destinationTrack as any).addProgramChange(pc.number, transformEvent(pc).time); });
     }
 }
+
+export function runStrettoPipelineQuantizedInput(sourceTrack: Track, destinationTrack: Track, options: ConversionOptions, eventsToDelete: Set<MidiEventType>, header: Midi['header']) {
+    // Quantized-input profile is intentionally deterministic and delegates to the shared transform core.
+    copyAndTransformTrackEventsInternal(sourceTrack, destinationTrack, options, eventsToDelete, header);
+}
+
+export function runLegacyTransformPipeline(sourceTrack: Track, destinationTrack: Track, options: ConversionOptions, eventsToDelete: Set<MidiEventType>, header: Midi['header']) {
+    // Compatibility profile preserves legacy transform behavior for existing workflows.
+    copyAndTransformTrackEventsInternal(sourceTrack, destinationTrack, options, eventsToDelete, header);
+}
+
+export function copyAndTransformTrackEvents(sourceTrack: Track, destinationTrack: Track, options: ConversionOptions, eventsToDelete: Set<MidiEventType>, header: Midi['header']) {
+    if (options.processingProfile === 'legacy_transform') {
+        runLegacyTransformPipeline(sourceTrack, destinationTrack, options, eventsToDelete, header);
+        return;
+    }
+    runStrettoPipelineQuantizedInput(sourceTrack, destinationTrack, options, eventsToDelete, header);
+}
+
 
 export function createPreviewMidi(originalMidi: Midi, trackId: number, eventsToDelete: Set<MidiEventType>, options: ConversionOptions): Midi {
     if (trackId < 0 || trackId >= originalMidi.tracks.length) throw new Error(`Track ${trackId} not found.`);

@@ -5,9 +5,11 @@ This document defines the **Desired End State** of the application. All future c
 
 ## 1. Data Pipeline Architecture
 
-The application assumes **Pre-Processed / Intentional MIDI Inputs**. 
-*   **No Aggressive Correction:** The system should NOT attempt complex "Shadow Quantization" or heuristic grid alignment to fix performance errors. It assumes the input MIDI is musically correct or that any desired quantization is simple and manual.
-*   **Analysis Integrity:** While we do not auto-correct the notes, the **Analysis Reports** (Rhythm, Harmony) must still provide deep insights into the structure of the data as provided.
+The application assumes **Pre-Processed / Intentional MIDI Inputs** and defaults to the `stretto_quantized` profile.
+*   **Default Behavior:** Generation and search workflows operate on the quantized-input pipeline by default.
+*   **Compatibility Behavior:** `legacy_transform` exists only to preserve historical outputs and is explicitly opt-in in UI state.
+*   **No Aggressive Correction:** The default system should NOT attempt heuristic recovery of expressive timing artifacts.
+*   **Analysis Integrity:** Analysis reports (Rhythm, Harmony) must still provide deep structural insight on the transformed output.
 
 
 ## 2. Harmonic Analysis & Arpeggiation

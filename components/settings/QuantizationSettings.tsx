@@ -15,6 +15,7 @@ interface QuantizationSettingsProps {
     setShiftToMeasure: (val: boolean) => void;
     
     quantizationWarning?: { message: string, details: string[] } | null;
+    showLegacyControls?: boolean;
 }
 
 export default function QuantizationSettings({
@@ -22,7 +23,8 @@ export default function QuantizationSettings({
     secondaryRhythm, setSecondaryRhythm,
     quantizeDurationMin, setQuantizeDurationMin,
     shiftToMeasure, setShiftToMeasure,
-    quantizationWarning
+    quantizationWarning,
+    showLegacyControls = false
 }: QuantizationSettingsProps) {
 
     const [showWarningDetails, setShowWarningDetails] = useState(false);
@@ -132,27 +134,28 @@ export default function QuantizationSettings({
                     <p className="text-xs text-gray-500 mt-2">Allows notes to snap to this grid if they don't fit the Primary grid.</p>
                 </div>
 
-                {/* Advanced / Shared Settings */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-                     <div>
-                        <label className="block text-sm font-medium text-gray-400 mb-1">Minimum Note Value (Output)</label>
-                        <select id="quantizeDurationMin" value={quantizeDurationMin} onChange={(e) => setQuantizeDurationMin(e.target.value)} className="block w-full bg-gray-darker border border-gray-medium rounded-md shadow-sm py-2 px-3 sm:text-sm text-gray-light">
-                            <option value="off">Same as Grid (Auto)</option>
-                            {MUSICAL_TIME_OPTIONS.filter(o => o.value > 0).map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                        </select>
-                        <p className="text-xs text-gray-500 mt-1">Staccato notes shorter than this will be extended.</p>
+                {showLegacyControls && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-400 mb-1">Minimum Note Value (Output)</label>
+                            <select id="quantizeDurationMin" value={quantizeDurationMin} onChange={(e) => setQuantizeDurationMin(e.target.value)} className="block w-full bg-gray-darker border border-gray-medium rounded-md shadow-sm py-2 px-3 sm:text-sm text-gray-light">
+                                <option value="off">Same as Grid (Auto)</option>
+                                {MUSICAL_TIME_OPTIONS.filter(o => o.value > 0).map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                            </select>
+                            <p className="text-xs text-gray-500 mt-1">Legacy control: force output-duration floor independent of primary grid.</p>
+                        </div>
+                        
+                        <div className="flex items-end">
+                            <label className="flex items-center p-3 bg-gray-darker rounded-lg border border-gray-medium hover:border-brand-secondary/50 transition-colors cursor-pointer h-full w-full">
+                                <input type="checkbox" checked={shiftToMeasure} onChange={(e) => setShiftToMeasure(e.target.checked)} className="h-5 w-5 rounded bg-gray-dark border-gray-medium text-brand-primary focus:ring-brand-primary focus:ring-2" />
+                                <div className="ml-3">
+                                    <span className="font-semibold text-gray-light">Shift to Measure</span>
+                                    <p className="text-xs text-gray-400">Legacy control: rebase onset to measure boundary.</p>
+                                </div>
+                            </label>
+                        </div>
                     </div>
-                    
-                    <div className="flex items-end">
-                         <label className="flex items-center p-3 bg-gray-darker rounded-lg border border-gray-medium hover:border-brand-secondary/50 transition-colors cursor-pointer h-full w-full">
-                             <input type="checkbox" checked={shiftToMeasure} onChange={(e) => setShiftToMeasure(e.target.checked)} className="h-5 w-5 rounded bg-gray-dark border-gray-medium text-brand-primary focus:ring-brand-primary focus:ring-2" />
-                             <div className="ml-3">
-                                 <span className="font-semibold text-gray-light">Shift to Measure</span>
-                                 <p className="text-xs text-gray-400">Align start to measure 1.</p>
-                             </div>
-                         </label>
-                    </div>
-                </div>
+                )}
 
                 {quantizationWarning && (
                     <div className="mt-2 p-3 bg-yellow-900/50 border border-yellow-700 text-yellow-200 rounded-lg text-sm flex flex-col gap-2">

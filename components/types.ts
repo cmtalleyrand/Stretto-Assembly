@@ -36,6 +36,8 @@ export type OutputStrategy = 'combine' | 'separate_tracks' | 'separate_voices';
 
 export type VoiceAssignmentMode = 'auto' | 'manual'; 
 
+export type ProcessingProfile = 'stretto_quantized' | 'legacy_transform';
+
 export type RhythmFamily = 'Simple' | 'Triple' | 'Quintuplet';
 
 export type HarmonicAnalysisMode = 'attack' | 'sustain' | 'hybrid' | 'arpeggio_window' | 'hia_v2';
@@ -86,6 +88,7 @@ export interface ModalConversionOptions {
 }
 
 export interface ConversionOptions {
+    processingProfile: ProcessingProfile;
     tempo: number;
     timeSignature: {
         numerator: number;

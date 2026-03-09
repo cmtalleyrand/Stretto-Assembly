@@ -99,6 +99,11 @@ export const useMidiActions = ({
              setAppState(AppState.ERROR);
              return;
         }
+
+        const effectiveOptions = {
+            ...conversionOptions,
+            processingProfile: conversionOptions.processingProfile || 'stretto_quantized'
+        };
         
         try {
             await new Promise(resolve => setTimeout(resolve, 100));
@@ -108,7 +113,7 @@ export const useMidiActions = ({
             const { report, auditLog } = generateGeminiScore(
                 midiData, 
                 sortedTracks, 
-                conversionOptions, 
+                effectiveOptions, 
                 contextText
             );
             

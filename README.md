@@ -22,14 +22,15 @@ Deep inspection of MIDI data to inform processing decisions.
   - *Beat Synced:* Harmonies normalized to specific beat buckets (Harmonic Rhythm).
 - **Voice Leading:** Histograms of melodic intervals to analyze the smoothness of lines.
 
-### 3. Transformation Pipeline (The "Shadow Grid")
-The application uses a sophisticated 2-pass "Shadow Quantization" engine logic:
+### 3. Transformation Pipeline
+The application defaults to the **Stretto Quantized** processing profile, optimized for pre-quantized, metrically intentional MIDI input:
 - **Quantization:** Snap notes to standard (1/4, 1/8, 1/16) or tuplets grids (Triplets, Quintuplets).
 - **Duration Constraints:** Enforce minimum note lengths to clean up staccato performance or "ghost notes".
 - **Overlap Pruning:** Intelligently shorten notes to prevent monophonic overlap conflicts, essential for clean sheet music export.
 - **Time Scaling:** Change tempo or double/half-time the rhythm (Augmentation/Diminution).
 - **Inversion:** Retrograde (play backwards) support, including segmented inversion (e.g., reverse every measure).
 - **Modal Conversion:** Remap pitches from one scale/mode to another (e.g., C Major to C Minor).
+- **Compatibility Mode:** A separate **Legacy Transform** profile remains available behind a collapsed settings panel for backward compatibility only; it is intentionally non-default.
 
 ### 4. Voice Separation
 An algorithm to split polyphonic tracks (piano/guitar) into separate monophonic voices (SATB).
@@ -79,6 +80,7 @@ Raw performance MIDI (e.g. recorded live) will produce unreliable results becaus
 2.  **Select:** Check the boxes for the tracks you want to include.
 3.  **Analyze (Optional):** Click the "Chart" icon on a track to view its key, rhythm, and chords. Use this to determine the best settings.
 4.  **Configure:**
+    - *Processing Profile:* Keep **Stretto Quantized** as default for generation/search. Open the collapsed Legacy section only when reproducing historical behavior.
     - *Tempo & Time:* Set the target BPM or Time Signature.
     - *Transform:* Transpose, Scale Time, or apply Inversion.
     - *Voice Separation:* Configure how chords are split if "Separate Voices" is chosen.

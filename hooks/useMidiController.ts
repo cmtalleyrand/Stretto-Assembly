@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Midi } from '@tonejs/midi';
-import { AppState, TrackInfo, MidiEventCounts, MidiEventType, TempoChangeMode, ConversionOptions, PianoRollTrackData, TrackAnalysisData, OutputStrategy, RhythmRule, VoiceAssignmentMode, AnalysisSection } from '../types';
+import { AppState, TrackInfo, MidiEventCounts, MidiEventType, TempoChangeMode, ConversionOptions, PianoRollTrackData, TrackAnalysisData, OutputStrategy, RhythmRule, VoiceAssignmentMode, AnalysisSection, ProcessingProfile } from '../types';
 import { getQuantizationWarning, stopPlayback } from '../components/services/midiService';
 import { MUSICAL_TIME_OPTIONS } from '../constants';
 import { useMidiActions } from './useMidiActions';
@@ -60,6 +60,7 @@ export const useMidiController = () => {
       }
   ]);
   const [contextText, setContextText] = useState<string>('');
+  const [processingProfile, setProcessingProfile] = useState<ProcessingProfile>('stretto_quantized');
 
   const [isPianoRollVisible, setIsPianoRollVisible] = useState<boolean>(false);
   const [pianoRollTrackData, setPianoRollTrackData] = useState<PianoRollTrackData | null>(null);
@@ -103,6 +104,7 @@ export const useMidiController = () => {
         debugLogging: false
     }]);
     setContextText(''); setAnalyzedTrackData(null); setIsAnalysisModalOpen(false);
+    setProcessingProfile('stretto_quantized');
   }, []);
 
   const getConversionOptions = useCallback((): ConversionOptions | null => {
@@ -114,6 +116,7 @@ export const useMidiController = () => {
     if (isNaN(parsedTsNum) || isNaN(parsedTsDenom) || parsedTsNum <= 0 || parsedTsDenom <= 0) return null;
 
     return {
+        processingProfile,
         tempo: parsedTempo,
         timeSignature: { numerator: parsedTsNum, denominator: parsedTsDenom },
         tempoChangeMode, originalTempo, transposition: 0, noteTimeScale: 1, inversionMode: 'off',
@@ -126,7 +129,7 @@ export const useMidiController = () => {
         voiceSeparationDisableChords: disableChords, voiceAssignmentMode, outputStrategy: 'separate_voices', 
         sections: analysisSections, voiceNames
     };
-  }, [newTempo, newTimeSignature, originalTempo, tempoChangeMode, primaryRhythm, secondaryRhythm, quantizeDurationMin, shiftToMeasure, detectOrnaments, softOverlapToleranceIndex, pitchBias, maxVoices, disableChords, voiceAssignmentMode, midiData, analysisSections, voiceNames, modalRoot, modalModeName, isModalConversionEnabled, modalMappings]);
+  }, [processingProfile, newTempo, newTimeSignature, originalTempo, tempoChangeMode, primaryRhythm, secondaryRhythm, quantizeDurationMin, shiftToMeasure, detectOrnaments, softOverlapToleranceIndex, pitchBias, maxVoices, disableChords, voiceAssignmentMode, midiData, analysisSections, voiceNames, modalRoot, modalModeName, isModalConversionEnabled, modalMappings]);
 
   const quantizationWarning = useMemo(() => {
       if (!midiData || !primaryRhythm.enabled) return null;
@@ -160,13 +163,13 @@ export const useMidiController = () => {
         modalRoot, modalModeName, isModalConversionEnabled, modalMappings,
         primaryRhythm, secondaryRhythm, quantizationValue: primaryRhythm.enabled ? primaryRhythm.minNoteValue : 'off', 
         quantizeDurationMin, shiftToMeasure, detectOrnaments, softOverlapToleranceIndex, pitchBias, maxVoices, disableChords,
-        voiceAssignmentMode, outputStrategy, eventsToDelete, analysisSections, contextText, voiceNames
+        voiceAssignmentMode, outputStrategy, eventsToDelete, analysisSections, contextText, voiceNames, processingProfile
     },
     setters: {
         setNewTempo, setNewTimeSignature, setTempoChangeMode, setModalRoot, setModalModeName, setIsModalConversionEnabled, setModalMappings,
         setPrimaryRhythm, setSecondaryRhythm, setQuantizeDurationMin, setShiftToMeasure, setDetectOrnaments, setSoftOverlapToleranceIndex,
         setPitchBias, setMaxVoices, setDisableChords, setVoiceAssignmentMode, setOutputStrategy, setIsPianoRollVisible, setEventsToDelete,
-        setAnalysisSections, setContextText, setVoiceNames, setIsAnalysisModalOpen
+        setAnalysisSections, setContextText, setVoiceNames, setIsAnalysisModalOpen, setProcessingProfile
     },
     actions: {
         ...actions,
