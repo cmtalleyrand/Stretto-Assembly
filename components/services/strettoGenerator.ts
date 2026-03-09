@@ -398,10 +398,6 @@ export async function searchStrettoChains(
     if (options.thirdSixthMode !== 'None') {
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
-    // Within each mod-12 equivalence class, sort by |t| so canonical (smallest-interval)
-    // forms are tried before octave-displaced variants. This is a static, zero-overhead
-    // way to deprioritise octave duplicates without any cross-branch state.
-    transpositions.sort((a, b) => Math.abs(a) - Math.abs(b));
     
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     variants.forEach((vA, iA) => {
@@ -534,6 +530,11 @@ export async function searchStrettoChains(
         return sig;
     }
 
+    // Tracks (vA, vB, d1, t1mod12, d2, t2mod12) tuples that have been recursed into.
+    // Used to push octave-class duplicates of already-explored triplets to the back
+    // of the transposition loop at sibling nodes.
+    const seenTripleBaseSigs = new Set<string>();
+
     async function solve(
         chain: StrettoChainOption[],
         variantIndices: number[],
@@ -655,7 +656,25 @@ export async function searchStrettoChains(
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
-            for (const t of transpositions) {
+            // Partition transpositions: push octave-class duplicates of already-recursed
+            // triplets to the back. Computed fresh per node so it never prunes — it only
+            // reorders within the current node's budget.
+            let orderedTranspositions = transpositions;
+            if (depth >= 2) {
+                const _d1 = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
+                const _t1norm = ((chain[depth-1].transposition - chain[depth-2].transposition) % 12 + 12) % 12;
+                const _vA = variantIndices[depth-2];
+                const _vB = variantIndices[depth-1];
+                const fresh: number[] = [], deferred: number[] = [];
+                for (const t of transpositions) {
+                    const t2norm = ((t - chain[depth-1].transposition) % 12 + 12) % 12;
+                    (seenTripleBaseSigs.has(`${_vA}_${_vB}_${_d1}_${_t1norm}_${delayTicks}_${t2norm}`)
+                        ? deferred : fresh).push(t);
+                }
+                orderedTranspositions = [...fresh, ...deferred];
+            }
+
+            for (const t of orderedTranspositions) {
                 // Gatekeeper B: voice cannot enter at same transposition as the immediately preceding voice
                 if (t === chain[chain.length - 1].transposition) continue;
 
@@ -761,6 +780,15 @@ export async function searchStrettoChains(
                         newVoiceState[v] = absStartTicks + variant.lengthTicks;
                         
                         const nextChain = [...chain, tempNextEntry];
+
+                        // Record only here — after all checks, at the point of actual recursion —
+                        // so quota/harmonic/stratification/metric rejections don't pollute the set.
+                        if (depth >= 2) {
+                            const _rd1 = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
+                            const _rt1norm = ((chain[depth-1].transposition - chain[depth-2].transposition) % 12 + 12) % 12;
+                            const _rt2norm = ((t - chain[depth-1].transposition) % 12 + 12) % 12;
+                            seenTripleBaseSigs.add(`${variantIndices[depth-2]}_${variantIndices[depth-1]}_${_rd1}_${_rt1norm}_${delayTicks}_${_rt2norm}`);
+                        }
 
                         await solve(
                             nextChain,
