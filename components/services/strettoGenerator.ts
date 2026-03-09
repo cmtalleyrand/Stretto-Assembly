@@ -531,10 +531,10 @@ export async function searchStrettoChains(
     }
 
     async function solve(
-        chain: StrettoChainOption[],
-        variantIndices: number[],
-        voiceEndTimesTicks: number[],
-        nInv: number,
+        chain: StrettoChainOption[], 
+        variantIndices: number[], 
+        voiceEndTimesTicks: number[], 
+        nInv: number, 
         nTrunc: number,
         nRestricted: number,
         nFree: number
@@ -595,13 +595,8 @@ export async function searchStrettoChains(
         } else if (depth > 1) {
             const prevDelayTicks = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
             
-            // Max Expansion: A delay can expand by at most 1 eighth-note, and only if
-            // the result would still be strictly under half the subject length.
-            if (prevDelayTicks + delayStep < subjectLengthTicks / 2) {
-                maxD = Math.min(maxD, prevDelayTicks + delayStep);
-            } else {
-                maxD = Math.min(maxD, prevDelayTicks); // Expansion blocked: would reach/exceed half subject length
-            }
+            // Max Expansion: A delay cannot be more than 1 eighth-note longer than the previous delay.
+            maxD = Math.min(maxD, prevDelayTicks + delayStep);
             
             if (depth >= 3) {
                 const prevPrevDelayTicks = Math.round(chain[depth-2].startBeat * ppq) - Math.round(chain[depth-3].startBeat * ppq);
@@ -637,14 +632,6 @@ export async function searchStrettoChains(
                 if (Math.abs(delayTicks - prevDelayTicks) < 1) {
                     const isDelayShort = delayTicks <= (prevEntryLengthTicks / 3);
                     if (!(isFinalThird && isDelayShort)) continue;
-                }
-                // Minimum Contraction: when contracting, must contract by at least a full beat,
-                // unless in the final third and the new delay is under 1/3 of subject length
-                // (in which case an eighth-note contraction is acceptable).
-                if (delayTicks < prevDelayTicks) {
-                    const isShort = delayTicks <= (prevEntryLengthTicks / 3);
-                    const minContraction = (isFinalThird && isShort) ? delayStep : ppq;
-                    if (prevDelayTicks - delayTicks < minContraction) continue;
                 }
             }
 
