@@ -667,7 +667,7 @@ export async function searchStrettoChains(
                 const deprioritized: number[] = [];
                 for (const t of transpositions) {
                     const t2norm = ((t - chain[depth-1].transposition) % 12 + 12) % 12;
-                    if (seenTripleBaseSigs.has(`${_vA}_${_vB}_${_d1}_${_t1norm}_${t2norm}`)) {
+                    if (seenTripleBaseSigs.has(`${_vA}_${_vB}_${_d1}_${_t1norm}_${delayTicks}_${t2norm}`)) {
                         deprioritized.push(t);
                     } else {
                         fresh.push(t);
@@ -693,10 +693,6 @@ export async function searchStrettoChains(
                         const t2 = t - chain[depth-1].transposition;
                         const tripleKey = `${vA}_${vB}_${vC}_${d1}_${d2}_${t1}_${t2}`;
                         if (!validTriples.has(tripleKey)) continue;
-                        // Record mod-12 base sig so octave variants are deprioritised in sibling branches
-                        const t1norm = (t1 % 12 + 12) % 12;
-                        const t2norm = (t2 % 12 + 12) % 12;
-                        seenTripleBaseSigs.add(`${vA}_${vB}_${d1}_${t1norm}_${t2norm}`);
                     }
 
                     const variant = variants[varIdx];
@@ -786,6 +782,15 @@ export async function searchStrettoChains(
                         newVoiceState[v] = absStartTicks + variant.lengthTicks;
                         
                         const nextChain = [...chain, tempNextEntry];
+
+                        // Record only when we actually recurse, so branches rejected by quota /
+                        // harmonic / stratification / metric checks do not pollute the seen set.
+                        if (depth >= 2) {
+                            const _rd1 = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
+                            const _rt1norm = ((chain[depth-1].transposition - chain[depth-2].transposition) % 12 + 12) % 12;
+                            const _rt2norm = ((t - chain[depth-1].transposition) % 12 + 12) % 12;
+                            seenTripleBaseSigs.add(`${variantIndices[depth-2]}_${variantIndices[depth-1]}_${_rd1}_${_rt1norm}_${delayTicks}_${_rt2norm}`);
+                        }
 
                         await solve(
                             nextChain,
