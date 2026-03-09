@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { StrettoCandidate, StrettoGrade, StrettoListFilterContext, StrettoListSortKey } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { DocumentTextIcon } from '../Icons';
+import { normalizeLexical, normalizeNumericStrings } from './filterContextNormalization';
 
 interface StrettoListProps {
     candidates: StrettoCandidate[];
@@ -124,9 +125,9 @@ export default function StrettoList({
     useEffect(() => {
         if (!onFilterContextChange) return;
         onFilterContextChange({
-            selectedPitches: Array.from(selectedPitches.values()) as string[],
-            selectedIntervals: (Array.from(selectedIntervals.values()) as string[]).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
-            selectedDelays: (Array.from(selectedDelays.values()) as string[]).sort((a, b) => parseFloat(a) - parseFloat(b)),
+            selectedPitches: normalizeLexical(selectedPitches),
+            selectedIntervals: normalizeLexical(selectedIntervals),
+            selectedDelays: normalizeNumericStrings(selectedDelays),
             maxDissonance,
             onlyResolved,
             visibleCount: sortedResults.length,
