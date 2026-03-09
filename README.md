@@ -35,7 +35,7 @@ Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that
 
 | Rule | Condition |
 |------|-----------|
-| **A.1 Global Uniqueness** | All delays `> Sb/3` must be distinct across the **entire chain**, not just adjacent pairs |
+| **A.1 Local Uniqueness** | All delays `> Sb/3` must be distinct across the **entire chain**, just adjacent pairs - but efficient to prune early|
 | **A.2 Half-length trigger** | If `d_{n-1} > Sb/2`, then `d_n < d_{n-1} − 0.5` |
 | **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
 | **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
