@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { computeDelayPenaltyBreakdown } from './strettoScoring';
+import { computeDelayPenaltyBreakdown, calculateStrettoScore, SubjectVariant } from './strettoScoring';
+import { StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 function testRepeatedDelayPenalty() {
   const delays = [1, 1, 1.5, 2];
@@ -42,11 +43,53 @@ function testNoEarlyExpansionPenaltyInFinalThird() {
   assert.equal(expansionOnly, 0, 'Expansion in final third must not be penalized by early-expansion rule.');
 }
 
+
+function testMissingStepPenalty() {
+  const variants: SubjectVariant[] = [
+    {
+      type: 'N',
+      truncationBeats: 0,
+      lengthTicks: 480,
+      notes: [{ relTick: 0, durationTicks: 480, pitch: 60 }],
+    },
+  ];
+
+  const chain: StrettoChainOption[] = [
+    { startBeat: 0, transposition: 0, type: 'N', length: 480, voiceIndex: 0 },
+    { startBeat: 1, transposition: 12, type: 'N', length: 480, voiceIndex: 1 },
+  ];
+
+  const options: StrettoSearchOptions = {
+    ensembleTotal: 4,
+    targetChainLength: 4,
+    subjectVoiceIndex: 0,
+    truncationMode: 'None',
+    truncationTargetBeats: 0,
+    inversionMode: 'None',
+    useChromaticInversion: false,
+    thirdSixthMode: 'None',
+    pivotMidi: 60,
+    requireConsonantEnd: false,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.3,
+    scaleRoot: 0,
+    scaleMode: 'Major',
+  };
+
+  const scored = calculateStrettoScore(chain, variants, [0, 0], options, 480);
+  const missingPenalty = scored.scoreLog?.penalties
+    .filter((item) => item.reason.startsWith('P_missing_steps:'))
+    .reduce((sum, item) => sum + item.points, 0) ?? 0;
+
+  assert.equal(missingPenalty, 400, 'Missing-step penalty must be -200 for each missing step (2 * 200).');
+}
+
 function runRegression() {
   testRepeatedDelayPenalty();
   testClusterPenaltyCanAccumulateAtCenter();
   testEarlyExpansionPenaltyBeforeFinalThird();
   testNoEarlyExpansionPenaltyInFinalThird();
+  testMissingStepPenalty();
   console.log('PASS: stretto distance-penalty regression suite.');
 }
 
