@@ -38,6 +38,9 @@ const DIAGNOSTIC_CASES: DiagnosticCase[] = [
       assert.equal(result.stats.stopReason, 'Success');
       assert.ok(result.results.length > 0, 'Expected at least one chain when target depth is modest.');
       assert.ok(result.stats.maxDepthReached >= 4, 'Expected solver to reach target depth 4.');
+      assert.ok(result.stats.stageStats, 'Expected stageStats payload to be present.');
+      assert.ok(result.stats.stageStats!.pairwiseTotal >= result.stats.stageStats!.pairwiseCompatible, 'Pairwise compatible count cannot exceed total pairwise combinations.');
+      assert.ok(result.stats.stageStats!.tripleCandidates >= result.stats.stageStats!.harmonicallyValidTriples, 'Harmonically valid triples cannot exceed triple candidates.');
     }
   },
   {

@@ -336,6 +336,9 @@ export async function searchStrettoChains(
     options: StrettoSearchOptions,
     ppq: number
 ): Promise<StrettoSearchReport> {
+
+    const toPairKey = (vA: number, vB: number, d: number, t: number): string => `${vA}_${vB}_${d}_${t}`;
+    const toTripleKey = (vA: number, vB: number, vC: number, d1: number, d2: number, t1: number, t2: number): string => `${vA}_${vB}_${vC}_${d1}_${d2}_${t1}_${t2}`;
     
     const startTime = Date.now();
     let nodesVisited = 0;
@@ -343,7 +346,27 @@ export async function searchStrettoChains(
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
-    if (baseNotes.length === 0) return { results: [], stats: { nodesVisited: 0, timeMs: 0, stopReason: 'Exhausted', maxDepthReached: 0 } };
+    if (baseNotes.length === 0) {
+        return {
+            results: [],
+            stats: {
+                nodesVisited: 0,
+                timeMs: 0,
+                stopReason: 'Exhausted',
+                maxDepthReached: 0,
+                stageStats: {
+                    validDelayCount: 0,
+                    transpositionCount: 0,
+                    pairwiseTotal: 0,
+                    pairwiseCompatible: 0,
+                    tripleCandidates: 0,
+                    triplePairwiseRejected: 0,
+                    tripleVoiceRejected: 0,
+                    harmonicallyValidTriples: 0
+                }
+            }
+        };
+    }
     
     const subjectLengthTicks = Math.max(...baseNotes.map(n => n.relTick + n.durationTicks));
     
@@ -386,7 +409,7 @@ export async function searchStrettoChains(
         }
     }
 
-    const compatTable = new Map<string, number>();
+    const pairwiseCompatibleTriplets = new Map<string, number>();
     const validDelays: number[] = [];
     const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
     
@@ -399,23 +422,38 @@ export async function searchStrettoChains(
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
     
+    const stageStats = {
+        validDelayCount: validDelays.length,
+        transpositionCount: transpositions.length,
+        pairwiseTotal: 0,
+        pairwiseCompatible: 0,
+        tripleCandidates: 0,
+        triplePairwiseRejected: 0,
+        tripleVoiceRejected: 0,
+        harmonicallyValidTriples: 0
+    };
+
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     variants.forEach((vA, iA) => {
         variants.forEach((vB, iB) => {
             validDelays.forEach(d => {
                 transpositions.forEach(t => {
-                    const key = `${iA}_${iB}_${d}_${t}`;
+                    stageStats.pairwiseTotal++;
+                    const key = toPairKey(iA, iB, d, t);
                     const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
-                    if (res.compatible) compatTable.set(key, res.dissonanceRatio);
+                    if (res.compatible) {
+                        pairwiseCompatibleTriplets.set(key, res.dissonanceRatio);
+                        stageStats.pairwiseCompatible++;
+                    }
                 });
             });
         });
     });
 
     // --- PRECOMPUTE TRIPLES ---
-    const validTriples = new Set<string>();
+    const harmonicallyValidTriples = new Set<string>();
     const validPairsList: {vA: number, vB: number, d: number, t: number}[] = [];
-    compatTable.forEach((_, key) => {
+    pairwiseCompatibleTriplets.forEach((_, key) => {
         const [vA, vB, d, t] = key.split('_').map(Number);
         validPairsList.push({vA, vB, d, t});
     });
@@ -429,6 +467,7 @@ export async function searchStrettoChains(
     for (const p1 of validPairsList) {
         const nextPairs = pairsByFirst.get(p1.vB) || [];
         for (const p2 of nextPairs) {
+            stageStats.tripleCandidates++;
             const d1 = p1.d;
             const d2 = p2.d;
             
@@ -443,8 +482,11 @@ export async function searchStrettoChains(
             
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
-                const keyAC = `${vA}_${vC}_${dAC}_${tAC}`;
-                if (!compatTable.has(keyAC)) continue;
+                const keyAC = toPairKey(vA, vC, dAC, tAC);
+                if (!pairwiseCompatibleTriplets.has(keyAC)) {
+                    stageStats.triplePairwiseRejected++;
+                    continue;
+                }
             }
             
             // Rule: Voice Spacing for the Triple
@@ -497,10 +539,14 @@ export async function searchStrettoChains(
                 if (possibleAssignment) break;
             }
             
-            if (!possibleAssignment) continue;
+            if (!possibleAssignment) {
+                stageStats.tripleVoiceRejected++;
+                continue;
+            }
             
-            const key = `${vA}_${p1.vB}_${vC}_${d1}_${d2}_${p1.t}_${p2.t}`;
-            validTriples.add(key);
+            const key = toTripleKey(vA, p1.vB, vC, d1, d2, p1.t, p2.t);
+            harmonicallyValidTriples.add(key);
+            stageStats.harmonicallyValidTriples++;
         }
     }
 
@@ -682,8 +728,8 @@ export async function searchStrettoChains(
                         const d2 = delayTicks;
                         const t1 = chain[depth-1].transposition - chain[depth-2].transposition;
                         const t2 = t - chain[depth-1].transposition;
-                        const tripleKey = `${vA}_${vB}_${vC}_${d1}_${d2}_${t1}_${t2}`;
-                        if (!validTriples.has(tripleKey)) continue;
+                        const tripleKey = toTripleKey(vA, vB, vC, d1, d2, t1, t2);
+                        if (!harmonicallyValidTriples.has(tripleKey)) continue;
                     }
 
                     const variant = variants[varIdx];
@@ -712,8 +758,8 @@ export async function searchStrettoChains(
                         if (absStartTicks < prevEndTicks) {
                             const relDelay = absStartTicks - prevStartTicks;
                             const relTrans = t - prevE.transposition;
-                            const key = `${prevVarIdx}_${varIdx}_${relDelay}_${relTrans}`;
-                            if (!compatTable.has(key)) {
+                            const key = toPairKey(prevVarIdx, varIdx, relDelay, relTrans);
+                            if (!pairwiseCompatibleTriplets.has(key)) {
                                 harmonicFail = true;
                                 break;
                             }
@@ -851,7 +897,8 @@ export async function searchStrettoChains(
             nodesVisited,
             timeMs: Date.now() - startTime,
             stopReason: stopReason,
-            maxDepthReached: maxDepth
+            maxDepthReached: maxDepth,
+            stageStats
         }
     };
 }
