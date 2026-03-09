@@ -530,11 +530,15 @@ export async function searchStrettoChains(
         return sig;
     }
 
+    // Tracks mod-12-normalised base sigs of triplets already explored, so octave
+    // transpositions of the same combination are deprioritised in the search order.
+    const seenTripleBaseSigs = new Set<string>();
+
     async function solve(
-        chain: StrettoChainOption[], 
-        variantIndices: number[], 
-        voiceEndTimesTicks: number[], 
-        nInv: number, 
+        chain: StrettoChainOption[],
+        variantIndices: number[],
+        voiceEndTimesTicks: number[],
+        nInv: number,
         nTrunc: number,
         nRestricted: number,
         nFree: number
@@ -595,8 +599,13 @@ export async function searchStrettoChains(
         } else if (depth > 1) {
             const prevDelayTicks = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
             
-            // Max Expansion: A delay cannot be more than 1 eighth-note longer than the previous delay.
-            maxD = Math.min(maxD, prevDelayTicks + delayStep);
+            // Max Expansion: A delay can expand by at most 1 eighth-note, and only if
+            // the result would still be strictly under half the subject length.
+            if (prevDelayTicks + delayStep < subjectLengthTicks / 2) {
+                maxD = Math.min(maxD, prevDelayTicks + delayStep);
+            } else {
+                maxD = Math.min(maxD, prevDelayTicks); // Expansion blocked: would reach/exceed half subject length
+            }
             
             if (depth >= 3) {
                 const prevPrevDelayTicks = Math.round(chain[depth-2].startBeat * ppq) - Math.round(chain[depth-3].startBeat * ppq);
@@ -633,12 +642,41 @@ export async function searchStrettoChains(
                     const isDelayShort = delayTicks <= (prevEntryLengthTicks / 3);
                     if (!(isFinalThird && isDelayShort)) continue;
                 }
+                // Minimum Contraction: when contracting, must contract by at least a full beat,
+                // unless in the final third and the new delay is under 1/3 of subject length
+                // (in which case an eighth-note contraction is acceptable).
+                if (delayTicks < prevDelayTicks) {
+                    const isShort = delayTicks <= (prevEntryLengthTicks / 3);
+                    const minContraction = (isFinalThird && isShort) ? delayStep : ppq;
+                    if (prevDelayTicks - delayTicks < minContraction) continue;
+                }
             }
 
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
-            for (const t of transpositions) {
+            // Deprioritise transpositions that are octave-equivalents (mod 12) of triplet
+            // combinations already explored earlier in the search.
+            let orderedTranspositions = transpositions;
+            if (depth >= 2) {
+                const _d1 = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
+                const _t1norm = ((chain[depth-1].transposition - chain[depth-2].transposition) % 12 + 12) % 12;
+                const _vA = variantIndices[depth-2];
+                const _vB = variantIndices[depth-1];
+                const fresh: number[] = [];
+                const deprioritized: number[] = [];
+                for (const t of transpositions) {
+                    const t2norm = ((t - chain[depth-1].transposition) % 12 + 12) % 12;
+                    if (seenTripleBaseSigs.has(`${_vA}_${_vB}_${_d1}_${_t1norm}_${t2norm}`)) {
+                        deprioritized.push(t);
+                    } else {
+                        fresh.push(t);
+                    }
+                }
+                orderedTranspositions = [...fresh, ...deprioritized];
+            }
+
+            for (const t of orderedTranspositions) {
                 // Gatekeeper B: voice cannot enter at same transposition as the immediately preceding voice
                 if (t === chain[chain.length - 1].transposition) continue;
 
@@ -655,6 +693,10 @@ export async function searchStrettoChains(
                         const t2 = t - chain[depth-1].transposition;
                         const tripleKey = `${vA}_${vB}_${vC}_${d1}_${d2}_${t1}_${t2}`;
                         if (!validTriples.has(tripleKey)) continue;
+                        // Record mod-12 base sig so octave variants are deprioritised in sibling branches
+                        const t1norm = (t1 % 12 + 12) % 12;
+                        const t2norm = (t2 % 12 + 12) % 12;
+                        seenTripleBaseSigs.add(`${vA}_${vB}_${d1}_${t1norm}_${t2norm}`);
                     }
 
                     const variant = variants[varIdx];
