@@ -27,7 +27,7 @@ export const SCORING = {
     HARMONY_NCT_PENALTY_MULT: 10, // Per beat of NCT
 
     // 4. Polyphony density
-    POLYPHONY_DENSITY_MULT: 200,
+    POLYPHONY_DENSITY_MULT: 400,
     POLYPHONY_DENSITY_OFFSET: 2,
 };
 
