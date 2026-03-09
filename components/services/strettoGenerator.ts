@@ -643,16 +643,31 @@ export async function searchStrettoChains(
             // local to this (chain, delayTicks) pair — no global state, no cross-branch bleed.
             const seenClasses = new Set<number>();
             const fresh: number[] = [], deferred: number[] = [];
+            const prevTransposition = chain[chain.length - 1].transposition;
             for (const t of transpositions) {
-                const tClass = ((t - chain[chain.length - 1].transposition) % 12 + 12) % 12;
-                (seenClasses.has(tClass) ? deferred : fresh).push(t);
+                const tClass = ((t - prevTransposition) % 12 + 12) % 12;
+                if (seenClasses.has(tClass)) {
+                    deferred.push(t);
+                    continue;
+                }
+
+                // Only mark a class as seen once its first representative survives
+                // transposition-level screening (Gatekeeper B). This avoids pushing
+                // all octave-equivalent alternatives to deferred when the first
+                // representative is rejected outright.
+                if (t === prevTransposition) {
+                    fresh.push(t);
+                    continue;
+                }
+
+                fresh.push(t);
                 seenClasses.add(tClass);
             }
             const orderedTranspositions = [...fresh, ...deferred];
 
             for (const t of orderedTranspositions) {
                 // Gatekeeper B: voice cannot enter at same transposition as the immediately preceding voice
-                if (t === chain[chain.length - 1].transposition) continue;
+                if (t === prevTransposition) continue;
 
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
 
