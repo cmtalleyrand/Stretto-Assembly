@@ -352,6 +352,16 @@ export interface StrettoSearchReport {
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        stageStats?: {
+            validDelayCount: number;
+            transpositionCount: number;
+            pairwiseTotal: number;
+            pairwiseCompatible: number;
+            tripleCandidates: number;
+            triplePairwiseRejected: number;
+            tripleVoiceRejected: number;
+            harmonicallyValidTriples: number;
+        };
     };
 }
 
