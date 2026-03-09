@@ -276,6 +276,20 @@ export interface TrackAnalysisData {
 
 export type StrettoGrade = 'STRONG' | 'VIABLE' | 'INVALID';
 
+export type StrettoListSortKey = 'grade' | 'delay' | 'interval' | 'dissonance' | 'nct' | 'intensity' | 'entry' | 'errors';
+
+export interface StrettoListFilterContext {
+    selectedPitches: string[];
+    selectedIntervals: string[];
+    selectedDelays: string[];
+    maxDissonance: number;
+    onlyResolved: boolean;
+    visibleCount: number;
+    totalCount: number;
+    sortKey: StrettoListSortKey;
+    sortDir: 'asc' | 'desc';
+}
+
 export interface StrettoError {
     tick: number;
     timeFormatted: string;

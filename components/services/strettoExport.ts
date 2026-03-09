@@ -23,7 +23,7 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
     });
     
     // Group notes by voice index
-    const notesByVoice: Record<number, any[]> = {};
+    const notesByVoice: Record<number, StrettoCandidate['notes']> = {};
     candidate.notes.forEach(n => {
         const v = n.voiceIndex ?? 0;
         if (!notesByVoice[v]) notesByVoice[v] = [];
@@ -47,7 +47,7 @@ export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq:
         track.channel = vIdx % 16;
         track.instrument.number = 0; // Acoustic Grand Piano default
         
-        const voiceNotes = notesByVoice[vIdx];
+        const voiceNotes = [...notesByVoice[vIdx]].sort((a, b) => a.ticks - b.ticks || a.midi - b.midi);
         voiceNotes.forEach(n => {
             track.addNote({
                 midi: n.midi,
@@ -104,7 +104,7 @@ export function downloadStrettoSelection(candidates: StrettoCandidate[], sourceP
 
     candidates.forEach((candidate, cIdx) => {
         // Group notes by voice index
-        const notesByVoice: Record<number, any[]> = {};
+        const notesByVoice: Record<number, StrettoCandidate['notes']> = {};
         candidate.notes.forEach(n => {
             const v = n.voiceIndex ?? 0;
             if (!notesByVoice[v]) notesByVoice[v] = [];
@@ -112,6 +112,7 @@ export function downloadStrettoSelection(candidates: StrettoCandidate[], sourceP
         });
 
         const voiceIndices = Object.keys(notesByVoice).map(Number).sort((a,b) => a-b);
+        if (voiceIndices.length === 0) return;
         const totalInCand = Math.max(...voiceIndices) + 1;
 
         voiceIndices.forEach(vIdx => {
@@ -121,8 +122,9 @@ export function downloadStrettoSelection(candidates: StrettoCandidate[], sourceP
             
             // Channel offset per candidate to avoid cross-talk if possible
             track.channel = (cIdx * 2 + vIdx) % 16;
-            
-            const voiceNotes = notesByVoice[vIdx];
+            track.instrument.number = 0;
+
+            const voiceNotes = [...notesByVoice[vIdx]].sort((a, b) => a.ticks - b.ticks || a.midi - b.midi);
             voiceNotes.forEach(n => {
                 track.addNote({
                     midi: n.midi,

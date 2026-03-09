@@ -8,8 +8,8 @@
 ## Phase 5: Assembly Optimization & LLM Integration (In Progress)
 *   [x] **Task 5.1:** Implement Fixed Entry Pivot logic for inversion consistency.
 *   [x] **Task 5.2:** Professionalize Discovery Grid filters (Multi-select, numeric range).
-*   [ ] **Task 5.3:** Refine Gemini Assembly prompts to respect advanced filtering context.
-*   [ ] **Task 5.4:** Finalize multi-track MIDI export for complex chains.
+*   [x] **Task 5.3:** Refine Gemini Assembly prompts to respect advanced filtering context.
+*   [x] **Task 5.4:** Finalize multi-track MIDI export for complex chains.
 
 ## Phase 6: Mandatory Triplet-Assembly Architecture Completion (Revised)
 

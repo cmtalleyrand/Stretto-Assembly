@@ -1,6 +1,6 @@
 
-import React, { useState, useMemo } from 'react';
-import { StrettoCandidate, StrettoGrade } from '../../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { StrettoCandidate, StrettoGrade, StrettoListFilterContext, StrettoListSortKey } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { DocumentTextIcon } from '../Icons';
 
@@ -13,13 +13,15 @@ interface StrettoListProps {
     onSelect: (candidate: StrettoCandidate) => void;
     checkedIds: Set<string>;
     onToggleCheck: (id: string) => void;
+    onFilterContextChange?: (context: StrettoListFilterContext) => void;
 }
 
-type SortKey = 'grade' | 'delay' | 'interval' | 'dissonance' | 'nct' | 'intensity' | 'entry' | 'errors';
+
+type SortKey = StrettoListSortKey;
 
 export default function StrettoList({ 
     candidates, processedResults, gradeFilter, setGradeFilter, 
-    selectedId, onSelect, checkedIds, onToggleCheck 
+    selectedId, onSelect, checkedIds, onToggleCheck, onFilterContextChange
 }: StrettoListProps) {
     const [sortKey, setSortKey] = useState<SortKey>('grade');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -118,6 +120,32 @@ export default function StrettoList({
         });
         return res;
     }, [finalFilteredResults, sortKey, sortDir]);
+
+    useEffect(() => {
+        if (!onFilterContextChange) return;
+        onFilterContextChange({
+            selectedPitches: Array.from(selectedPitches.values()) as string[],
+            selectedIntervals: (Array.from(selectedIntervals.values()) as string[]).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+            selectedDelays: (Array.from(selectedDelays.values()) as string[]).sort((a, b) => parseFloat(a) - parseFloat(b)),
+            maxDissonance,
+            onlyResolved,
+            visibleCount: sortedResults.length,
+            totalCount: processedResults.length,
+            sortKey,
+            sortDir,
+        });
+    }, [
+        onFilterContextChange,
+        selectedPitches,
+        selectedIntervals,
+        selectedDelays,
+        maxDissonance,
+        onlyResolved,
+        sortedResults.length,
+        processedResults.length,
+        sortKey,
+        sortDir,
+    ]);
 
     const handleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
