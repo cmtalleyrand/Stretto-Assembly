@@ -16,7 +16,8 @@ import StrettoConfig, { SearchResolution } from './stretto/StrettoConfig';
 import StrettoList from './stretto/StrettoList';
 import StrettoInspector from './stretto/StrettoInspector';
 import StrettoFooter from './stretto/StrettoFooter';
-import StrettoChainView from './stretto/StrettoChainView'; 
+import StrettoChainView from './stretto/StrettoChainView';
+import PianoRoll from './PianoRoll';
 
 interface StrettoViewProps {
     notes: RawNote[]; 
@@ -114,8 +115,23 @@ export default function StrettoView({
 
     const subjectNotes = useMemo(() => {
         if (mode === 'abc') return parseSimpleAbc(abcInput, ppq || 480);
-        return initialNotes; 
+        return initialNotes;
     }, [mode, abcInput, initialNotes, ppq]);
+
+    const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+    const abcKeyLabel = useMemo(() => {
+        if (mode !== 'abc') return null;
+        const parsed = extractKeyFromAbc(abcInput);
+        if (!parsed) return 'C Major (default – no K: field)';
+        return `${NOTE_NAMES[parsed.root]} ${parsed.mode}`;
+    }, [mode, abcInput]);
+
+    const subjectPianoRollData = useMemo(() => ({
+        notes: subjectNotes.map(n => ({ ...n, voiceIndex: 0 })),
+        name: 'Subject',
+        ppq: ppq || 480,
+        timeSignature: { numerator: ts.num, denominator: ts.den },
+    }), [subjectNotes, ppq, ts]);
 
     // Clear selection when subject changes
     useEffect(() => {
@@ -410,6 +426,15 @@ export default function StrettoView({
                             </div>
                         )}
                         <textarea value={abcInput} onChange={e => setAbcInput(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded p-3 text-white font-mono h-40 outline-none focus:border-brand-primary" />
+                        {abcKeyLabel && (
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[11px] text-gray-500 uppercase tracking-wide font-bold">ABC Parsing Key:</span>
+                                <span className="bg-brand-primary/20 text-brand-primary border border-brand-primary/40 px-2 py-0.5 rounded font-mono text-xs font-bold">
+                                    {abcKeyLabel}
+                                </span>
+                                <span className="text-[10px] text-gray-600 italic">applied to note accidentals</span>
+                            </div>
+                        )}
                     </div>
 
                     <aside className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 space-y-3">
@@ -439,6 +464,15 @@ export default function StrettoView({
                             </select>
                         </div>
                     </aside>
+                </div>
+            )}
+
+            {mode === 'abc' && subjectNotes.length > 0 && (
+                <div className="mb-6">
+                    <label className="block text-sm text-gray-400 font-bold uppercase tracking-wider mb-2">Subject Preview</label>
+                    <div className="h-56 bg-gray-900 rounded border border-gray-700 overflow-hidden">
+                        <PianoRoll trackData={subjectPianoRollData} />
+                    </div>
                 </div>
             )}
 
