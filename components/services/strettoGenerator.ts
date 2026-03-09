@@ -594,27 +594,29 @@ export async function searchStrettoChains(
             minD = Math.floor(prevEntryLengthTicks * 0.5);
         } else if (depth > 1) {
             const prevDelayTicks = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
-            
-            // Max Expansion: A delay cannot be more than 1 eighth-note longer than the previous delay.
-            maxD = Math.min(maxD, prevDelayTicks + delayStep);
-            
+            const prevSubjectLengthTicks = chain[depth - 1].length;
+
+            // Rule A: If d{n-1} > Sb/2, force at least 0.5 beat contraction.
+            if (prevDelayTicks > (prevSubjectLengthTicks / 2)) {
+                maxD = Math.min(maxD, prevDelayTicks - delayStep);
+            } else {
+                // Otherwise, legacy elasticity limit (max +0.5 beat expansion) can still apply.
+                maxD = Math.min(maxD, prevDelayTicks + delayStep);
+            }
+
             if (depth >= 3) {
                 const prevPrevDelayTicks = Math.round(chain[depth-2].startBeat * ppq) - Math.round(chain[depth-3].startBeat * ppq);
-                
-                // Expansion Reaction
-                if (prevDelayTicks > prevPrevDelayTicks) {
-                    const isDelayShort = prevDelayTicks <= (prevEntryLengthTicks / 3);
-                    const relaxation = (isFinalThird && isDelayShort) ? 0 : delayStep;
-                    maxD = Math.min(maxD, prevPrevDelayTicks - relaxation);
-                }
-                
-                // n+2 Rule
-                const isDelayShort = prevPrevDelayTicks <= (prevEntryLengthTicks / 3);
-                if (isFinalThird && isDelayShort) {
-                    maxD = Math.min(maxD, prevPrevDelayTicks + delayStep);
-                } else {
+
+                // Rule B: If previous delay expanded and is > Sb/3, current must contract by >=0.5 beat vs two entries ago.
+                if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
                     maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
                 }
+            }
+
+            // Rule C: After truncated entry, must contract by >=1 beat unless previous delay < Sb/3.
+            const prevIsTruncated = chain[depth - 1].length < chain[0].length;
+            if (prevIsTruncated && prevDelayTicks >= (prevSubjectLengthTicks / 3)) {
+                maxD = Math.min(maxD, prevDelayTicks - (2 * delayStep));
             }
         }
 
@@ -630,7 +632,7 @@ export async function searchStrettoChains(
                 const prevDelayTicks = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
                 // No Repeats
                 if (Math.abs(delayTicks - prevDelayTicks) < 1) {
-                    const isDelayShort = delayTicks <= (prevEntryLengthTicks / 3);
+                    const isDelayShort = prevDelayTicks <= (prevEntryLengthTicks / 3);
                     if (!(isFinalThird && isDelayShort)) continue;
                 }
             }

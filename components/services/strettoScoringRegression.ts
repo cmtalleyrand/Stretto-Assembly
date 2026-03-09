@@ -84,12 +84,51 @@ function testMissingStepPenalty() {
   assert.equal(missingPenalty, 400, 'Missing-step penalty must be -200 for each missing step (2 * 200).');
 }
 
+
+function testPostTruncationContractionPenalty() {
+  const variants: SubjectVariant[] = [
+    { type: 'N', truncationBeats: 0, lengthTicks: 4800, notes: [{ relTick: 0, durationTicks: 4800, pitch: 60 }] },
+    { type: 'N', truncationBeats: 9.5, lengthTicks: 4560, notes: [{ relTick: 0, durationTicks: 4560, pitch: 64 }] },
+  ];
+
+  const chain: StrettoChainOption[] = [
+    { startBeat: 0, transposition: 0, type: 'N', length: 4800, voiceIndex: 0 },
+    { startBeat: 6, transposition: 7, type: 'N', length: 4560, voiceIndex: 1 },
+    { startBeat: 11.5, transposition: 12, type: 'N', length: 4800, voiceIndex: 2 },
+  ];
+
+  const options: StrettoSearchOptions = {
+    ensembleTotal: 4,
+    targetChainLength: 3,
+    subjectVoiceIndex: 0,
+    truncationMode: 3,
+    truncationTargetBeats: 9.5,
+    inversionMode: 'None',
+    useChromaticInversion: false,
+    thirdSixthMode: 'None',
+    pivotMidi: 60,
+    requireConsonantEnd: false,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.3,
+    scaleRoot: 0,
+    scaleMode: 'Major',
+  };
+
+  const scored = calculateStrettoScore(chain, variants, [0, 1, 0], options, 480);
+  const postTruncPenalty = scored.scoreLog?.penalties
+    .filter((item) => item.reason.startsWith('P_distance: post-truncation contraction miss'))
+    .reduce((sum, item) => sum + item.points, 0) ?? 0;
+
+  assert.equal(postTruncPenalty, 40, 'Expected post-truncation contraction miss to incur 40 points.');
+}
+
 function runRegression() {
   testRepeatedDelayPenalty();
   testClusterPenaltyCanAccumulateAtCenter();
   testEarlyExpansionPenaltyBeforeFinalThird();
   testNoEarlyExpansionPenaltyInFinalThird();
   testMissingStepPenalty();
+  testPostTruncationContractionPenalty();
   console.log('PASS: stretto distance-penalty regression suite.');
 }
 

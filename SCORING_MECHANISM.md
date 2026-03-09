@@ -25,7 +25,7 @@ $$ S_{total} = U_{quality} - P_{distance} - P_{truncation} - P_{monotony} - P_{h
 
 where
 
-$$ Q = 0.2S1 + 0.3S2 + 0.2S3, \quad U_{quality} = -1000Q $$
+$$ Q = 0.2S1 + 0.3S2 + 0.4S3, \quad U_{quality} = -1000Q $$
 
 and `ScoreLog.base = 0`.
 
@@ -34,12 +34,13 @@ and `ScoreLog.base = 0`.
 #### A. Quality Utility Penalty ($U_{quality}$)
 *   `S1`: Unweighted dissonance ratio (`TotalDissonantTime / TotalPolyphonicTime`).
 *   `S2`: Strong-beat-weighted dissonance ratio (1.5x weight on strong beats).
-*   `S3`: Non-chord-tone ratio over slices with at least 3 active voices.
+*   `S3`: Non-chord-tone ratio over slices with at least 3 active voices (weighted at 2x prior emphasis).
 
 #### B. Distance Structure ($P_{distance}$)
 *   **Repeated Delay:** $-20$ points per repeated delay occurrence beyond first use.
 *   **Local Delay Cluster:** $-10$ points per adjacent delay within $0.5$ beat (left/right counted independently).
 *   **Early Expansion:** $-40$ points per expansion before the final-third boundary.
+*   **Post-Truncation Contraction Miss:** $-40$ points when a truncated entry is not followed by >=1 beat contraction (except short-delay exemption).
 
 #### C. Truncation ($P_{truncation}$)
 *   **Cost:** $-20$ points per *beat* of the subject removed.
@@ -60,7 +61,7 @@ Rewards "Hyper-Stretto" (entries that occur very soon after the previous one).
     *   If $Delay_e < 50\%$ of Subject Length: $+25$ points.
 
 #### B. Polyphony Density ($B_{polyphony}$)
-*   Duration-weighted average active voices contributes additive density reward.
+*   Duration-weighted average active voices contributes additive density reward (multiplier doubled from 200 to 400).
 
 #### C. Harmonic Reward ($R_{harmony}$)
 *   Stable full-chord occupancy contributes positive reward.

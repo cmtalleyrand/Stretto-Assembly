@@ -6,7 +6,7 @@ import { analyzeStrettoHarmony } from './strettoHarmonyAnalysis';
 // --- Weights & Constants ---
 const W_S1 = 0.2; // Unweighted Dissonance
 const W_S2 = 0.3; // Weighted Dissonance
-const W_S3 = 0.2; // NCT Ratio
+const W_S3 = 0.4; // NCT Ratio (emphasized)
 
 // Chord Templates (Pitch Class Sets) for Metric S3
 const CHORD_TEMPLATES: number[][] = [
@@ -82,6 +82,12 @@ export function computeDelayPenaltyBreakdown(delays: number[], chainLength: numb
     }
 
     return { total, items };
+}
+
+
+
+function isTruncatedEntry(entry: StrettoChainOption, chain: StrettoChainOption[]): boolean {
+    return entry.length < chain[0].length;
 }
 
 function countNCTs(pitches: number[]): number {
@@ -278,6 +284,25 @@ export function calculateStrettoScore(
     const delayPenalty = computeDelayPenaltyBreakdown(delays, chain.length);
     score -= delayPenalty.total;
     penalties.push(...delayPenalty.items);
+
+    // P_distance: truncated-entry contraction requirement
+    // Rule: after a truncated entry, the next delay must contract by >= 1 beat unless previous delay < Sb/3.
+    for (let i = 2; i < chain.length; i++) {
+        const prevEntry = chain[i - 1];
+        const prevDelay = chain[i - 1].startBeat - chain[i - 2].startBeat;
+        const currentDelay = chain[i].startBeat - chain[i - 1].startBeat;
+        if (!isTruncatedEntry(prevEntry, chain)) continue;
+        if (prevDelay < (subjectLengthBeats / 3)) continue;
+        const requiredMaxDelay = prevDelay - 1;
+        if (currentDelay > requiredMaxDelay) {
+            const penalty = SCORING.EARLY_EXPANSION_PENALTY;
+            score -= penalty;
+            penalties.push({
+                reason: `P_distance: post-truncation contraction miss (entry ${i + 1}; need <= ${requiredMaxDelay.toFixed(2)}B)`,
+                points: penalty
+            });
+        }
+    }
 
     // P_truncation: penalise beats removed
     for (let i = 0; i < chain.length; i++) {

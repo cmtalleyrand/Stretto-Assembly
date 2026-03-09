@@ -48,15 +48,50 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
 
     const renderScoreTooltip = (log?: ScoreLog) => {
         if (!log) return null;
+
+        const group = (items: ScoreLog['bonuses'] | ScoreLog['penalties'], predicates: Array<{ title: string; test: (reason: string) => boolean }>) => {
+            const grouped = predicates.map((predicate) => ({
+                title: predicate.title,
+                items: items.filter((item) => predicate.test(item.reason))
+            })).filter((bucket) => bucket.items.length > 0);
+
+            const groupedItems = new Set(grouped.flatMap((bucket) => bucket.items));
+            const remaining = items.filter((item) => !groupedItems.has(item));
+            if (remaining.length > 0) grouped.push({ title: 'Other', items: remaining });
+            return grouped;
+        };
+
+        const bonusGroups = group(log.bonuses, [
+            { title: 'Compactness', test: (reason) => reason.startsWith('B_compactness:') },
+            { title: 'Polyphony / Harmony Rewards', test: (reason) => reason.startsWith('Polyphony density') || reason.startsWith('Harmony:') }
+        ]);
+        const penaltyGroups = group(log.penalties, [
+            { title: 'Quality Metrics (S1/S2/S3)', test: (reason) => reason.startsWith('S1:') || reason.startsWith('S2:') || reason.startsWith('S3:') },
+            { title: 'Distance Constraints', test: (reason) => reason.startsWith('P_distance:') },
+            { title: 'Structure Constraints', test: (reason) => reason.startsWith('P_truncation:') || reason.startsWith('P_missing_steps:') || reason.startsWith('P_monotony') }
+        ]);
+
         return (
-            <div className="absolute right-0 top-full mt-2 z-50 w-64 bg-black border border-gray-600 rounded p-3 shadow-xl text-xs text-gray-300">
+            <div className="absolute right-0 top-full mt-2 z-50 w-[28rem] bg-black border border-gray-600 rounded p-3 shadow-xl text-xs text-gray-300">
                 <div className="font-bold text-gray-200 border-b border-gray-600 pb-1 mb-2">Score Breakdown ({log.total.toFixed(0)})</div>
-                <div className="flex justify-between mb-1"><span>Base</span><span>{log.base}</span></div>
-                {log.bonuses.map((b, i) => (
-                    <div key={`b-${i}`} className="flex justify-between text-green-400"><span>+ {b.reason}</span><span>{b.points}</span></div>
+                <div className="flex justify-between mb-2 text-gray-400"><span>Base</span><span>{log.base}</span></div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-brand-primary mb-1">Rewards</div>
+                {bonusGroups.map((grouping, gi) => (
+                    <div key={`bg-${gi}`} className="mb-1">
+                        <div className="text-[10px] text-green-300/80">{grouping.title}</div>
+                        {grouping.items.map((b, i) => (
+                            <div key={`b-${gi}-${i}`} className="flex justify-between text-green-400"><span>+ {b.reason}</span><span>{b.points}</span></div>
+                        ))}
+                    </div>
                 ))}
-                {log.penalties.map((p, i) => (
-                    <div key={`p-${i}`} className="flex justify-between text-red-400"><span>- {p.reason}</span><span>{p.points}</span></div>
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-red-300 mt-2 mb-1">Penalties</div>
+                {penaltyGroups.map((grouping, gi) => (
+                    <div key={`pg-${gi}`} className="mb-1">
+                        <div className="text-[10px] text-red-300/80">{grouping.title}</div>
+                        {grouping.items.map((p, i) => (
+                            <div key={`p-${gi}-${i}`} className="flex justify-between text-red-400"><span>- {p.reason}</span><span>{p.points}</span></div>
+                        ))}
+                    </div>
                 ))}
             </div>
         );
@@ -138,7 +173,7 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                             className={`p-2 cursor-pointer hover:bg-gray-800 transition-colors flex flex-col gap-2 ${isSelected ? 'bg-gray-800 border-l-4 border-l-brand-primary' : ''}`}
                         >
                             <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap justify-end">
                                     {hasVariations && (
                                         <button 
                                             onClick={(e) => toggleExpand(e, res.id)}
@@ -154,9 +189,9 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                                         </span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    {renderMetricBadge("Diss", res.dissonanceRatio || 0, "Dissonance Ratio")}
-                                    {renderMetricBadge("NCT", res.nctRatio || 0, "Non-Chord Tone Ratio")}
+                                <div className="flex items-center gap-2 flex-wrap justify-end">
+                                    {renderMetricBadge("DISS", res.dissonanceRatio || 0, "Dissonance Ratio (S1/S2)")}
+                                    {renderMetricBadge("NCT", res.nctRatio || 0, "Non-Chord Tone Ratio (S3)")}
                                     
                                     <div className="relative">
                                         <button 
@@ -197,9 +232,9 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                                             className={`p-2 border-l border-gray-700 hover:bg-gray-800/50 cursor-pointer transition-colors ${isVarSelected ? 'bg-gray-800/80 border-l-2 border-l-brand-secondary' : ''}`}
                                         >
                                             <div className="flex justify-between items-center mb-1">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-wrap justify-end">
                                                     <span className="text-[10px] font-bold text-gray-500">Variation {vIdx + 1}</span>
-                                                    {renderMetricBadge("Diss", v.dissonanceRatio || 0, "Diss Ratio")}
+                                                    {renderMetricBadge("DISS", v.dissonanceRatio || 0, "Dissonance Ratio (S1/S2)")}
                                                     {renderMetricBadge("NCT", v.nctRatio || 0, "NCT Ratio")}
                                                 </div>
                                                 <span className="text-[9px] text-gray-600">Score: {v.score.toFixed(0)}</span>
