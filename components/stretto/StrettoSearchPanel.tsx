@@ -302,7 +302,7 @@ export default function StrettoSearchPanel({
                     {renderConstraintSelector("Inverted Entries", "inversionMode", options.inversionMode)}
                     <div className={`flex flex-col gap-1 px-1 transition-opacity ${options.inversionMode === 'None' ? 'opacity-30 pointer-events-none' : ''}`}>
                         <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-gray-500 whitespace-nowrap">Scale:</span>
+                            <span className="text-[10px] text-gray-500 whitespace-nowrap">Inv. Scale:</span>
                             <select 
                                 value={options.scaleRoot}
                                 onChange={(e) => handleChange('scaleRoot', parseInt(e.target.value))}
