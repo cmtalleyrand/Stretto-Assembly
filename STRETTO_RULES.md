@@ -12,6 +12,13 @@ Notation: $n$ is entry index, $d_n$ is delay between entries $(n-1)\rightarrow n
 2. **Expansion recoil trigger:** if $d_{n-1} > d_{n-2}$ and $d_{n-1} > Sb/3$, then $d_n < d_{n-2} - 0.5B$.
 3. **Post-truncation contraction:** after a truncated entry, the next delay must contract by at least $1B$, unless $d_{n-1} < Sb/3$.
 
+## 🚨 Critical P4/P5/P8 Policy Clarification
+1. **Parallel perfect 4ths are permitted unconditionally.**
+2. **P4 dissonance is contextual only:** a perfect fourth is dissonant exclusively when its lower note is the bass in the active sonority.
+3. **Parallel perfect 5ths/octaves are invalid if either condition holds:**
+   - consecutive pair boundaries each contain a P5/P8 parallel event;
+   - a P5/P8 parallel event occurs and both adjacent delays satisfy `d >= Sb/3`.
+
 ## 1. Hard Constraints (The "Gatekeepers")
 Any chain candidate that violates *any* of these rules is immediately discarded (pruned) during the search process.
 
@@ -77,7 +84,7 @@ Distance penalty decomposition:
 *   **Contextual:** P4 is dissonant **only** against the bass.
 
 ### Parallel Motion Check
-Both voices moving into a Perfect 5th or Octave interval from another Perfect interval of the same class is a fatal error.
+Both voices moving into a Perfect 5th or Octave interval from another Perfect interval of the same class is a fatal error subject to chain-context gating: consecutive boundary occurrence is always invalid, and any occurrence is invalid when neither adjacent delay is below `Sb/3`. Parallel P4 is explicitly permitted.
 
 ## 5. Explicitly Removed Legacy Additions
 * per-unique-distance reward,
