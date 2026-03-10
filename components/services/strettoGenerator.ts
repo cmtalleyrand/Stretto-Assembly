@@ -28,12 +28,36 @@ interface PairwiseCompatibilityRecord {
     maxDissonanceRunEvents: number;
 }
 
+interface DagNodeIdentityParts {
+    chain: StrettoChainOption[];
+    variantIndices: number[];
+    voiceEndTimesTicks: number[];
+    nInv: number;
+    nTrunc: number;
+    nRestricted: number;
+    nFree: number;
+}
+
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
 }
 
 function roundToWholePercent(value: number): number {
     return Math.round(value * 100);
+}
+
+export function getChainStructuralSignature(chain: StrettoChainOption[], ppq: number): string {
+    let sig = '';
+    for (let i = 1; i < chain.length; i++) {
+        sig += (Math.round(chain[i].startBeat * ppq) - Math.round(chain[i - 1].startBeat * ppq));
+        sig += ',';
+    }
+    sig += '|';
+    for (let i = 0; i < chain.length; i++) {
+        sig += ((chain[i].transposition % 12 + 12) % 12);
+        sig += chain[i].type;
+    }
+    return sig;
 }
 
 export function toCanonicalTripletKey(parts: TripletKeyParts): string {
@@ -64,6 +88,14 @@ export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, 
 
 export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
     return stopTraversal ? [] : Array.from(nextLayer.values());
+}
+
+export function getDagNodeIdentity(parts: DagNodeIdentityParts, ppq: number): string {
+    const chainSig = getChainStructuralSignature(parts.chain, ppq);
+    const boundarySig = toOrderedBoundarySignature(parts.chain, ppq);
+    const variantSig = parts.variantIndices.join(',');
+    const lengthSig = parts.chain.map((entry) => entry.length).join(',');
+    return `${chainSig}|${boundarySig}|len:${lengthSig}|var:${variantSig}|v:${parts.voiceEndTimesTicks.join(',')}|q:${parts.nInv},${parts.nTrunc},${parts.nRestricted},${parts.nFree}`;
 }
 
 export function shouldYieldToEventLoop(iteration: number, interval: number = EVENT_LOOP_YIELD_INTERVAL): boolean {
@@ -688,19 +720,7 @@ export async function searchStrettoChains(
 
     const seenSignatures = new Set<string>();
     // Collision-free structural string key for deduplication
-    function getChainSignature(c: StrettoChainOption[]): string {
-        let sig = '';
-        for (let i = 1; i < c.length; i++) {
-            sig += (Math.round(c[i].startBeat * ppq) - Math.round(c[i - 1].startBeat * ppq));
-            sig += ',';
-        }
-        sig += '|';
-        for (let i = 0; i < c.length; i++) {
-            sig += ((c[i].transposition % 12 + 12) % 12);
-            sig += c[i].type;
-        }
-        return sig;
-    }
+    const getChainSignature = (c: StrettoChainOption[]): string => getChainStructuralSignature(c, ppq);
 
     interface DagNode {
         chain: StrettoChainOption[];
@@ -717,9 +737,15 @@ export async function searchStrettoChains(
     }
 
     function getDagNodeKey(node: DagNode): string {
-        const chainSig = getChainSignature(node.chain);
-        const boundarySig = getBoundarySignature(node.chain);
-        return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}`;
+        return getDagNodeIdentity({
+            chain: node.chain,
+            variantIndices: node.variantIndices,
+            voiceEndTimesTicks: node.voiceEndTimesTicks,
+            nInv: node.nInv,
+            nTrunc: node.nTrunc,
+            nRestricted: node.nRestricted,
+            nFree: node.nFree
+        }, ppq);
     }
 
     function expandNode(node: DagNode): DagNode[] {
@@ -950,6 +976,15 @@ export async function searchStrettoChains(
             operationCounter++;
             maxDepth = Math.max(maxDepth, node.chain.length);
 
+            if (node.chain.length === options.targetChainLength) {
+                const sig = getChainSignature(node.chain);
+                if (!seenSignatures.has(sig)) {
+                    seenSignatures.add(sig);
+                    unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
+                }
+                continue;
+            }
+
             if (shouldYieldToEventLoop(operationCounter)) {
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
             }
@@ -969,15 +1004,6 @@ export async function searchStrettoChains(
                 if (!terminationReason) terminationReason = 'NodeLimit';
                 stopTraversal = true;
                 break;
-            }
-
-            if (node.chain.length === options.targetChainLength) {
-                const sig = getChainSignature(node.chain);
-                if (!seenSignatures.has(sig)) {
-                    seenSignatures.add(sig);
-                    unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
-                }
-                continue;
             }
 
             if (node.chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {

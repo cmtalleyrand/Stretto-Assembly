@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { resolveNextFrontierLayer, searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
+import { getDagNodeIdentity, resolveNextFrontierLayer, searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -60,6 +60,34 @@ assert.equal(
   'pairwise lower-bound helper must accept records that satisfy both hard bounds'
 );
 
+
+const dagIdentityBase = {
+  chain: [
+    { startBeat: 0, transposition: 0, type: 'N' as const, length: 960, voiceIndex: 1 },
+    { startBeat: 1, transposition: 7, type: 'N' as const, length: 480, voiceIndex: 2 }
+  ],
+  voiceEndTimesTicks: [960, 0, 1440, 0],
+  nInv: 0,
+  nTrunc: 1,
+  nRestricted: 0,
+  nFree: 2
+};
+
+assert.notEqual(
+  getDagNodeIdentity({ ...dagIdentityBase, variantIndices: [0, 1] }, ppq),
+  getDagNodeIdentity({ ...dagIdentityBase, variantIndices: [0, 2] }, ppq),
+  'DAG node identity must discriminate variant-index histories because admissibility checks depend on per-position variant selections'
+);
+
+assert.notEqual(
+  getDagNodeIdentity({ ...dagIdentityBase, variantIndices: [0, 1], chain: [
+    { startBeat: 0, transposition: 0, type: 'N' as const, length: 960, voiceIndex: 1 },
+    { startBeat: 1, transposition: 7, type: 'N' as const, length: 720, voiceIndex: 2 }
+  ] }, ppq),
+  getDagNodeIdentity({ ...dagIdentityBase, variantIndices: [0, 1] }, ppq),
+  'DAG node identity must discriminate entry-length histories under truncation-enabled search'
+);
+
 const nextLayer = new Map<string, number>([['a', 1], ['b', 2]]);
 assert.deepEqual(
   resolveNextFrontierLayer(nextLayer, false),
@@ -68,8 +96,8 @@ assert.deepEqual(
 );
 assert.deepEqual(
   resolveNextFrontierLayer(nextLayer, true),
-  [1, 2],
-  'frontier resolver must preserve queued successors even after timeout/node-limit stop declaration'
+  [],
+  'frontier resolver must halt traversal immediately after timeout/node-limit stop declaration'
 );
 
 const subject: RawNote[] = [
@@ -116,5 +144,21 @@ assert.equal(typeof reportA.stats.stageStats.tripleLowerBoundRejected, 'number',
 assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
 assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');
 assert.equal(typeof reportA.stats.coverage.maxFrontierClassCount, 'number', 'coverage must include max frontier class count');
+
+
+const originalDateNow = Date.now;
+let nowTicks = 0;
+Date.now = () => {
+  nowTicks += 31000;
+  return nowTicks;
+};
+
+try {
+  const timeoutReport = await searchStrettoChains(subject, { ...options, targetChainLength: 2 }, ppq);
+  assert.equal(timeoutReport.stats.maxDepthReached, 2, 'forced-timeout scenario must still record reached target depth');
+  assert.ok(timeoutReport.results.length > 0, 'forced-timeout scenario must retain already-reached full-length chains');
+} finally {
+  Date.now = originalDateNow;
+}
 
 console.log('stretto canonical key + deterministic DAG traversal tests passed');
