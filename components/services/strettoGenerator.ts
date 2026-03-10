@@ -7,7 +7,68 @@ import { getInvertedPitch } from './strettoCore';
 // --- Constants & Types ---
 const MAX_SEARCH_NODES = 2000000; // Increased to allow deeper search
 const TIME_LIMIT_MS = 30000;
+const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
+const EVENT_LOOP_YIELD_INTERVAL = 2048;
+
+interface TripletKeyParts {
+    variantA: number;
+    variantB: number;
+    variantC: number;
+    delayAB: number;
+    delayBC: number;
+    transpositionAB: number;
+    transpositionBC: number;
+}
+
+interface PairwiseCompatibilityRecord {
+    dissonanceRatio: number;
+    hasFourth: boolean;
+    hasVoiceCrossing: boolean;
+    maxDissonanceRunEvents: number;
+}
+
+export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
+    return maxDepthReached >= Math.max(1, targetChainLength - 1);
+}
+
+function roundToWholePercent(value: number): number {
+    return Math.round(value * 100);
+}
+
+export function toCanonicalTripletKey(parts: TripletKeyParts): string {
+    return `${parts.variantA}|${parts.variantB}|${parts.variantC}|${parts.delayAB}|${parts.delayBC}|${parts.transpositionAB}|${parts.transpositionBC}`;
+}
+
+export function toBoundaryPairKey(left: StrettoChainOption, right: StrettoChainOption, ppq: number): string {
+    const leftStart = Math.round(left.startBeat * ppq);
+    const rightStart = Math.round(right.startBeat * ppq);
+    const delayTicks = rightStart - leftStart;
+    const transpositionDelta = right.transposition - left.transposition;
+    return `${left.voiceIndex}:${left.type}->${right.voiceIndex}:${right.type}|d${delayTicks}|t${transpositionDelta}`;
+}
+
+export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: number): string {
+    if (chain.length < 2) return 'root';
+    const boundaries: string[] = [];
+    for (let i = 1; i < chain.length; i++) {
+        // Preserve temporal order: expansion predicates depend on immediate predecessor state.
+        boundaries.push(`${i - 1}>${i}:${toBoundaryPairKey(chain[i - 1], chain[i], ppq)}`);
+    }
+    return boundaries.join('||');
+}
+
+export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, maxPairwiseDissonance: number): boolean {
+    return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
+}
+
+export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
+    return stopTraversal ? [] : Array.from(nextLayer.values());
+}
+
+export function shouldYieldToEventLoop(iteration: number, interval: number = EVENT_LOOP_YIELD_INTERVAL): boolean {
+    return iteration > 0 && iteration % interval === 0;
+}
 
 // --- Precomputation: Scales & Inversion ---
 
@@ -47,7 +108,7 @@ function checkCounterpointStructure(
     transposition: number,
     maxDissonanceRatio: number,
     ppqParam: number = 480
-): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number } {
+): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number } {
     
     // Collect all time points
     const timePoints = new Set<number>();
@@ -86,6 +147,10 @@ function checkCounterpointStructure(
     let dissonantTicks = 0;
     let strongBeatParallels = 0;
     let weakBeatParallels = 0;
+    let hasFourth = false;
+    let hasVoiceCrossing = false;
+    let previousOrderingSign = 0;
+    let maxDissonanceRunEvents = 0;
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -115,9 +180,15 @@ function checkCounterpointStructure(
 
         const p1 = activeA.pitch;
         const p2 = activeB.pitch;
+        const orderingSign = Math.sign(p1 - p2);
+        if (orderingSign !== 0) {
+            if (previousOrderingSign !== 0 && previousOrderingSign !== orderingSign) hasVoiceCrossing = true;
+            previousOrderingSign = orderingSign;
+        }
         const lo = Math.min(p1, p2);
         const hi = Math.max(p1, p2);
         const interval = (hi - lo) % 12;
+        if (interval === 5) hasFourth = true;
 
         // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
         if (prevP1 !== null && prevP2 !== null) {
@@ -149,12 +220,14 @@ function checkCounterpointStructure(
             // For run length, we count *events* (intervals), not ticks
             if (!lastIsDiss) dissRunLength = 1;
             else dissRunLength++;
+            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents };
 
             lastIsDiss = true;
         } else {
+            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             dissRunLength = 0;
             lastIsDiss = false;
         }
@@ -165,10 +238,11 @@ function checkCounterpointStructure(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents };
     }
 
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels };
+    maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents };
 }
 
 // Helper: Determine beat strength
@@ -338,11 +412,23 @@ export async function searchStrettoChains(
 ): Promise<StrettoSearchReport> {
 
     const toPairKey = (vA: number, vB: number, d: number, t: number): string => `${vA}_${vB}_${d}_${t}`;
-    const toTripleKey = (vA: number, vB: number, vC: number, d1: number, d2: number, t1: number, t2: number): string => `${vA}_${vB}_${vC}_${d1}_${d2}_${t1}_${t2}`;
+    const toTripleKey = (vA: number, vB: number, vC: number, d1: number, d2: number, t1: number, t2: number): string => toCanonicalTripletKey({
+        variantA: vA,
+        variantB: vB,
+        variantC: vC,
+        delayAB: d1,
+        delayBC: d2,
+        transpositionAB: t1,
+        transpositionBC: t2
+    });
     
     const startTime = Date.now();
     let nodesVisited = 0;
+    let edgesTraversed = 0;
     let maxDepth = 0;
+    let operationCounter = 0;
+    let activeTimeLimitMs = TIME_LIMIT_MS;
+    let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
@@ -359,10 +445,14 @@ export async function searchStrettoChains(
                     transpositionCount: 0,
                     pairwiseTotal: 0,
                     pairwiseCompatible: 0,
+                    pairwiseWithFourth: 0,
+                    pairwiseWithVoiceCrossing: 0,
                     tripleCandidates: 0,
                     triplePairwiseRejected: 0,
+                    tripleLowerBoundRejected: 0,
                     tripleVoiceRejected: 0,
-                    harmonicallyValidTriples: 0
+                    harmonicallyValidTriples: 0,
+                    deterministicDagMergedNodes: 0
                 }
             }
         };
@@ -409,7 +499,7 @@ export async function searchStrettoChains(
         }
     }
 
-    const pairwiseCompatibleTriplets = new Map<string, number>();
+    const pairwiseCompatibleTriplets = new Map<string, PairwiseCompatibilityRecord>();
     const validDelays: number[] = [];
     const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
     
@@ -427,10 +517,14 @@ export async function searchStrettoChains(
         transpositionCount: transpositions.length,
         pairwiseTotal: 0,
         pairwiseCompatible: 0,
+        pairwiseWithFourth: 0,
+        pairwiseWithVoiceCrossing: 0,
         tripleCandidates: 0,
         triplePairwiseRejected: 0,
+        tripleLowerBoundRejected: 0,
         tripleVoiceRejected: 0,
-        harmonicallyValidTriples: 0
+        harmonicallyValidTriples: 0,
+        deterministicDagMergedNodes: 0
     };
 
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
@@ -439,16 +533,28 @@ export async function searchStrettoChains(
             validDelays.forEach(d => {
                 transpositions.forEach(t => {
                     stageStats.pairwiseTotal++;
+                    operationCounter++;
                     const key = toPairKey(iA, iB, d, t);
                     const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
                     if (res.compatible) {
-                        pairwiseCompatibleTriplets.set(key, res.dissonanceRatio);
+                        pairwiseCompatibleTriplets.set(key, {
+                            dissonanceRatio: res.dissonanceRatio,
+                            hasFourth: res.hasFourth,
+                            hasVoiceCrossing: res.hasVoiceCrossing,
+                            maxDissonanceRunEvents: res.maxDissonanceRunEvents
+                        });
                         stageStats.pairwiseCompatible++;
+                        if (res.hasFourth) stageStats.pairwiseWithFourth++;
+                        if (res.hasVoiceCrossing) stageStats.pairwiseWithVoiceCrossing++;
                     }
                 });
             });
         });
     });
+
+    if (shouldYieldToEventLoop(operationCounter)) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
 
     // --- PRECOMPUTE TRIPLES ---
     const harmonicallyValidTriples = new Set<string>();
@@ -465,9 +571,18 @@ export async function searchStrettoChains(
     }
 
     for (const p1 of validPairsList) {
+        const keyAB = toPairKey(p1.vA, p1.vB, p1.d, p1.t);
+        const pairAB = pairwiseCompatibleTriplets.get(keyAB);
+        if (!pairAB) continue;
+
         const nextPairs = pairsByFirst.get(p1.vB) || [];
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
+            operationCounter++;
+            const keyBC = toPairKey(p2.vA, p2.vB, p2.d, p2.t);
+            const pairBC = pairwiseCompatibleTriplets.get(keyBC);
+            if (!pairBC) continue;
+
             const d1 = p1.d;
             const d2 = p2.d;
             
@@ -483,10 +598,18 @@ export async function searchStrettoChains(
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
                 const keyAC = toPairKey(vA, vC, dAC, tAC);
-                if (!pairwiseCompatibleTriplets.has(keyAC)) {
+                const pairAC = pairwiseCompatibleTriplets.get(keyAC);
+                if (!pairAC) {
                     stageStats.triplePairwiseRejected++;
                     continue;
                 }
+                if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairAC, options.maxPairwiseDissonance)) {
+                    stageStats.tripleLowerBoundRejected++;
+                    continue;
+                }
+            } else if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance)) {
+                stageStats.tripleLowerBoundRejected++;
+                continue;
             }
             
             // Rule: Voice Spacing for the Triple
@@ -547,6 +670,10 @@ export async function searchStrettoChains(
             const key = toTripleKey(vA, p1.vB, vC, d1, d2, p1.t, p2.t);
             harmonicallyValidTriples.add(key);
             stageStats.harmonicallyValidTriples++;
+
+            if (shouldYieldToEventLoop(operationCounter)) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
         }
     }
 
@@ -576,107 +703,69 @@ export async function searchStrettoChains(
         return sig;
     }
 
-    async function solve(
-        chain: StrettoChainOption[], 
-        variantIndices: number[], 
-        voiceEndTimesTicks: number[], 
-        nInv: number, 
-        nTrunc: number,
-        nRestricted: number,
-        nFree: number
-    ) {
-        nodesVisited++;
-        maxDepth = Math.max(maxDepth, chain.length);
-        
-        if (Date.now() - startTime > TIME_LIMIT_MS) {
-            if (!terminationReason) terminationReason = 'Timeout';
-            return;
-        }
-        if (nodesVisited > MAX_SEARCH_NODES) {
-            if (!terminationReason) terminationReason = 'NodeLimit';
-            return;
-        }
+    interface DagNode {
+        chain: StrettoChainOption[];
+        variantIndices: number[];
+        voiceEndTimesTicks: number[];
+        nInv: number;
+        nTrunc: number;
+        nRestricted: number;
+        nFree: number;
+    }
 
-        // If target reached, store unscored result (scoring deferred to post-search)
-        if (chain.length === options.targetChainLength) {
-            const sig = getChainSignature(chain);
-            if (!seenSignatures.has(sig)) {
-                seenSignatures.add(sig);
-                unscoredResults.push({
-                    entries: [...chain],
-                    variantIndices: [...variantIndices]
-                });
-            }
-            return;
-        }
+    function getBoundarySignature(chain: StrettoChainOption[]): string {
+        return toOrderedBoundarySignature(chain, ppq);
+    }
 
-        // --- PARTIAL RESULTS LOGIC ---
-        // If the chain is significant (>= 3 entries), store as partial (unscored).
-        // Bounded to MAX_PARTIALS to prevent OOM in difficult searches.
-        if (chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {
-            const sig = getChainSignature(chain);
-            if (!seenPartialSigs.has(sig)) {
-                seenPartialSigs.add(sig);
-                unscoredPartials.push({
-                    entries: [...chain],
-                    variantIndices: [...variantIndices]
-                });
-            }
-        }
+    function getDagNodeKey(node: DagNode): string {
+        const chainSig = getChainSignature(node.chain);
+        const boundarySig = getBoundarySignature(node.chain);
+        return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}`;
+    }
 
-        const depth = chain.length; 
+    function expandNode(node: DagNode): DagNode[] {
+        const successors: DagNode[] = [];
+        const { chain, variantIndices, voiceEndTimesTicks, nInv, nTrunc, nRestricted, nFree } = node;
+        const depth = chain.length;
         const prevEntry = chain[depth - 1];
-        
-        const isFinalThird = depth >= options.targetChainLength - Math.ceil(options.targetChainLength / 3);
-        const prevEntryLengthTicks = chain[depth-1].length; // Post-truncation length
 
-        // --- RULE 1 & 2: DELAY LOGIC (STRICT) ---
+        const isFinalThird = depth >= options.targetChainLength - Math.ceil(options.targetChainLength / 3);
+        const prevEntryLengthTicks = chain[depth - 1].length;
+
         const possibleDelaysTicks: number[] = [];
-        let minD = delayStep; 
-        let maxD = Math.floor(prevEntryLengthTicks * (2/3)); // Based on truncated length
+        let minD = delayStep;
+        let maxD = Math.floor(prevEntryLengthTicks * (2 / 3));
 
         if (depth === 1) {
-            // First delay should be long (between 1/2 and 2/3)
             minD = Math.floor(prevEntryLengthTicks * 0.5);
         } else if (depth > 1) {
-            const prevDelayTicks = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
+            const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const prevSubjectLengthTicks = chain[depth - 1].length;
 
-            // Rule A: If d{n-1} > Sb/2, force at least 0.5 beat contraction.
-            if (prevDelayTicks > (prevSubjectLengthTicks / 2)) {
-                maxD = Math.min(maxD, prevDelayTicks - delayStep);
-            } else {
-                // Otherwise, legacy elasticity limit (max +0.5 beat expansion) can still apply.
-                maxD = Math.min(maxD, prevDelayTicks + delayStep);
-            }
+            if (prevDelayTicks > (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
+            else maxD = Math.min(maxD, prevDelayTicks + delayStep);
 
             if (depth >= 3) {
-                const prevPrevDelayTicks = Math.round(chain[depth-2].startBeat * ppq) - Math.round(chain[depth-3].startBeat * ppq);
-
-                // Rule B: If previous delay expanded and is > Sb/3, current must contract by >=0.5 beat vs two entries ago.
+                const prevPrevDelayTicks = Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq);
                 if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
                     maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
                 }
             }
 
-            // Rule C: After truncated entry, must contract by >=1 beat unless previous delay < Sb/3.
             const prevIsTruncated = chain[depth - 1].length < chain[0].length;
             if (prevIsTruncated && prevDelayTicks >= (prevSubjectLengthTicks / 3)) {
                 maxD = Math.min(maxD, prevDelayTicks - (2 * delayStep));
             }
         }
 
-        // Snap minD/maxD to grid
         minD = Math.ceil(minD / delayStep) * delayStep;
         maxD = Math.floor(maxD / delayStep) * delayStep;
-
         for (let d = minD; d <= maxD; d += delayStep) possibleDelaysTicks.push(d);
-        possibleDelaysTicks.sort((a,b) => a - b); 
+        possibleDelaysTicks.sort((a, b) => a - b);
 
         for (const delayTicks of possibleDelaysTicks) {
             if (depth >= 2) {
-                const prevDelayTicks = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
-                // No Repeats
+                const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
                 if (Math.abs(delayTicks - prevDelayTicks) < 1) {
                     const isDelayShort = prevDelayTicks <= (prevEntryLengthTicks / 3);
                     if (!(isFinalThird && isDelayShort)) continue;
@@ -686,11 +775,9 @@ export async function searchStrettoChains(
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
-            // Within this node's transposition enumeration, try the first representative
-            // of each t2norm class before its octave duplicates. The seenClasses set is
-            // local to this (chain, delayTicks) pair — no global state, no cross-branch bleed.
             const seenClasses = new Set<number>();
-            const fresh: number[] = [], deferred: number[] = [];
+            const fresh: number[] = [];
+            const deferred: number[] = [];
             const prevTransposition = chain[chain.length - 1].transposition;
             for (const t of transpositions) {
                 const tClass = ((t - prevTransposition) % 12 + 12) % 12;
@@ -698,36 +785,27 @@ export async function searchStrettoChains(
                     deferred.push(t);
                     continue;
                 }
-
-                // Only mark a class as seen once its first representative survives
-                // transposition-level screening (Gatekeeper B). This avoids pushing
-                // all octave-equivalent alternatives to deferred when the first
-                // representative is rejected outright.
                 if (t === prevTransposition) {
                     fresh.push(t);
                     continue;
                 }
-
                 fresh.push(t);
                 seenClasses.add(tClass);
             }
             const orderedTranspositions = [...fresh, ...deferred];
 
             for (const t of orderedTranspositions) {
-                // Gatekeeper B: voice cannot enter at same transposition as the immediately preceding voice
                 if (t === prevTransposition) continue;
 
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-
-                    // --- TRIPLE PRUNING ---
                     if (depth >= 2) {
-                        const vA = variantIndices[depth-2];
-                        const vB = variantIndices[depth-1];
+                        const vA = variantIndices[depth - 2];
+                        const vB = variantIndices[depth - 1];
                         const vC = varIdx;
-                        const d1 = Math.round(chain[depth-1].startBeat * ppq) - Math.round(chain[depth-2].startBeat * ppq);
+                        const d1 = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
                         const d2 = delayTicks;
-                        const t1 = chain[depth-1].transposition - chain[depth-2].transposition;
-                        const t2 = t - chain[depth-1].transposition;
+                        const t1 = chain[depth - 1].transposition - chain[depth - 2].transposition;
+                        const t2 = t - chain[depth - 1].transposition;
                         const tripleKey = toTripleKey(vA, vB, vC, d1, d2, t1, t2);
                         if (!harmonicallyValidTriples.has(tripleKey)) continue;
                     }
@@ -737,13 +815,13 @@ export async function searchStrettoChains(
                     const isTrunc = variant.truncationBeats > 0;
                     if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
                     if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
-                    
+
                     const intervalClass = Math.abs(t % 12);
                     const isRestricted = [3, 4, 8, 9].includes(intervalClass);
-                    const isFree = [0, 7].includes(intervalClass) || intervalClass === 5; 
+                    const isFree = [0, 7].includes(intervalClass) || intervalClass === 5;
                     const nextRestricted = nRestricted + (isRestricted ? 1 : 0);
                     const nextFree = nFree + (isFree ? 1 : 0);
-                    
+
                     if (nextRestricted > 1 && nextRestricted >= nextFree) continue;
                     if (isRestricted && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
                     if (options.disallowComplexExceptions && (isInv || isTrunc) && isRestricted) continue;
@@ -754,7 +832,7 @@ export async function searchStrettoChains(
                         const prevVarIdx = variantIndices[k];
                         const prevStartTicks = Math.round(prevE.startBeat * ppq);
                         const prevEndTicks = prevStartTicks + variants[prevVarIdx].lengthTicks;
-                        
+
                         if (absStartTicks < prevEndTicks) {
                             const relDelay = absStartTicks - prevStartTicks;
                             const relTrans = t - prevE.transposition;
@@ -769,7 +847,7 @@ export async function searchStrettoChains(
 
                     for (let v = 0; v < options.ensembleTotal; v++) {
                         if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
-                        
+
                         let stratFail = false;
                         for (let existingIdx = 0; existingIdx < chain.length; existingIdx++) {
                             const e = chain[existingIdx];
@@ -781,7 +859,7 @@ export async function searchStrettoChains(
                                 if (highVoiceTrans < lowVoiceTrans) stratFail = true;
                             }
                             const bassIdx = options.ensembleTotal - 1;
-                            const altoIdx = bassIdx - 2; 
+                            const altoIdx = bassIdx - 2;
                             if (bassIdx >= 2) {
                                 const isNewBass = (v === bassIdx);
                                 const isNewAlto = (v === altoIdx);
@@ -810,40 +888,120 @@ export async function searchStrettoChains(
                             length: variant.lengthTicks,
                             voiceIndex: v
                         };
-                        
-                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks)) {
-                            continue;
-                        }
+
+                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks)) continue;
 
                         const newVoiceState = [...voiceEndTimesTicks];
                         newVoiceState[v] = absStartTicks + variant.lengthTicks;
-                        
-                        const nextChain = [...chain, tempNextEntry];
 
-                        await solve(
-                            nextChain,
-                            [...variantIndices, varIdx],
-                            newVoiceState,
-                            nInv + (isInv?1:0),
-                            nTrunc + (isTrunc?1:0),
-                            nextRestricted,
-                            nextFree
-                        );
+                        edgesTraversed++;
+                        successors.push({
+                            chain: [...chain, tempNextEntry],
+                            variantIndices: [...variantIndices, varIdx],
+                            voiceEndTimesTicks: newVoiceState,
+                            nInv: nInv + (isInv ? 1 : 0),
+                            nTrunc: nTrunc + (isTrunc ? 1 : 0),
+                            nRestricted: nextRestricted,
+                            nFree: nextFree
+                        });
                     }
                 }
             }
         }
+
+        return successors;
     }
-    
+
     const initialVoiceState = new Array(options.ensembleTotal).fill(0);
     initialVoiceState[options.subjectVoiceIndex] = variants[0].lengthTicks;
-    
-    await solve(
-        [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].lengthTicks, voiceIndex: options.subjectVoiceIndex }],
-        [0],
-        initialVoiceState,
-        0, 0, 0, 1
-    );
+
+    let frontier: DagNode[] = [{
+        chain: [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].lengthTicks, voiceIndex: options.subjectVoiceIndex }],
+        variantIndices: [0],
+        voiceEndTimesTicks: initialVoiceState,
+        nInv: 0,
+        nTrunc: 0,
+        nRestricted: 0,
+        nFree: 1
+    }];
+
+    let maxFrontierSize = frontier.length;
+    let maxFrontierClassCount = 1;
+
+    const frontierClassKey = (chain: StrettoChainOption[]): string => {
+        if (chain.length < 2) return 'root';
+        const delays: number[] = [];
+        for (let i = 1; i < chain.length; i++) {
+            delays.push(Math.round((chain[i].startBeat - chain[i - 1].startBeat) * ppq));
+        }
+        return delays.join(',');
+    };
+
+    while (frontier.length > 0) {
+        maxFrontierSize = Math.max(maxFrontierSize, frontier.length);
+        const frontierClasses = new Set(frontier.map((n) => frontierClassKey(n.chain)));
+        maxFrontierClassCount = Math.max(maxFrontierClassCount, frontierClasses.size);
+
+        frontier.sort((a, b) => getChainSignature(a.chain).localeCompare(getChainSignature(b.chain)));
+        const nextLayer = new Map<string, DagNode>();
+        let stopTraversal = false;
+
+        for (const node of frontier) {
+            nodesVisited++;
+            operationCounter++;
+            maxDepth = Math.max(maxDepth, node.chain.length);
+
+            if (shouldYieldToEventLoop(operationCounter)) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
+
+            if (Date.now() - startTime > activeTimeLimitMs) {
+                const canExtend = timeoutExtensionAppliedMs === 0 && shouldExtendTimeoutNearCompletion(maxDepth, options.targetChainLength);
+                if (canExtend) {
+                    timeoutExtensionAppliedMs = NEAR_COMPLETION_TIMEOUT_EXTENSION_MS;
+                    activeTimeLimitMs += timeoutExtensionAppliedMs;
+                } else {
+                    if (!terminationReason) terminationReason = 'Timeout';
+                    stopTraversal = true;
+                    break;
+                }
+            }
+            if (nodesVisited > MAX_SEARCH_NODES) {
+                if (!terminationReason) terminationReason = 'NodeLimit';
+                stopTraversal = true;
+                break;
+            }
+
+            if (node.chain.length === options.targetChainLength) {
+                const sig = getChainSignature(node.chain);
+                if (!seenSignatures.has(sig)) {
+                    seenSignatures.add(sig);
+                    unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
+                }
+                continue;
+            }
+
+            if (node.chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {
+                const sig = getChainSignature(node.chain);
+                if (!seenPartialSigs.has(sig)) {
+                    seenPartialSigs.add(sig);
+                    unscoredPartials.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
+                }
+            }
+
+            const successors = expandNode(node);
+            for (const successor of successors) {
+                const nodeKey = getDagNodeKey(successor);
+                if (nextLayer.has(nodeKey)) {
+                    stageStats.deterministicDagMergedNodes++;
+                    continue;
+                }
+                nextLayer.set(nodeKey, successor);
+            }
+        }
+
+        frontier = resolveNextFrontierLayer(nextLayer, stopTraversal);
+    }
 
     // --- POST-SEARCH: Score all found chains ---
     let sourceUnscored = unscoredResults;
@@ -895,9 +1053,16 @@ export async function searchStrettoChains(
         results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),
         stats: {
             nodesVisited,
+            edgesTraversed,
             timeMs: Date.now() - startTime,
             stopReason: stopReason,
             maxDepthReached: maxDepth,
+            timeoutExtensionAppliedMs,
+            coverage: {
+                nodeBudgetUsedPercent: roundToWholePercent(Math.min(1, nodesVisited / MAX_SEARCH_NODES)),
+                maxFrontierSize,
+                maxFrontierClassCount
+            },
             stageStats
         }
     };

@@ -363,18 +363,29 @@ export interface StrettoSearchReport {
     results: StrettoChainResult[];
     stats: {
         nodesVisited: number;
+        edgesTraversed?: number;
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        timeoutExtensionAppliedMs?: number;
+        coverage?: {
+            nodeBudgetUsedPercent: number;
+            maxFrontierSize: number;
+            maxFrontierClassCount: number;
+        };
         stageStats?: {
             validDelayCount: number;
             transpositionCount: number;
             pairwiseTotal: number;
             pairwiseCompatible: number;
+            pairwiseWithFourth: number;
+            pairwiseWithVoiceCrossing: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
+            tripleLowerBoundRejected: number;
             tripleVoiceRejected: number;
             harmonicallyValidTriples: number;
+            deterministicDagMergedNodes: number;
         };
     };
 }
