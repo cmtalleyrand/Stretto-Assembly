@@ -61,6 +61,10 @@ export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, 
     return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
 }
 
+export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
+    return stopTraversal ? [] : Array.from(nextLayer.values());
+}
+
 // --- Precomputation: Scales & Inversion ---
 
 function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offsetTicks: number } {
@@ -924,6 +928,7 @@ export async function searchStrettoChains(
 
         frontier.sort((a, b) => getChainSignature(a.chain).localeCompare(getChainSignature(b.chain)));
         const nextLayer = new Map<string, DagNode>();
+        let stopTraversal = false;
 
         for (const node of frontier) {
             nodesVisited++;
@@ -936,13 +941,13 @@ export async function searchStrettoChains(
                     activeTimeLimitMs += timeoutExtensionAppliedMs;
                 } else {
                     if (!terminationReason) terminationReason = 'Timeout';
-                    frontier = [];
+                    stopTraversal = true;
                     break;
                 }
             }
             if (nodesVisited > MAX_SEARCH_NODES) {
                 if (!terminationReason) terminationReason = 'NodeLimit';
-                frontier = [];
+                stopTraversal = true;
                 break;
             }
 
@@ -974,7 +979,7 @@ export async function searchStrettoChains(
             }
         }
 
-        frontier = Array.from(nextLayer.values());
+        frontier = resolveNextFrontierLayer(nextLayer, stopTraversal);
     }
 
     // --- POST-SEARCH: Score all found chains ---

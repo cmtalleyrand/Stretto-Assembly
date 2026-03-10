@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
+import { resolveNextFrontierLayer, searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -58,6 +58,18 @@ assert.equal(
   violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 2 }, 0.75),
   false,
   'pairwise lower-bound helper must accept records that satisfy both hard bounds'
+);
+
+const nextLayer = new Map<string, number>([['a', 1], ['b', 2]]);
+assert.deepEqual(
+  resolveNextFrontierLayer(nextLayer, false),
+  [1, 2],
+  'frontier resolver must carry queued successors when traversal has not been stopped'
+);
+assert.deepEqual(
+  resolveNextFrontierLayer(nextLayer, true),
+  [],
+  'frontier resolver must discard queued successors after timeout/node-limit stop declaration'
 );
 
 const subject: RawNote[] = [
