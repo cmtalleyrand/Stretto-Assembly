@@ -156,6 +156,7 @@ Date.now = () => {
 try {
   const timeoutReport = await searchStrettoChains(subject, { ...options, targetChainLength: 2 }, ppq);
   assert.equal(timeoutReport.stats.maxDepthReached, 2, 'forced-timeout scenario must still record reached target depth');
+  assert.equal(timeoutReport.stats.stopReason, 'Timeout', 'forced-timeout scenario must still enforce timeout guards while visiting terminal frontiers');
   assert.ok(timeoutReport.results.length > 0, 'forced-timeout scenario must retain already-reached full-length chains');
 } finally {
   Date.now = originalDateNow;

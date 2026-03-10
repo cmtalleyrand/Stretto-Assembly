@@ -976,13 +976,13 @@ export async function searchStrettoChains(
             operationCounter++;
             maxDepth = Math.max(maxDepth, node.chain.length);
 
-            if (node.chain.length === options.targetChainLength) {
+            const isTerminalNode = node.chain.length === options.targetChainLength;
+            if (isTerminalNode) {
                 const sig = getChainSignature(node.chain);
                 if (!seenSignatures.has(sig)) {
                     seenSignatures.add(sig);
                     unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
                 }
-                continue;
             }
 
             if (shouldYieldToEventLoop(operationCounter)) {
@@ -1005,6 +1005,8 @@ export async function searchStrettoChains(
                 stopTraversal = true;
                 break;
             }
+
+            if (isTerminalNode) continue;
 
             if (node.chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {
                 const sig = getChainSignature(node.chain);
@@ -1030,7 +1032,7 @@ export async function searchStrettoChains(
 
     // --- POST-SEARCH: Score all found chains ---
     let sourceUnscored = unscoredResults;
-    let stopReason: StrettoSearchReport['stats']['stopReason'] = unscoredResults.length > 0 ? 'Success' : (terminationReason || 'Exhausted');
+    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || (unscoredResults.length > 0 ? 'Success' : 'Exhausted');
 
     // Fallback to partials if no full-length results
     if (unscoredResults.length === 0 && unscoredPartials.length > 0) {
