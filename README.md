@@ -1,5 +1,13 @@
 # Stretto Assembly — Algorithm Architecture
 
+## 🚨 CRITICAL COUNTERPOINT POLICY (NON-NEGOTIABLE)
+
+1. **Parallel perfect 4ths are always allowed.**
+2. **Perfect 4ths are only contextually dissonant when the lower note is the global bass at that instant; otherwise they are treated as consonant.**
+3. **Perfect 5th / octave parallels are invalid when either:**
+   - They occur across two consecutive pair boundaries, or
+   - Any such parallel occurs while both adjacent delays are `>= Sb/3` (i.e., neither delay is under one-third subject length).
+
 ## ⚠️ CRITICAL: DO NOT REVERT THE SEARCH ARCHITECTURE
 
 This document defines the **mandatory, intended architecture** for the chain search algorithm.
