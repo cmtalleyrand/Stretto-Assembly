@@ -203,6 +203,7 @@ assert.equal(typeof reportA.stats.stageStats.tripleLowerBoundRejected, 'number',
 assert.equal(typeof reportA.stats.stageStats.tripleParallelRejected, 'number', 'triplet parallel rejection counter must be numeric');
 assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
 assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');
-assert.equal(typeof reportA.stats.coverage.maxFrontierClassCount, 'number', 'coverage must include max frontier class count');
+assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason), 'search must terminate with an explicit completion reason');
+assert.ok(reportA.stats.maxDepthReached >= 1, 'search run-to-completion test fixture must explore at least one expansion depth');
 
 console.log('stretto canonical key + deterministic DAG traversal tests passed');
