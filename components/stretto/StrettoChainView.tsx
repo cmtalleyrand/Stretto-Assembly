@@ -7,6 +7,7 @@ import StrettoInspector from './StrettoInspector';
 import { DownloadIcon } from '../Icons';
 import { generatePolyphonicHarmonicRegions, getInvertedPitch } from '../services/strettoCore'; // Use centralized inversion
 import { getStrictPitchName } from '../services/midiSpelling';
+import { deriveSearchStatusPresentation } from './searchStatus';
 
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
@@ -102,6 +103,11 @@ export default function StrettoChainView({
         };
     }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.scaleMode]);
 
+    const searchStatus = React.useMemo(() => {
+        if (!searchReport) return null;
+        return deriveSearchStatusPresentation(searchReport, searchOptions.targetChainLength);
+    }, [searchReport, searchOptions.targetChainLength]);
+
     return (
         <>
             <StrettoSearchPanel 
@@ -125,24 +131,12 @@ export default function StrettoChainView({
                             </div>
                         )}
                     </div>
-                    {searchReport && searchReport.stats.stopReason === 'Exhausted' && searchReport.stats.maxDepthReached > 0 && (
-                        <div className="bg-orange-900/30 border-b border-orange-800 p-2 text-[10px] text-orange-200">
-                            <strong>Partial Depth Results:</strong> Full chains of {searchOptions.targetChainLength} entries were not found. Showing deepest valid chains discovered before exhaustion (Max depth: {searchReport.stats.maxDepthReached}).
-                        </div>
-                    )}
-                    {searchReport && searchReport.stats.stopReason === 'Exhausted' && searchReport.stats.maxDepthReached === 0 && (
-                        <div className="bg-red-900/30 border-b border-red-800 p-2 text-[10px] text-red-200">
-                            <strong>Search Exhausted:</strong> No valid chains found. Try relaxing rules.
-                        </div>
-                    )}
-                    {searchReport && searchReport.stats.stopReason === 'Timeout' && (
-                        <div className="bg-yellow-900/30 border-b border-yellow-800 p-2 text-[10px] text-yellow-200">
-                            <strong>Search Timed Out:</strong> Time limit reached. Max depth: {searchReport.stats.maxDepthReached}. Try relaxing constraints.
-                        </div>
-                    )}
-                    {searchReport && searchReport.stats.stopReason === 'NodeLimit' && (
-                        <div className="bg-yellow-900/30 border-b border-yellow-800 p-2 text-[10px] text-yellow-200">
-                            <strong>Search Node Limit Reached:</strong> Search space too large. Max depth: {searchReport.stats.maxDepthReached}. Try tightening constraints.
+                    {searchStatus && (
+                        <div className={`border-b p-2 text-[10px] ${searchStatus.toneClass}`}>
+                            <strong>{searchStatus.heading}:</strong> {searchStatus.detail}
+                            <div className="mt-1 text-[9px] text-gray-300">
+                                Progress {searchStatus.progressPercent}% · Target {searchOptions.targetChainLength} · Reached {searchReport?.stats.maxDepthReached ?? 0}
+                            </div>
                         </div>
                     )}
                     <StrettoResultsList 
