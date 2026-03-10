@@ -69,7 +69,6 @@ export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTrave
 export function shouldYieldToEventLoop(iteration: number, interval: number = EVENT_LOOP_YIELD_INTERVAL): boolean {
     return iteration > 0 && iteration % interval === 0;
 }
-
 // --- Precomputation: Scales & Inversion ---
 
 function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offsetTicks: number } {
