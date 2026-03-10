@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { resolveNextFrontierLayer, searchStrettoChains, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
+import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition, resolveNextFrontierLayer, searchStrettoChains, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -45,19 +45,86 @@ assert.notEqual(
 );
 
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.8, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1 }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.8, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>() }, 0.75),
   true,
   'pairwise lower-bound helper must reject records exceeding dissonance ratio threshold'
 );
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 3 }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 3, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>() }, 0.75),
   true,
   'pairwise lower-bound helper must reject records exceeding dissonance run-event threshold'
 );
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 2 }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 2, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>() }, 0.75),
   false,
   'pairwise lower-bound helper must accept records that satisfy both hard bounds'
+);
+
+
+const p4UpperVoiceA = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0, durationTicks: 480, pitch: 60 },
+    { relTick: 480, durationTicks: 480, pitch: 62 }
+  ]
+};
+const p4UpperVoiceB = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0, durationTicks: 480, pitch: 65 },
+    { relTick: 480, durationTicks: 480, pitch: 67 }
+  ]
+};
+const p4Pair = checkCounterpointStructure(p4UpperVoiceA, p4UpperVoiceB, 0, 0, 0.01, ppq);
+assert.equal(p4Pair.compatible, true, 'pairwise scan must treat P4 as provisionally consonant before bass-context dissonance resolution');
+assert.equal(p4Pair.dissonanceRatio, 0, 'pairwise P4-only slices must not accrue dissonance ratio burden');
+assert.equal(p4Pair.hasParallelPerfect58, false, 'parallel P4 motion must never be tagged as forbidden perfect 5/8 parallel motion');
+
+
+const p4WithAAsBass = checkCounterpointStructureWithBassRole(p4UpperVoiceA, p4UpperVoiceB, 0, 0, 0.01, 'a', ppq);
+assert.equal(p4WithAAsBass.compatible, false, 'pairwise scan must reject P4 when variant A is known bass and forms the lower note');
+
+const p4WithBAsBass = checkCounterpointStructureWithBassRole(p4UpperVoiceA, p4UpperVoiceB, 0, -10, 0.01, 'b', ppq);
+assert.equal(p4WithBAsBass.compatible, false, 'pairwise scan must reject P4 when variant B is known bass and forms the lower note');
+
+assert.equal(
+  violatesTripletParallelPolicy(
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>() },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>() },
+    120,
+    120,
+    960
+  ),
+  true,
+  'triplet policy must reject consecutive boundaries that both carry P5/P8 parallel motion'
+);
+
+assert.equal(
+  violatesTripletParallelPolicy(
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>() },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>() },
+    360,
+    420,
+    960
+  ),
+  true,
+  'triplet policy must reject any P5/P8 parallel motion when neither adjacent delay is below Sb/3'
+);
+
+assert.equal(
+  violatesTripletParallelPolicy(
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>() },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>() },
+    240,
+    420,
+    960
+  ),
+  false,
+  'triplet policy must preserve admissibility when at least one adjacent delay is below Sb/3'
 );
 
 const nextLayer = new Map<string, number>([['a', 1], ['b', 2]]);
@@ -76,6 +143,21 @@ assert.equal(shouldYieldToEventLoop(0, 8), false, 'yield helper must not trigger
 assert.equal(shouldYieldToEventLoop(7, 8), false, 'yield helper must not trigger before interval boundary');
 assert.equal(shouldYieldToEventLoop(8, 8), true, 'yield helper must trigger at interval boundary');
 assert.equal(shouldYieldToEventLoop(16, 8), true, 'yield helper must trigger at repeated interval boundaries');
+
+
+assert.equal(
+  isVoicePairAllowedForTransposition(2, 3, 0, 4, true),
+  false,
+  'voice-metadata predicate must forbid assigning disallowLowestPair records to the two lowest voices'
+);
+assert.equal(
+  isVoicePairAllowedForTransposition(0, 1, 0, 4, true),
+  true,
+  'voice-metadata predicate must preserve admissibility outside the two-lowest-voice slot when spacing constraints are satisfied'
+);
+const allowedPairs = buildAllowedVoicePairs(0, 4, true);
+assert.equal(allowedPairs.has('2->3'), false, 'precomputed voice-pair metadata must exclude lowest-pair assignment when disallowed');
+assert.equal(allowedPairs.has('0->1'), true, 'precomputed voice-pair metadata must retain admissible non-lowest assignments');
 
 const subject: RawNote[] = [
   { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
@@ -118,8 +200,10 @@ assert.ok(reportA.stats.stageStats.deterministicDagMergedNodes >= 0, 'merge coun
 assert.equal(typeof reportA.stats.stageStats.pairwiseWithFourth, 'number', 'pairwise fourth-presence counter must be numeric');
 assert.equal(typeof reportA.stats.stageStats.pairwiseWithVoiceCrossing, 'number', 'pairwise voice-crossing counter must be numeric');
 assert.equal(typeof reportA.stats.stageStats.tripleLowerBoundRejected, 'number', 'triplet lower-bound rejection counter must be numeric');
+assert.equal(typeof reportA.stats.stageStats.tripleParallelRejected, 'number', 'triplet parallel rejection counter must be numeric');
 assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
 assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');
-assert.equal(typeof reportA.stats.coverage.maxFrontierClassCount, 'number', 'coverage must include max frontier class count');
+assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason), 'search must terminate with an explicit completion reason');
+assert.ok(reportA.stats.maxDepthReached >= 1, 'search run-to-completion test fixture must explore at least one expansion depth');
 
 console.log('stretto canonical key + deterministic DAG traversal tests passed');
