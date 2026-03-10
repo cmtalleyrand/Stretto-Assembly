@@ -24,12 +24,25 @@ The algorithm must be implemented as a **staged bottom-up precomputation pipelin
 
 ### Conceptual model
 
-Every stretto entry has these attributes:
-- `d` — delay (in beats) from the previous entry
-- `t` — transposition interval (semitones)
-- `v` — assigned voice index
-- `trunc` — truncation status
-- `inv` — inversion status
+Canonical entry representation (normative):
+
+\[
+e_i = (d_i,\ t_i,\ v_i,\ inv_i,\ trunc_i)
+\]
+
+where:
+
+- `d_i`: entry-local incremental delay parameter (beat-grid scalar) for `i>=1`; `d_0` is not applicable because `e_0` has no predecessor
+- `t_i`: transposition interval in semitones
+- `v_i`: assigned voice index
+- `inv_i`: inversion flag
+- `trunc_i`: truncation extent (zero means full-length)
+
+Important normalization identity:
+
+- Define derived absolute start offsets by `s_0 = 0` and `s_i = Σ_{k=1..i} d_k` for `i>=1`; `s_i` is distance-from-origin, while `d_i` remains the local incremental delay parameter. For legacy absolute-start imports, recover `d_i` by `d_i = s_i - s_{i-1}` for `i>=1`.
+
+See `docs/stretto-entry-model.md` for formal domains, constraints, and legacy-field mappings.
 
 The pipeline produces a set of **valid triplets** (consecutive groups of 3 entries), then assembles longer chains by chaining triplets that share their overlapping pair.
 
@@ -118,6 +131,20 @@ Global constraints (e.g. delay uniqueness across the full chain) are enforced he
 |------|------|
 | `STRETTO_RULES.md` | Authoritative rule definitions — source of truth |
 | `PROJECT_INTENT.md` | Architectural invariants |
+| `docs/stretto-entry-model.md` | Canonical entry tuple definition + migration mapping |
 | `strettoGenerator.ts` | Implementation — must follow the pipeline above |
 
 **If `strettoGenerator.ts` contains a depth-first recursive `solve()` function as its primary chain search mechanism, it has been reverted to the wrong architecture.**
+
+---
+
+## Migration status (canonical model rollout)
+
+The canonical tuple `(d_i, t_i, v_i, inv_i, trunc_i)` is now documented as the normative model. Runtime modules remain mixed while migration is in progress.
+
+| Area | Status |
+|---|---|
+| Documentation (`README.md`, `docs/stretto-entry-model.md`) | Canonical-ready |
+| Type surface (`types.ts::StrettoChainOption`) | Compatibility mode (legacy fields) |
+| Search/generation (`components/services/strettoGenerator.ts`) | Compatibility mode (legacy fields + `variantIndices`) |
+| UI rendering (`components/stretto/StrettoChainView.tsx`, `components/stretto/StrettoResultsList.tsx`) | Compatibility mode |
