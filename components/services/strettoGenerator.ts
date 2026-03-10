@@ -47,6 +47,16 @@ export function toBoundaryPairKey(left: StrettoChainOption, right: StrettoChainO
     return `${left.voiceIndex}:${left.type}->${right.voiceIndex}:${right.type}|d${delayTicks}|t${transpositionDelta}`;
 }
 
+export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: number): string {
+    if (chain.length < 2) return 'root';
+    const boundaries: string[] = [];
+    for (let i = 1; i < chain.length; i++) {
+        // Preserve temporal order: expansion predicates depend on immediate predecessor state.
+        boundaries.push(`${i - 1}>${i}:${toBoundaryPairKey(chain[i - 1], chain[i], ppq)}`);
+    }
+    return boundaries.join('||');
+}
+
 export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, maxPairwiseDissonance: number): boolean {
     return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
 }
@@ -684,13 +694,7 @@ export async function searchStrettoChains(
     }
 
     function getBoundarySignature(chain: StrettoChainOption[]): string {
-        if (chain.length < 2) return 'root';
-        const boundaries: string[] = [];
-        for (let i = 1; i < chain.length; i++) {
-            boundaries.push(toBoundaryPairKey(chain[i - 1], chain[i], ppq));
-        }
-        boundaries.sort();
-        return boundaries.join('||');
+        return toOrderedBoundarySignature(chain, ppq);
     }
 
     function getDagNodeKey(node: DagNode): string {

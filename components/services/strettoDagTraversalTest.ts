@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, violatesPairwiseLowerBound } from './strettoGenerator';
+import { searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -24,6 +24,24 @@ assert.equal(
   toBoundaryPairKey(left, right, ppq),
   '1:N->2:N|d480|t7',
   'boundary pair key must encode ordered voice/type relation plus delay/transposition delta'
+);
+
+const historyA: StrettoChainOption[] = [
+  { startBeat: 0, transposition: 0, type: 'N', length: 960, voiceIndex: 1 },
+  { startBeat: 1, transposition: -24, type: 'N', length: 960, voiceIndex: 2 },
+  { startBeat: 2, transposition: -24, type: 'N', length: 960, voiceIndex: 3 },
+  { startBeat: 3, transposition: -24, type: 'N', length: 960, voiceIndex: 0 }
+];
+const historyB: StrettoChainOption[] = [
+  { startBeat: 0, transposition: 0, type: 'N', length: 960, voiceIndex: 1 },
+  { startBeat: 1, transposition: 0, type: 'N', length: 960, voiceIndex: 2 },
+  { startBeat: 2, transposition: 0, type: 'N', length: 960, voiceIndex: 3 },
+  { startBeat: 3, transposition: -24, type: 'N', length: 960, voiceIndex: 0 }
+];
+assert.notEqual(
+  toOrderedBoundarySignature(historyA, ppq),
+  toOrderedBoundarySignature(historyB, ppq),
+  'ordered boundary signatures must distinguish histories with different temporal transposition-delta placement'
 );
 
 assert.equal(
