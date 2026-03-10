@@ -20,6 +20,13 @@ interface TripletKeyParts {
     transpositionBC: number;
 }
 
+interface PairwiseCompatibilityRecord {
+    dissonanceRatio: number;
+    hasFourth: boolean;
+    hasVoiceCrossing: boolean;
+    maxDissonanceRunEvents: number;
+}
+
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
 }
@@ -38,6 +45,10 @@ export function toBoundaryPairKey(left: StrettoChainOption, right: StrettoChainO
     const delayTicks = rightStart - leftStart;
     const transpositionDelta = right.transposition - left.transposition;
     return `${left.voiceIndex}:${left.type}->${right.voiceIndex}:${right.type}|d${delayTicks}|t${transpositionDelta}`;
+}
+
+export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, maxPairwiseDissonance: number): boolean {
+    return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
 }
 
 // --- Precomputation: Scales & Inversion ---
@@ -78,7 +89,7 @@ function checkCounterpointStructure(
     transposition: number,
     maxDissonanceRatio: number,
     ppqParam: number = 480
-): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number } {
+): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number } {
     
     // Collect all time points
     const timePoints = new Set<number>();
@@ -117,6 +128,10 @@ function checkCounterpointStructure(
     let dissonantTicks = 0;
     let strongBeatParallels = 0;
     let weakBeatParallels = 0;
+    let hasFourth = false;
+    let hasVoiceCrossing = false;
+    let previousOrderingSign = 0;
+    let maxDissonanceRunEvents = 0;
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -146,9 +161,15 @@ function checkCounterpointStructure(
 
         const p1 = activeA.pitch;
         const p2 = activeB.pitch;
+        const orderingSign = Math.sign(p1 - p2);
+        if (orderingSign !== 0) {
+            if (previousOrderingSign !== 0 && previousOrderingSign !== orderingSign) hasVoiceCrossing = true;
+            previousOrderingSign = orderingSign;
+        }
         const lo = Math.min(p1, p2);
         const hi = Math.max(p1, p2);
         const interval = (hi - lo) % 12;
+        if (interval === 5) hasFourth = true;
 
         // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
         if (prevP1 !== null && prevP2 !== null) {
@@ -180,12 +201,14 @@ function checkCounterpointStructure(
             // For run length, we count *events* (intervals), not ticks
             if (!lastIsDiss) dissRunLength = 1;
             else dissRunLength++;
+            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents };
 
             lastIsDiss = true;
         } else {
+            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             dissRunLength = 0;
             lastIsDiss = false;
         }
@@ -196,10 +219,11 @@ function checkCounterpointStructure(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents };
     }
 
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels };
+    maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents };
 }
 
 // Helper: Determine beat strength
@@ -401,8 +425,11 @@ export async function searchStrettoChains(
                     transpositionCount: 0,
                     pairwiseTotal: 0,
                     pairwiseCompatible: 0,
+                    pairwiseWithFourth: 0,
+                    pairwiseWithVoiceCrossing: 0,
                     tripleCandidates: 0,
                     triplePairwiseRejected: 0,
+                    tripleLowerBoundRejected: 0,
                     tripleVoiceRejected: 0,
                     harmonicallyValidTriples: 0,
                     deterministicDagMergedNodes: 0
@@ -452,7 +479,7 @@ export async function searchStrettoChains(
         }
     }
 
-    const pairwiseCompatibleTriplets = new Map<string, number>();
+    const pairwiseCompatibleTriplets = new Map<string, PairwiseCompatibilityRecord>();
     const validDelays: number[] = [];
     const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
     
@@ -470,8 +497,11 @@ export async function searchStrettoChains(
         transpositionCount: transpositions.length,
         pairwiseTotal: 0,
         pairwiseCompatible: 0,
+        pairwiseWithFourth: 0,
+        pairwiseWithVoiceCrossing: 0,
         tripleCandidates: 0,
         triplePairwiseRejected: 0,
+        tripleLowerBoundRejected: 0,
         tripleVoiceRejected: 0,
         harmonicallyValidTriples: 0,
         deterministicDagMergedNodes: 0
@@ -486,8 +516,15 @@ export async function searchStrettoChains(
                     const key = toPairKey(iA, iB, d, t);
                     const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
                     if (res.compatible) {
-                        pairwiseCompatibleTriplets.set(key, res.dissonanceRatio);
+                        pairwiseCompatibleTriplets.set(key, {
+                            dissonanceRatio: res.dissonanceRatio,
+                            hasFourth: res.hasFourth,
+                            hasVoiceCrossing: res.hasVoiceCrossing,
+                            maxDissonanceRunEvents: res.maxDissonanceRunEvents
+                        });
                         stageStats.pairwiseCompatible++;
+                        if (res.hasFourth) stageStats.pairwiseWithFourth++;
+                        if (res.hasVoiceCrossing) stageStats.pairwiseWithVoiceCrossing++;
                     }
                 });
             });
@@ -509,9 +546,17 @@ export async function searchStrettoChains(
     }
 
     for (const p1 of validPairsList) {
+        const keyAB = toPairKey(p1.vA, p1.vB, p1.d, p1.t);
+        const pairAB = pairwiseCompatibleTriplets.get(keyAB);
+        if (!pairAB) continue;
+
         const nextPairs = pairsByFirst.get(p1.vB) || [];
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
+            const keyBC = toPairKey(p2.vA, p2.vB, p2.d, p2.t);
+            const pairBC = pairwiseCompatibleTriplets.get(keyBC);
+            if (!pairBC) continue;
+
             const d1 = p1.d;
             const d2 = p2.d;
             
@@ -527,10 +572,18 @@ export async function searchStrettoChains(
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
                 const keyAC = toPairKey(vA, vC, dAC, tAC);
-                if (!pairwiseCompatibleTriplets.has(keyAC)) {
+                const pairAC = pairwiseCompatibleTriplets.get(keyAC);
+                if (!pairAC) {
                     stageStats.triplePairwiseRejected++;
                     continue;
                 }
+                if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairAC, options.maxPairwiseDissonance)) {
+                    stageStats.tripleLowerBoundRejected++;
+                    continue;
+                }
+            } else if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance)) {
+                stageStats.tripleLowerBoundRejected++;
+                continue;
             }
             
             // Rule: Voice Spacing for the Triple
@@ -848,7 +901,23 @@ export async function searchStrettoChains(
         nFree: 1
     }];
 
+    let maxFrontierSize = frontier.length;
+    let maxFrontierClassCount = 1;
+
+    const frontierClassKey = (chain: StrettoChainOption[]): string => {
+        if (chain.length < 2) return 'root';
+        const delays: number[] = [];
+        for (let i = 1; i < chain.length; i++) {
+            delays.push(Math.round((chain[i].startBeat - chain[i - 1].startBeat) * ppq));
+        }
+        return delays.join(',');
+    };
+
     while (frontier.length > 0) {
+        maxFrontierSize = Math.max(maxFrontierSize, frontier.length);
+        const frontierClasses = new Set(frontier.map((n) => frontierClassKey(n.chain)));
+        maxFrontierClassCount = Math.max(maxFrontierClassCount, frontierClasses.size);
+
         frontier.sort((a, b) => getChainSignature(a.chain).localeCompare(getChainSignature(b.chain)));
         const nextLayer = new Map<string, DagNode>();
 
@@ -960,7 +1029,9 @@ export async function searchStrettoChains(
             maxDepthReached: maxDepth,
             timeoutExtensionAppliedMs,
             coverage: {
-                nodeBudgetUsedPercent: roundToWholePercent(Math.min(1, nodesVisited / MAX_SEARCH_NODES))
+                nodeBudgetUsedPercent: roundToWholePercent(Math.min(1, nodesVisited / MAX_SEARCH_NODES)),
+                maxFrontierSize,
+                maxFrontierClassCount
             },
             stageStats
         }

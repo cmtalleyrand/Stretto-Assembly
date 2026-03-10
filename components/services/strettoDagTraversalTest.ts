@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey } from './strettoGenerator';
+import { searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, violatesPairwiseLowerBound } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -24,6 +24,22 @@ assert.equal(
   toBoundaryPairKey(left, right, ppq),
   '1:N->2:N|d480|t7',
   'boundary pair key must encode ordered voice/type relation plus delay/transposition delta'
+);
+
+assert.equal(
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.8, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1 }, 0.75),
+  true,
+  'pairwise lower-bound helper must reject records exceeding dissonance ratio threshold'
+);
+assert.equal(
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 3 }, 0.75),
+  true,
+  'pairwise lower-bound helper must reject records exceeding dissonance run-event threshold'
+);
+assert.equal(
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 2 }, 0.75),
+  false,
+  'pairwise lower-bound helper must accept records that satisfy both hard bounds'
 );
 
 const subject: RawNote[] = [
@@ -64,5 +80,11 @@ assert.deepEqual(signaturesA, signaturesB, 'deterministic DAG traversal must pro
 assert.ok(reportA.stats.stageStats, 'stageStats must be emitted');
 assert.equal(typeof reportA.stats.stageStats.deterministicDagMergedNodes, 'number', 'deterministic DAG merge counter must be numeric');
 assert.ok(reportA.stats.stageStats.deterministicDagMergedNodes >= 0, 'merge counter must be non-negative');
+assert.equal(typeof reportA.stats.stageStats.pairwiseWithFourth, 'number', 'pairwise fourth-presence counter must be numeric');
+assert.equal(typeof reportA.stats.stageStats.pairwiseWithVoiceCrossing, 'number', 'pairwise voice-crossing counter must be numeric');
+assert.equal(typeof reportA.stats.stageStats.tripleLowerBoundRejected, 'number', 'triplet lower-bound rejection counter must be numeric');
+assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
+assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');
+assert.equal(typeof reportA.stats.coverage.maxFrontierClassCount, 'number', 'coverage must include max frontier class count');
 
 console.log('stretto canonical key + deterministic DAG traversal tests passed');

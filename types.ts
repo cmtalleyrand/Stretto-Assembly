@@ -370,14 +370,19 @@ export interface StrettoSearchReport {
         timeoutExtensionAppliedMs?: number;
         coverage?: {
             nodeBudgetUsedPercent: number;
+            maxFrontierSize: number;
+            maxFrontierClassCount: number;
         };
         stageStats?: {
             validDelayCount: number;
             transpositionCount: number;
             pairwiseTotal: number;
             pairwiseCompatible: number;
+            pairwiseWithFourth: number;
+            pairwiseWithVoiceCrossing: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
+            tripleLowerBoundRejected: number;
             tripleVoiceRejected: number;
             harmonicallyValidTriples: number;
             deterministicDagMergedNodes: number;
