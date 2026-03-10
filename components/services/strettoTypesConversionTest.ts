@@ -59,6 +59,8 @@ const canonicalSource: CanonicalStrettoChainEntry = {
 const legacyConverted = toLegacyChainOption(canonicalSource, {
   previousStartBeatFromE0: 2,
   lengthTicks: 240,
+  fullLengthTicks: 480,
+  truncatedLengthTicks: 240,
 });
 assert.deepEqual(
   legacyConverted,
@@ -85,8 +87,25 @@ assert.deepEqual(
   'Chain conversion should infer each delay from adjacent legacy absolute starts.'
 );
 
+
+assert.throws(
+  () => toLegacyChainOption(canonicalSource, { previousStartBeatFromE0: 0 }),
+  /Missing length context: non-truncated canonical entries require fullLengthTicks or explicit lengthTicks\./,
+  'Non-truncated entries must not silently default to zero length.'
+);
+
+assert.throws(
+  () =>
+    toLegacyChainOptions(canonicalChain, {
+      fullLengthTicks: 480,
+    }),
+  /Missing length context: truncated canonical entries require truncatedLengthTicks or explicit lengthTicks\./,
+  'Chain conversion must reject missing truncated-length context instead of emitting zero-length notes.'
+);
+
 const roundTripLegacyChain = toLegacyChainOptions(canonicalChain, {
-  lengthTicksByIndex: [480, 300, 480],
+  fullLengthTicks: 480,
+  truncatedLengthTicks: 300,
 });
 assert.deepEqual(
   roundTripLegacyChain,

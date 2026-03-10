@@ -376,9 +376,35 @@ export interface CanonicalChainEntryConversionContext {
     previousStartBeatFromE0?: number;
 
     /**
-     * Legacy entries require a tick length field; this defaults to 0 when omitted.
+     * Explicit legacy length in ticks for this entry.
      */
     lengthTicks?: number;
+
+    /**
+     * Full (non-truncated) legacy length in ticks.
+     * Used when `lengthTicks` is omitted and `isTruncated` is `false`.
+     */
+    fullLengthTicks?: number;
+
+    /**
+     * Truncated legacy length in ticks.
+     * Used when `lengthTicks` is omitted and `isTruncated` is `true`.
+     */
+    truncatedLengthTicks?: number;
+}
+
+function resolveLegacyLengthTicks(
+    canonical: CanonicalStrettoChainEntry,
+    context: CanonicalChainEntryConversionContext
+): number {
+    if (typeof context.lengthTicks === 'number') return context.lengthTicks;
+    if (canonical.isTruncated) {
+        if (typeof context.truncatedLengthTicks === 'number') return context.truncatedLengthTicks;
+        throw new Error('Missing length context: truncated canonical entries require truncatedLengthTicks or explicit lengthTicks.');
+    }
+
+    if (typeof context.fullLengthTicks === 'number') return context.fullLengthTicks;
+    throw new Error('Missing length context: non-truncated canonical entries require fullLengthTicks or explicit lengthTicks.');
 }
 
 export function fromLegacyChainOption(
@@ -402,12 +428,13 @@ export function toLegacyChainOption(
     context: CanonicalChainEntryConversionContext = {}
 ): StrettoChainOption {
     const previousStartBeatFromE0 = context.previousStartBeatFromE0 ?? 0;
+    const length = resolveLegacyLengthTicks(canonical, context);
 
     return {
         startBeat: previousStartBeatFromE0 + canonical.delayBeatsFromPreviousEntry,
         transposition: canonical.transpositionSemisFromE0,
         type: canonical.isInverted ? 'I' : 'N',
-        length: context.lengthTicks ?? 0,
+        length,
         voiceIndex: canonical.voiceIndex,
     };
 }
@@ -423,10 +450,22 @@ export interface LegacyChainOptionsConversionContext {
 
 export interface CanonicalChainOptionsConversionContext {
     /**
-     * Optional explicit length for each output legacy entry. When omitted for an
-     * index, `length` defaults to 0 for that output entry.
+     * Optional explicit length for each output legacy entry. When provided for an
+     * index, it has highest precedence.
      */
     lengthTicksByIndex?: number[];
+
+    /**
+     * Full (non-truncated) length used as shared fallback for indices without
+     * `lengthTicksByIndex[index]`.
+     */
+    fullLengthTicks?: number;
+
+    /**
+     * Truncated length used as shared fallback for indices without
+     * `lengthTicksByIndex[index]`.
+     */
+    truncatedLengthTicks?: number;
 }
 
 /**
@@ -468,6 +507,8 @@ export function toLegacyChainOptions(
         const legacy = toLegacyChainOption(canonical, {
             previousStartBeatFromE0,
             lengthTicks: context.lengthTicksByIndex?.[index],
+            fullLengthTicks: context.fullLengthTicks,
+            truncatedLengthTicks: context.truncatedLengthTicks,
         });
         previousStartBeatFromE0 = legacy.startBeat;
         return legacy;
