@@ -527,12 +527,17 @@ export async function searchStrettoChains(
     };
 
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
-    variants.forEach((vA, iA) => {
-        variants.forEach((vB, iB) => {
-            validDelays.forEach(d => {
-                transpositions.forEach(t => {
+    for (let iA = 0; iA < variants.length; iA++) {
+        const vA = variants[iA];
+        for (let iB = 0; iB < variants.length; iB++) {
+            const vB = variants[iB];
+            for (const d of validDelays) {
+                for (const t of transpositions) {
                     stageStats.pairwiseTotal++;
                     operationCounter++;
+                    if (shouldYieldToEventLoop(operationCounter)) {
+                        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                    }
                     const key = toPairKey(iA, iB, d, t);
                     const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
                     if (res.compatible) {
@@ -546,13 +551,9 @@ export async function searchStrettoChains(
                         if (res.hasFourth) stageStats.pairwiseWithFourth++;
                         if (res.hasVoiceCrossing) stageStats.pairwiseWithVoiceCrossing++;
                     }
-                });
-            });
-        });
-    });
-
-    if (shouldYieldToEventLoop(operationCounter)) {
-        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                }
+            }
+        }
     }
 
     // --- PRECOMPUTE TRIPLES ---
@@ -578,6 +579,9 @@ export async function searchStrettoChains(
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
             operationCounter++;
+            if (shouldYieldToEventLoop(operationCounter)) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
             const keyBC = toPairKey(p2.vA, p2.vB, p2.d, p2.t);
             const pairBC = pairwiseCompatibleTriplets.get(keyBC);
             if (!pairBC) continue;
@@ -669,10 +673,6 @@ export async function searchStrettoChains(
             const key = toTripleKey(vA, p1.vB, vC, d1, d2, p1.t, p2.t);
             harmonicallyValidTriples.add(key);
             stageStats.harmonicallyValidTriples++;
-
-            if (shouldYieldToEventLoop(operationCounter)) {
-                await new Promise<void>((resolve) => setTimeout(resolve, 0));
-            }
         }
     }
 

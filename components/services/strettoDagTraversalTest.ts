@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { resolveNextFrontierLayer, searchStrettoChains, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
+import { resolveNextFrontierLayer, searchStrettoChains, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -68,9 +68,14 @@ assert.deepEqual(
 );
 assert.deepEqual(
   resolveNextFrontierLayer(nextLayer, true),
-  [1, 2],
-  'frontier resolver must preserve queued successors even after timeout/node-limit stop declaration'
+  [],
+  'frontier resolver must discard queued successors after timeout/node-limit stop declaration'
 );
+
+assert.equal(shouldYieldToEventLoop(0, 8), false, 'yield helper must not trigger at iteration zero');
+assert.equal(shouldYieldToEventLoop(7, 8), false, 'yield helper must not trigger before interval boundary');
+assert.equal(shouldYieldToEventLoop(8, 8), true, 'yield helper must trigger at interval boundary');
+assert.equal(shouldYieldToEventLoop(16, 8), true, 'yield helper must trigger at repeated interval boundaries');
 
 const subject: RawNote[] = [
   { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
