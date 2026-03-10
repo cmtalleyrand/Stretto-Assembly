@@ -15,16 +15,16 @@ function mkReport(stopReason: StrettoSearchReport['stats']['stopReason'], maxDep
 }
 
 const timeoutFar = deriveSearchStatusPresentation(mkReport('Timeout', 3), 8);
-if (!timeoutFar.heading.includes('Before Target Depth')) {
-  throw new Error('Timeout far-from-target heading is incorrect.');
+if (timeoutFar.heading !== 'Search Timed Out') {
+  throw new Error('Timeout heading should use concise terminal label.');
 }
-if (!timeoutFar.detail.includes('reduce branching factor')) {
-  throw new Error('Timeout far-from-target guidance is incorrect.');
+if (!timeoutFar.detail.includes('Depth 3/8')) {
+  throw new Error('Timeout detail must report concise depth metrics.');
 }
 
 const timeoutNear = deriveSearchStatusPresentation(mkReport('Timeout', 7, 10000), 8);
-if (!timeoutNear.heading.includes('Near Completion')) {
-  throw new Error('Timeout near-target heading is incorrect.');
+if (timeoutNear.heading !== 'Search Timed Out') {
+  throw new Error('Timeout near-target heading should use concise terminal label.');
 }
 if (!timeoutNear.detail.includes('+10000ms')) {
   throw new Error('Timeout near-target extension visibility is missing.');
