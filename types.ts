@@ -363,9 +363,14 @@ export interface StrettoSearchReport {
     results: StrettoChainResult[];
     stats: {
         nodesVisited: number;
+        edgesTraversed?: number;
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        timeoutExtensionAppliedMs?: number;
+        coverage?: {
+            nodeBudgetUsedPercent: number;
+        };
         stageStats?: {
             validDelayCount: number;
             transpositionCount: number;
@@ -375,6 +380,7 @@ export interface StrettoSearchReport {
             triplePairwiseRejected: number;
             tripleVoiceRejected: number;
             harmonicallyValidTriples: number;
+            deterministicDagMergedNodes: number;
         };
     };
 }
