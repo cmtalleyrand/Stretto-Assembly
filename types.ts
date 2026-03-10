@@ -383,7 +383,6 @@ export interface StrettoSearchReport {
             tripleCandidates: number;
             triplePairwiseRejected: number;
             tripleLowerBoundRejected: number;
-            tripleParallelRejected: number;
             tripleVoiceRejected: number;
             harmonicallyValidTriples: number;
             deterministicDagMergedNodes: number;

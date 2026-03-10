@@ -31,9 +31,19 @@ export function deriveSearchStatusPresentation(
   }
 
   if (report.stats.stopReason === 'Timeout') {
+    const closeToTarget = maxDepth >= Math.max(1, safeTarget - 1);
+    if (closeToTarget) {
+      return {
+        heading: 'Search Timed Out Near Completion',
+        detail: `Depth progress ${maxDepth}/${safeTarget} (${progressPercent}%). Search reached near-target depth before timeout.${extensionText}`,
+        toneClass: 'bg-yellow-900/30 border-yellow-800 text-yellow-200',
+        progressPercent
+      };
+    }
+
     return {
-      heading: 'Search Timed Out',
-      detail: `Depth ${maxDepth}/${safeTarget} (${progressPercent}%).${extensionText}`,
+      heading: 'Search Timed Out Before Target Depth',
+      detail: `Depth progress ${maxDepth}/${safeTarget} (${progressPercent}%). This indicates search-space growth under current settings; guidance is to reduce branching factor (e.g., stricter structural constraints) or rerun with more time.${extensionText}`,
       toneClass: 'bg-yellow-900/30 border-yellow-800 text-yellow-200',
       progressPercent
     };
@@ -42,7 +52,7 @@ export function deriveSearchStatusPresentation(
   if (report.stats.stopReason === 'NodeLimit') {
     return {
       heading: 'Search Node Budget Reached',
-      detail: `Depth ${maxDepth}/${safeTarget} (${progressPercent}%). Node budget reached.`,
+      detail: `Depth progress ${maxDepth}/${safeTarget} (${progressPercent}%). Node budget saturation indicates combinatorial explosion; tighten admissibility constraints to decrease branching complexity.`,
       toneClass: 'bg-yellow-900/30 border-yellow-800 text-yellow-200',
       progressPercent
     };
