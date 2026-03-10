@@ -333,6 +333,188 @@ export interface StrettoChainOption {
     voiceIndex: number;
 }
 
+/**
+ * Canonical representation for chain entries, where delay is measured from the
+ * immediately previous entry (`d_i`), not from the origin entry `e0`.
+ * `delayBeatsFromPreviousEntry` is a first-class stored value in canonical form.
+ *
+ * Invariants:
+ * - For `e0`: `delayBeatsFromPreviousEntry = 0`, `transpositionSemisFromE0 = 0`,
+ *   `isInverted = false`, and `isTruncated = false`.
+ * - For every entry index `i > 0`: `delayBeatsFromPreviousEntry >= 0`.
+ * - Monotone nondecreasing chain timing: defining
+ *   `t_i = Σ_{k=0..i} chain[k].delayBeatsFromPreviousEntry`, then
+ *   `t_i >= t_{i-1}` for every `i > 0`.
+ */
+export interface CanonicalStrettoChainEntry {
+    delayBeatsFromPreviousEntry: number;
+    transpositionSemisFromE0: number;
+    voiceIndex: number;
+    isInverted: boolean;
+    isTruncated: boolean;
+}
+
+export interface LegacyChainOptionConversionContext {
+    /**
+     * Absolute start beat of the previous chain entry in legacy coordinates.
+     * Defaults to 0, which is the correct predecessor for `e0`.
+     */
+    previousStartBeatFromE0?: number;
+
+    /**
+     * If provided, truncation is inferred via `legacy.length < fullLengthTicks`.
+     * If omitted, truncation defaults to `false`.
+     */
+    fullLengthTicks?: number;
+}
+
+export interface CanonicalChainEntryConversionContext {
+    /**
+     * Absolute start beat of the previous chain entry in legacy coordinates.
+     * Defaults to 0, which is the correct predecessor for `e0`.
+     */
+    previousStartBeatFromE0?: number;
+
+    /**
+     * Explicit legacy length in ticks for this entry.
+     */
+    lengthTicks?: number;
+
+    /**
+     * Full (non-truncated) legacy length in ticks.
+     * Used when `lengthTicks` is omitted and `isTruncated` is `false`.
+     */
+    fullLengthTicks?: number;
+
+    /**
+     * Truncated legacy length in ticks.
+     * Used when `lengthTicks` is omitted and `isTruncated` is `true`.
+     */
+    truncatedLengthTicks?: number;
+}
+
+function resolveLegacyLengthTicks(
+    canonical: CanonicalStrettoChainEntry,
+    context: CanonicalChainEntryConversionContext
+): number {
+    if (typeof context.lengthTicks === 'number') return context.lengthTicks;
+    if (canonical.isTruncated) {
+        if (typeof context.truncatedLengthTicks === 'number') return context.truncatedLengthTicks;
+        throw new Error('Missing length context: truncated canonical entries require truncatedLengthTicks or explicit lengthTicks.');
+    }
+
+    if (typeof context.fullLengthTicks === 'number') return context.fullLengthTicks;
+    throw new Error('Missing length context: non-truncated canonical entries require fullLengthTicks or explicit lengthTicks.');
+}
+
+export function fromLegacyChainOption(
+    legacy: StrettoChainOption,
+    context: LegacyChainOptionConversionContext = {}
+): CanonicalStrettoChainEntry {
+    const hasFullLength = typeof context.fullLengthTicks === 'number';
+    const previousStartBeatFromE0 = context.previousStartBeatFromE0 ?? 0;
+
+    return {
+        delayBeatsFromPreviousEntry: legacy.startBeat - previousStartBeatFromE0,
+        transpositionSemisFromE0: legacy.transposition,
+        voiceIndex: legacy.voiceIndex,
+        isInverted: legacy.type === 'I',
+        isTruncated: hasFullLength ? legacy.length < context.fullLengthTicks! : false,
+    };
+}
+
+export function toLegacyChainOption(
+    canonical: CanonicalStrettoChainEntry,
+    context: CanonicalChainEntryConversionContext = {}
+): StrettoChainOption {
+    const previousStartBeatFromE0 = context.previousStartBeatFromE0 ?? 0;
+    const length = resolveLegacyLengthTicks(canonical, context);
+
+    return {
+        startBeat: previousStartBeatFromE0 + canonical.delayBeatsFromPreviousEntry,
+        transposition: canonical.transpositionSemisFromE0,
+        type: canonical.isInverted ? 'I' : 'N',
+        length,
+        voiceIndex: canonical.voiceIndex,
+    };
+}
+
+
+export interface LegacyChainOptionsConversionContext {
+    /**
+     * If provided, truncation is inferred via `legacy.length < fullLengthTicks`
+     * for every entry in the chain.
+     */
+    fullLengthTicks?: number;
+}
+
+export interface CanonicalChainOptionsConversionContext {
+    /**
+     * Optional explicit length for each output legacy entry. When provided for an
+     * index, it has highest precedence.
+     */
+    lengthTicksByIndex?: number[];
+
+    /**
+     * Full (non-truncated) length used as shared fallback for indices without
+     * `lengthTicksByIndex[index]`.
+     */
+    fullLengthTicks?: number;
+
+    /**
+     * Truncated length used as shared fallback for indices without
+     * `lengthTicksByIndex[index]`.
+     */
+    truncatedLengthTicks?: number;
+}
+
+/**
+ * Converts a full legacy chain to canonical entries.
+ *
+ * This function eliminates caller-managed predecessor bookkeeping by deriving
+ * each `delayBeatsFromPreviousEntry` from adjacent legacy `startBeat` values
+ * in a single O(n) pass.
+ */
+export function fromLegacyChainOptions(
+    legacyEntries: StrettoChainOption[],
+    context: LegacyChainOptionsConversionContext = {}
+): CanonicalStrettoChainEntry[] {
+    let previousStartBeatFromE0 = 0;
+
+    return legacyEntries.map((legacy) => {
+        const canonical = fromLegacyChainOption(legacy, {
+            previousStartBeatFromE0,
+            fullLengthTicks: context.fullLengthTicks,
+        });
+        previousStartBeatFromE0 = legacy.startBeat;
+        return canonical;
+    });
+}
+
+/**
+ * Converts a full canonical chain to legacy entries.
+ *
+ * This function reconstructs absolute legacy `startBeat` coordinates from
+ * relative delays via cumulative summation in a single O(n) pass.
+ */
+export function toLegacyChainOptions(
+    canonicalEntries: CanonicalStrettoChainEntry[],
+    context: CanonicalChainOptionsConversionContext = {}
+): StrettoChainOption[] {
+    let previousStartBeatFromE0 = 0;
+
+    return canonicalEntries.map((canonical, index) => {
+        const legacy = toLegacyChainOption(canonical, {
+            previousStartBeatFromE0,
+            lengthTicks: context.lengthTicksByIndex?.[index],
+            fullLengthTicks: context.fullLengthTicks,
+            truncatedLengthTicks: context.truncatedLengthTicks,
+        });
+        previousStartBeatFromE0 = legacy.startBeat;
+        return legacy;
+    });
+}
+
 export interface ScoreLogItem {
     reason: string;
     points: number;
