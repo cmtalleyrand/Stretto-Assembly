@@ -68,8 +68,8 @@ assert.deepEqual(
 );
 assert.deepEqual(
   resolveNextFrontierLayer(nextLayer, true),
-  [],
-  'frontier resolver must discard queued successors after timeout/node-limit stop declaration'
+  [1, 2],
+  'frontier resolver must preserve queued successors even after timeout/node-limit stop declaration'
 );
 
 const subject: RawNote[] = [

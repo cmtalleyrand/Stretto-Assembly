@@ -61,10 +61,9 @@ export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, 
     return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
 }
 
-export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
-    return stopTraversal ? [] : Array.from(nextLayer.values());
+export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, _stopTraversal: boolean): T[] {
+    return Array.from(nextLayer.values());
 }
-
 // --- Precomputation: Scales & Inversion ---
 
 function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offsetTicks: number } {
@@ -934,6 +933,15 @@ export async function searchStrettoChains(
             nodesVisited++;
             maxDepth = Math.max(maxDepth, node.chain.length);
 
+            if (node.chain.length === options.targetChainLength) {
+                const sig = getChainSignature(node.chain);
+                if (!seenSignatures.has(sig)) {
+                    seenSignatures.add(sig);
+                    unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
+                }
+                continue;
+            }
+
             if (Date.now() - startTime > activeTimeLimitMs) {
                 const canExtend = timeoutExtensionAppliedMs === 0 && shouldExtendTimeoutNearCompletion(maxDepth, options.targetChainLength);
                 if (canExtend) {
@@ -949,15 +957,6 @@ export async function searchStrettoChains(
                 if (!terminationReason) terminationReason = 'NodeLimit';
                 stopTraversal = true;
                 break;
-            }
-
-            if (node.chain.length === options.targetChainLength) {
-                const sig = getChainSignature(node.chain);
-                if (!seenSignatures.has(sig)) {
-                    seenSignatures.add(sig);
-                    unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
-                }
-                continue;
             }
 
             if (node.chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {
