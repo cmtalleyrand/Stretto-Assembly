@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
+import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isStrongBeat, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -79,6 +79,40 @@ assert.equal(stageCounterFixture.pairStageRejected, 1, 'pair-stage helper must i
 assert.equal(stageCounterFixture.tripletStageRejected, 1, 'triplet-stage helper must increment triplet-stage rejection counter exactly once for one rejected predicate');
 assert.equal(stageCounterFixture.globalLineageStageRejected, 1, 'global-lineage helper must increment global-lineage rejection counter exactly once for one rejected predicate');
 
+
+const perfectParallelA = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0, durationTicks: 480, pitch: 60 },
+    { relTick: 480, durationTicks: 480, pitch: 62 }
+  ]
+};
+const perfectParallelB = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0, durationTicks: 480, pitch: 67 },
+    { relTick: 480, durationTicks: 480, pitch: 69 }
+  ]
+};
+const perfectParallelScan = checkCounterpointStructure(perfectParallelA, perfectParallelB, 0, 0, 1.0, ppq);
+assert.equal(perfectParallelScan.hasParallelPerfect58, true, 'pairwise scan must flag strict parallel perfect motion when both voices move simultaneously by equal signed delta from a perfect interval');
+
+const contraryMotionB = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0, durationTicks: 480, pitch: 67 },
+    { relTick: 480, durationTicks: 480, pitch: 65 }
+  ]
+};
+const contraryMotionScan = checkCounterpointStructure(perfectParallelA, contraryMotionB, 0, 0, 1.0, ppq);
+assert.equal(contraryMotionScan.hasParallelPerfect58, false, 'pairwise scan must not flag contrary motion as parallel perfect motion');
+
 const p4UpperVoiceA = {
   type: 'N' as const,
   truncationBeats: 0,
@@ -101,6 +135,8 @@ const p4Pair = checkCounterpointStructure(p4UpperVoiceA, p4UpperVoiceB, 0, 0, 0.
 assert.equal(p4Pair.compatible, true, 'pairwise scan must treat P4 as provisionally consonant before bass-context dissonance resolution');
 assert.equal(p4Pair.dissonanceRatio, 0, 'pairwise P4-only slices must not accrue dissonance ratio burden');
 assert.equal(p4Pair.hasParallelPerfect58, false, 'parallel P4 motion must never be tagged as forbidden perfect 5/8 parallel motion');
+assert.ok((p4Pair.p4Spans?.length ?? 0) > 0, 'pairwise metadata must include P4 simultaneity spans');
+assert.equal((p4Pair.parallelPerfectStartTicks?.length ?? 0), 0, 'pairwise metadata must not report forbidden perfect locations for pure P4 fixtures');
 
 
 const p4WithAAsBass = checkCounterpointStructureWithBassRole(p4UpperVoiceA, p4UpperVoiceB, 0, 0, 0.01, 'a', ppq);
@@ -161,6 +197,22 @@ assert.equal(shouldYieldToEventLoop(0, 8), false, 'yield helper must not trigger
 assert.equal(shouldYieldToEventLoop(7, 8), false, 'yield helper must not trigger before interval boundary');
 assert.equal(shouldYieldToEventLoop(8, 8), true, 'yield helper must trigger at interval boundary');
 assert.equal(shouldYieldToEventLoop(16, 8), true, 'yield helper must trigger at repeated interval boundaries');
+
+assert.equal(isStrongBeat(0, ppq, 4, 4), true, '4/4 downbeat must be strong');
+assert.equal(isStrongBeat(ppq * 2, ppq, 4, 4), true, '4/4 beat 3 must be strong');
+assert.equal(isStrongBeat(ppq, ppq, 4, 4), false, '4/4 beat 2 must be weak');
+assert.equal(isStrongBeat(ppq * 3, ppq, 4, 4), false, '4/4 beat 4 must be weak');
+
+assert.equal(isStrongBeat(0, ppq, 12, 8), true, '12/8 beat 1 must be strong');
+assert.equal(isStrongBeat(ppq * 3, ppq, 12, 8), true, '12/8 beat 3 (dotted-quarter index 3) must be strong');
+assert.equal(isStrongBeat(Math.round(ppq * 1.5), ppq, 12, 8), false, '12/8 beat 2 must be weak');
+assert.equal(isStrongBeat(Math.round(ppq * 4.5), ppq, 12, 8), false, '12/8 beat 4 must be weak');
+
+assert.equal(isStrongBeat(0, ppq, 6, 8), true, '6/8 downbeat must be strong');
+assert.equal(isStrongBeat(Math.round(ppq * 1.5), ppq, 6, 8), false, '6/8 second beat must be weak under first-beat-only rule');
+
+assert.equal(isStrongBeat(0, ppq, 9, 8), true, '9/8 downbeat must be strong');
+assert.equal(isStrongBeat(ppq * 3, ppq, 9, 8), false, '9/8 third dotted-quarter beat must be weak under first-beat-only rule');
 
 
 assert.equal(
@@ -238,6 +290,10 @@ assert.equal(typeof reportA.stats.stageStats.pairStageRejected, 'number', 'stage
 assert.equal(typeof reportA.stats.stageStats.tripletStageRejected, 'number', 'stage stats must include triplet-stage rejection counter');
 assert.equal(typeof reportA.stats.stageStats.globalLineageStageRejected, 'number', 'stage stats must include global-lineage-stage rejection counter');
 assert.equal(typeof reportA.stats.stageStats.structuralScanInvocations, 'number', 'stage stats must include structural scan invocation counter');
+assert.equal(typeof reportA.stats.stageStats.pairwiseParallelRejected, 'number', 'stage stats must include pairwise parallel-perfect rejection counter');
+assert.ok(Array.isArray(reportA.stats.stageStats.dissonanceSpans), 'stage stats must expose dissonance span metadata');
+assert.ok(Array.isArray(reportA.stats.stageStats.p4Spans), 'stage stats must expose P4 span metadata');
+assert.ok(Array.isArray(reportA.stats.stageStats.parallelPerfectLocationTicks), 'stage stats must expose parallel-perfect location metadata');
 assert.ok(reportA.stats.stageStats.structuralScanInvocations > 0, 'stage stats must report at least one guarded structural scan invocation');
 assert.ok(reportA.stats.stageStats.tripletStageRejected > 0, 'triplet-stage rejection counter must record pre-scan pruning events');
 assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');

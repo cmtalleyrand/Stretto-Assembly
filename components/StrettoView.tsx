@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
-import { parseSimpleAbc, extractKeyFromAbc } from './services/abcBridge';
+import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
 import { searchStrettoChains } from './services/strettoGenerator'; 
 import { getStrictPitchName } from './services/midiSpelling';
@@ -286,7 +286,13 @@ export default function StrettoView({
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
         setTimeout(async () => {
             try {
-                const report = await searchStrettoChains(subjectNotes.filter(n => !!n), { ...searchOptions, voiceNames }, ppq || 480);
+                const sourceMeter = mode === 'abc' ? extractMeterFromAbc(abcInput) : null;
+                const report = await searchStrettoChains(subjectNotes.filter(n => !!n), {
+                    ...searchOptions,
+                    voiceNames,
+                    meterNumerator: sourceMeter?.num ?? ts.num,
+                    meterDenominator: sourceMeter?.den ?? ts.den,
+                }, ppq || 480);
                 setChainResults(report.results); setSearchReport(report);
             } catch (e) { alert("Search failed."); } finally { setIsSearching(false); }
         }, 100);
