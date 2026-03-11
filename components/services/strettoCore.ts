@@ -464,6 +464,9 @@ export function analyzeStrettoCandidate(
     let pairDissonanceScore = 0;
     let maxDissonanceRunEvents = 0;
     let currentDissonanceRunEvents = 0;
+    let maxDissonanceRunTicks = 0;
+    let currentDissonanceRunTicks = 0;
+    const maxAllowedContinuousDissonanceTicks = ppq;
     harmonicRegions.forEach(r => {
         const mid = r.startTick + (r.endTick - r.startTick)/2;
         const active = allNotes.filter(n => n.ticks <= mid && (n.ticks + n.durationTicks) > mid);
@@ -486,17 +489,21 @@ export function analyzeStrettoCandidate(
         }
         
         if (r.type !== 'consonant_stable') {
+            const runTicks = r.endTick - r.startTick;
             currentDissonanceRunEvents += 1;
+            currentDissonanceRunTicks += runTicks;
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, currentDissonanceRunEvents);
+            maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, currentDissonanceRunTicks);
         } else {
             currentDissonanceRunEvents = 0;
+            currentDissonanceRunTicks = 0;
         }
 
         const durBeats = (r.endTick - r.startTick) / ppq;
         pairDissonanceScore += (durBeats * pairDissCount);
     });
 
-    const violatesDissonancePolicy = dissonanceRatio > maxPairwiseDissonance || maxDissonanceRunEvents > 2;
+    const violatesDissonancePolicy = dissonanceRatio > maxPairwiseDissonance || maxDissonanceRunEvents > 2 || maxDissonanceRunTicks > maxAllowedContinuousDissonanceTicks;
 
     const errors: StrettoError[] = [];
     
@@ -545,7 +552,7 @@ export function analyzeStrettoCandidate(
             tick: delayTicks,
             timeFormatted: getFormattedTime(delayTicks, ppq, ts.num, ts.den),
             type: maxDissonanceRunEvents > 2 ? 'Consecutive Dissonance' : 'Unresolved Dissonance',
-            details: `Pairwise dissonance policy violation (ratio=${Math.round(dissonanceRatio * 100)}%, cap=${Math.round(maxPairwiseDissonance * 100)}%, maxRun=${maxDissonanceRunEvents}, allowedRun<=2).`,
+            details: `Pairwise dissonance policy violation (ratio=${Math.round(dissonanceRatio * 100)}%, cap=${Math.round(maxPairwiseDissonance * 100)}%, maxRunEvents=${maxDissonanceRunEvents}, allowedRunEvents<=2, maxRunTicks=${maxDissonanceRunTicks}, allowedRunTicks<=${maxAllowedContinuousDissonanceTicks}).`,
             severity: 'fatal'
         });
     }
