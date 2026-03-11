@@ -48,56 +48,100 @@ The pipeline produces a set of **valid triplets** (consecutive groups of 3 entri
 
 ---
 
-## Pipeline Stages (Authoritative Order from `PROJECT_PLAN.md` §6.0A)
+## Pipeline Stages
 
-The stage order below is normative and supersedes earlier informal descriptions. Candidate transitions are enumerated **only after** pairwise and triplet feasibility artifacts are established.
+### Stage 1 — Valid Delay Triplets (cheapest filter)
 
-1. **Pairwise dissonance precompute (artifact stage).**
-   - Compute reusable pairwise dissonance over canonical pair-relation keys of adjacent entries.
-   - Key domain includes adjacent-entry relation terms and `d_{i+1}`; it excludes predecessor delay `d_i` by invariance.
-2. **Pair-local predicate stage.**
-   - Apply delay-domain and start-delay boundary predicates.
-   - Apply repeat-whitelist semantics and derive local forward-budget payload.
-3. **Triplet-local predicate stage.**
-   - Evaluate voicing and delay rules requiring two adjacent pair relations.
-4. **Triplet dissonance stage.**
-   - Evaluate A–C dissonance checks only when temporal overlap exists.
-5. **Transition enumeration stage.**
-   - Enumerate candidate transitions strictly from fully feasible triplet artifacts.
-6. **Global-lineage stage.**
-   - During path extension, enforce global constraints (notably A.1 long-delay uniqueness).
-7. **State propagation/cache stage.**
-   - Cache accepted frontier state and propagate forward-budget payload deterministically.
+Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that satisfy the delay rules from `STRETTO_RULES.md` simultaneously and as a unit, given the subject length `Sb`:
 
-### Implementation clarifications (aligned to project plan)
+| Rule | Condition |
+|------|-----------|
+| **A.1 Global Uniqueness (deferred enforcement target)** | All delays `> Sb/3` must be distinct across the **entire chain**. Stage 1 does not prove this globally; it only emits triplets that remain admissible for incremental uniqueness enforcement in Stage 5. |
+| **A.2 Half-length trigger** | If `d_{n-1} > Sb/2`, then `d_n < d_{n-1} − 0.5` |
+| **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
+| **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
+| **A.5 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
 
-- Adjacent-transposition separation (`|t_i - t_{i+1}| >= 5`) is pairwise and is therefore enforced in pairwise precompute (`Δt` domain) before structural scans.
-- Transform adjacency prohibition (no consecutive inversion; no consecutive truncation) is enforced at extension time using predecessor variant state.
-- Stage-5 “candidate extension” means one proposed successor tuple `(delay, transposition, variant, voice)` appended to a frontier node.
+**Start entries** (index 0) are valid if their delay is within the universal max.
+**End entries** have relaxed rules: any delay `< Sb/3` is acceptable regardless of contraction direction.
 
-### Stage-5 incremental uniqueness invariant
+The output of this stage is `validDelayTriplets: Set<(d₁, d₂, d₃)>`.
 
-During DAG traversal, frontier state carries a high-delay set `U` for delays `> Sb/3`:
+---
+
+### Stage 2 — Valid Transposition Triplets
+
+For each delay triplet from Stage 1, enumerate all combinations of three transposition intervals `(t₁, t₂, t₃)` that satisfy voice separation rules:
+
+- **Neighbour ordering:** higher voice index must have lower or equal transposition (no voice crossing)
+- **Bass–alto separation:** alto transposition must be ≥ bass transposition + 12 semitones
+- **No consecutive same transposition** (Gatekeeper B: `t_n ≠ t_{n-1}`)
+
+The output is `validTranspositionTriplets: Set<(d₁,d₂,d₃, t₁,t₂,t₃)>` with provisional voice assignments.
+
+---
+
+### Stage 3 — Pairwise Harmonic Check
+
+For each (delay, transposition) triplet, check every **overlapping pair** of entries for harmonic admissibility using the precomputed `compatTable`. A pair fails if the notes that sound simultaneously produce a combination absent from the compat table.
+
+This is the same compatibility table already built by the existing code — it just needs to be applied at the pair level during precomputation, not inline during DFS.
+
+---
+
+### Stage 4 — Triplet-Level Harmonic Check
+
+For surviving pairs, check the **full triplet overlap** (all three entries sounding simultaneously where their time windows intersect). Apply dissonance and voice-leading rules to the three-voice texture.
+
+The output is `validTriplets: Map<tripletKey, TripletData>`.
+
+---
+
+### Stage 5 — Chain Assembly
+
+Assemble chains of length `N` by joining valid triplets that share their overlapping boundary pair:
+
+```
+Triplet A covers entries [i, i+1, i+2]
+Triplet B covers entries [i+1, i+2, i+3]
+A and B are compatible if their shared pair (i+1, i+2) matches exactly.
+```
+
+This is graph traversal on a DAG of triplets — it is exhaustive and guaranteed correct because every constraint was enforced in the precomputation stages.
+
+Global constraints (especially A.1 delay uniqueness) are enforced here as an **incremental invariant**, not an ex-post validation pass.
+
+### Stage 5A — Incremental global uniqueness state
+
+During DAG traversal, every frontier state carries an explicit uniqueness accumulator for delays `> Sb/3`:
 
 \[
 \text{state} = (\text{boundaryPairKey},\ i,\ U)
 \]
 
-Extension semantics:
+where `U` is the set (or bitset over quantized delay bins) of already-used high delays.
 
-- if `d_new <= Sb/3`: uniqueness-neutral,
-- if `d_new > Sb/3` and `d_new ∉ U`: accept and update `U ← U ∪ {d_new}`,
+When appending a candidate successor triplet that contributes new delay `d_new`:
+
+- if `d_new <= Sb/3`: extension is uniqueness-neutral,
+- if `d_new > Sb/3` and `d_new ∉ U`: extend and update `U ← U ∪ {d_new}`,
 - if `d_new > Sb/3` and `d_new ∈ U`: reject immediately.
 
-This yields `O(1)` average-time uniqueness checks per extension with hash membership.
+This makes uniqueness checking `O(1)` average-time per extension with hash-set membership (or worst-case `O(1)` deterministic with fixed-grid bitset indexing), and avoids generating invalid full chains before rejection.
+
+### Stage 5B — Dominance pruning on equivalent boundaries
+
+For fixed `(boundaryPairKey, i)`, if two frontier states have uniqueness sets `U1` and `U2` with `U1 ⊆ U2`, then state `(boundaryPairKey, i, U2)` is dominated and can be pruned because any continuation valid from `U2` is also valid from `U1`.
+
+This converts global uniqueness from a late filter into a low-cost, monotone feasibility constraint during assembly.
 
 ---
 
 ## Why This Architecture Is Correct
 
-| Property | DFS-with-pruning (old) | Triplet assembly target (Phase 6) |
+| Property | DFS-with-pruning (old) | Triplet assembly (correct) |
 |----------|----------------------|--------------------------|
-| Exhaustive | No — pruning can cut valid branches | Target property under staged completion and bounded runtime budgets |
+| Exhaustive | No — pruning can cut valid branches | Yes — all valid triplets are enumerated first |
 | Global Uniqueness (A.1) | Broken — only checks adjacent delay | Enforced incrementally at each Stage-5 extension via stateful membership checks |
 | Constraint isolation | Mixed — rules scattered inline | Clean — each rule applied at exactly one stage |
 | Performance | Unpredictable — search tree varies wildly | Predictable — precomputation cost is bounded |
