@@ -1040,8 +1040,10 @@ export async function searchStrettoChains(
                 }
 
                 const admissibleNextVoices = new Set<number>();
+                const allowsReusingVoiceA = d1 + d2 >= variants[vA].lengthTicks;
                 for (let voiceC = 0; voiceC < options.ensembleTotal; voiceC++) {
-                    if (voiceC === voiceA || voiceC === voiceB) continue;
+                    if (voiceC === voiceB) continue;
+                    if (voiceC === voiceA && !allowsReusingVoiceA) continue;
                     if (!pairBC.allowedVoicePairs.has(`${voiceB}->${voiceC}`)) continue;
 
                     if (pairBC.hasFourth) {
