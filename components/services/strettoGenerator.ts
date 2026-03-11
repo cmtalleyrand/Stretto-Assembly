@@ -725,7 +725,7 @@ export async function searchStrettoChains(
 
                     // Neutral scan (P4 treated as provisionally consonant)
                     stageStats.structuralScanInvocations++;
-                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
+                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance, ppq);
                     if (!pairScan.compatible) {
                         stageStats.pairStageRejected++;
                         continue;
@@ -734,9 +734,9 @@ export async function searchStrettoChains(
                     // Bass-role scans: P4 resolved as dissonant when lower note is bass.
                     // These are the authoritative results for voice-specific pruning.
                     stageStats.structuralScanInvocations++;
-                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'a', ppq);
+                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq);
                     stageStats.structuralScanInvocations++;
-                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'b', ppq);
+                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq);
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
