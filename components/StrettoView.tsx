@@ -17,6 +17,7 @@ import StrettoList from './stretto/StrettoList';
 import StrettoInspector from './stretto/StrettoInspector';
 import StrettoFooter from './stretto/StrettoFooter';
 import StrettoChainView from './stretto/StrettoChainView';
+import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
 
 interface StrettoViewProps {
@@ -270,6 +271,14 @@ export default function StrettoView({
     const processedDiscoveryResults = useMemo(() => {
         return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
     }, [pairwiseResults, gradeFilter, searchOptions.maxPairwiseDissonance]);
+
+    useEffect(() => {
+        setCheckedIds((prev) => pruneCheckedIdsByHardPairwisePolicy(prev, pairwiseResults, searchOptions.maxPairwiseDissonance));
+        setSelectedCandidate((prev) => {
+            if (!prev) return null;
+            return isCandidateAllowedByHardPairwisePolicy(prev, searchOptions.maxPairwiseDissonance) ? prev : null;
+        });
+    }, [pairwiseResults, searchOptions.maxPairwiseDissonance]);
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
