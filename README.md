@@ -56,7 +56,7 @@ Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that
 
 | Rule | Condition |
 |------|-----------|
-| **A.1 Local Uniqueness** | All delays `> Sb/3` must be distinct across the **entire chain**, just adjacent pairs - but efficient to prune early|
+| **A.1 Global Uniqueness (deferred enforcement target)** | All delays `> Sb/3` must be distinct across the **entire chain**. Stage 1 does not prove this globally; it only emits triplets that remain admissible for incremental uniqueness enforcement in Stage 5. |
 | **A.2 Half-length trigger** | If `d_{n-1} > Sb/2`, then `d_n < d_{n-1} − 0.5` |
 | **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
 | **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
@@ -109,7 +109,31 @@ A and B are compatible if their shared pair (i+1, i+2) matches exactly.
 
 This is graph traversal on a DAG of triplets — it is exhaustive and guaranteed correct because every constraint was enforced in the precomputation stages.
 
-Global constraints (e.g. delay uniqueness across the full chain) are enforced here by tracking seen delay values as the chain grows, rejecting any triplet that would introduce a duplicate delay `> Sb/3`.
+Global constraints (especially A.1 delay uniqueness) are enforced here as an **incremental invariant**, not an ex-post validation pass.
+
+### Stage 5A — Incremental global uniqueness state
+
+During DAG traversal, every frontier state carries an explicit uniqueness accumulator for delays `> Sb/3`:
+
+\[
+\text{state} = (\text{boundaryPairKey},\ i,\ U)
+\]
+
+where `U` is the set (or bitset over quantized delay bins) of already-used high delays.
+
+When appending a candidate successor triplet that contributes new delay `d_new`:
+
+- if `d_new <= Sb/3`: extension is uniqueness-neutral,
+- if `d_new > Sb/3` and `d_new ∉ U`: extend and update `U ← U ∪ {d_new}`,
+- if `d_new > Sb/3` and `d_new ∈ U`: reject immediately.
+
+This makes uniqueness checking `O(1)` average-time per extension with hash-set membership (or worst-case `O(1)` deterministic with fixed-grid bitset indexing), and avoids generating invalid full chains before rejection.
+
+### Stage 5B — Dominance pruning on equivalent boundaries
+
+For fixed `(boundaryPairKey, i)`, if two frontier states have uniqueness sets `U1` and `U2` with `U1 ⊆ U2`, then state `(boundaryPairKey, i, U2)` is dominated and can be pruned because any continuation valid from `U2` is also valid from `U1`.
+
+This converts global uniqueness from a late filter into a low-cost, monotone feasibility constraint during assembly.
 
 ---
 
@@ -118,7 +142,7 @@ Global constraints (e.g. delay uniqueness across the full chain) are enforced he
 | Property | DFS-with-pruning (old) | Triplet assembly (correct) |
 |----------|----------------------|--------------------------|
 | Exhaustive | No — pruning can cut valid branches | Yes — all valid triplets are enumerated first |
-| Global Uniqueness (A.1) | Broken — only checks adjacent delay | Enforced — tracked across full chain in Stage 5 |
+| Global Uniqueness (A.1) | Broken — only checks adjacent delay | Enforced incrementally at each Stage-5 extension via stateful membership checks |
 | Constraint isolation | Mixed — rules scattered inline | Clean — each rule applied at exactly one stage |
 | Performance | Unpredictable — search tree varies wildly | Predictable — precomputation cost is bounded |
 | Debuggability | Hard — no intermediate state | Easy — each stage's output can be inspected |
