@@ -41,6 +41,7 @@ interface PairwiseCompatibilityRecord {
     intervalClass: number;
     isRestrictedInterval: boolean;
     isFreeInterval: boolean;
+    meetsAdjacentTranspositionSeparation: boolean;
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
@@ -737,15 +738,6 @@ export async function searchStrettoChains(
                 for (const t of transpositions) {
                     stageStats.pairwiseTotal++;
 
-                    // Adjacent-transposition gatekeeper (pairwise form):
-                    // each pair (e_i, e_{i+1}) must satisfy |t_{i+1} - t_i| >= 5 semitones.
-                    // In pairwise precomputation, `t` is exactly that adjacent delta, so prune
-                    // sub-P4 intervals before any structural scan to reduce work.
-                    if (Math.abs(t) < 5) {
-                        stageStats.pairStageRejected++;
-                        continue;
-                    }
-
                     operationCounter++;
                     if (shouldYieldToEventLoop(operationCounter)) {
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -815,7 +807,8 @@ export async function searchStrettoChains(
                         },
                         intervalClass,
                         isRestrictedInterval,
-                        isFreeInterval
+                        isFreeInterval,
+                        meetsAdjacentTranspositionSeparation: Math.abs(t) >= 5
                     });
                     stageStats.pairwiseCompatible++;
                     if (pairScan.hasFourth) {
@@ -1129,6 +1122,16 @@ export async function searchStrettoChains(
                 if (t === prevTransposition) continue;
 
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                    // Immediate-neighbor pairwise lookup: this is the sole location where A.6 is evaluated.
+                    // Non-adjacent overlaps are harmonic-only predicates and are handled separately below.
+                    const immPrevVarIdx = variantIndices[depth - 1];
+                    const immRelDelay = delayTicks;
+                    const immRelTrans = t - chain[depth - 1].transposition;
+                    const immKey = toPairKey(immPrevVarIdx, varIdx, immRelDelay, immRelTrans);
+                    const immPair = pairwiseCompatibleTriplets.get(immKey);
+                    if (!immPair) continue;
+                    if (!immPair.meetsAdjacentTranspositionSeparation) continue;
+
                     if (depth >= 2) {
                         const vA = variantIndices[depth - 2];
                         const vB = variantIndices[depth - 1];
@@ -1162,20 +1165,9 @@ export async function searchStrettoChains(
                     let isRestricted: boolean;
                     let isFree: boolean;
                     if (depth >= 2) {
-                        // The immediate predecessor pair key exists — look up its interval class.
-                        const immPrevVarIdx = variantIndices[depth - 1];
-                        const immRelDelay = delayTicks;
-                        const immRelTrans = t - chain[depth - 1].transposition;
-                        const immKey = toPairKey(immPrevVarIdx, varIdx, immRelDelay, immRelTrans);
-                        const immPair = pairwiseCompatibleTriplets.get(immKey);
-                        if (immPair) {
-                            isRestricted = immPair.isRestrictedInterval;
-                            isFree = immPair.isFreeInterval;
-                        } else {
-                            const ic = ((t % 12) + 12) % 12;
-                            isRestricted = [3, 4, 8, 9].includes(ic);
-                            isFree = [0, 5, 7].includes(ic);
-                        }
+                        // Immediate predecessor pair record already resolved above.
+                        isRestricted = immPair.isRestrictedInterval;
+                        isFree = immPair.isFreeInterval;
                     } else {
                         const ic = ((t % 12) + 12) % 12;
                         isRestricted = [3, 4, 8, 9].includes(ic);
@@ -1192,6 +1184,8 @@ export async function searchStrettoChains(
                     const overlappingPairs: { entry: StrettoChainOption; pairRecord: PairwiseCompatibilityRecord }[] = [];
                     let harmonicFail = false;
                     for (let k = 0; k < chain.length; k++) {
+                        // Immediate predecessor pair is already validated via immPair above.
+                        if (k === chain.length - 1) continue;
                         const prevE = chain[k];
                         const prevVarIdx = variantIndices[k];
                         const prevStartTicks = Math.round(prevE.startBeat * ppq);

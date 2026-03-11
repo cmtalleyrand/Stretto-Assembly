@@ -31,7 +31,7 @@ Any chain candidate that violates *any* of these rules is immediately discarded 
 6.  **Adjacent Transposition Separation:** For every adjacent pair `(e_i, e_{i+1})`, enforce `|t_i - t_{i+1}| >= 5` semitones (perfect fourth minimum).
 7.  **Transform Adjacency Prohibition:** Consecutive inversion entries are forbidden, and consecutive truncated entries are forbidden.
 
-Implementation invariant: Rule A.6 is pairwise and is therefore enforced during pairwise candidate precomputation (`Δt` domain) to prune inadmissible edges before expensive structural/harmonic scans.
+Implementation invariant: Rule A.6 is an immediate-neighbor predicate and is therefore enforced during successor extension against the direct predecessor `(e_{i-1}, e_i)` only; non-adjacent overlapping pairs remain governed by harmonic compatibility rules, not A.6.
 
 ### B. Voice Interval Constraints (Relative)
 The algorithm strictly enforces vertical ordering:
