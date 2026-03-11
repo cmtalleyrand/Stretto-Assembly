@@ -119,31 +119,13 @@ Global constraints (especially A.1 delay uniqueness) are enforced here as an **i
 
 ### Stage 5A — Incremental global uniqueness state
 
-During DAG traversal, every frontier state carries an explicit uniqueness accumulator for delays `> Sb/3`.
-
-Conceptually (minimal model), uniqueness feasibility depends on:
+During DAG traversal, every frontier state carries an explicit uniqueness accumulator for delays `> Sb/3`:
 
 \[
-\text{state}_{min} = (\text{boundaryPairKey},\ i,\ U)
+\text{state} = (\text{boundaryPairKey},\ i,\ U)
 \]
 
 where `U` is the set (or bitset over quantized delay bins) of already-used high delays.
-
-In the current branch, the **implemented merge/dedup key is intentionally richer** than `state_min` and includes additional feasibility dimensions:
-
-- chain structural signature (`getChainSignature`),
-- ordered boundary signature (`toOrderedBoundarySignature`),
-- voice re-entry clocks (`voiceEndTimesTicks`),
-- quota counters (`nInv`, `nTrunc`, `nRestricted`, `nFree`),
-- high-delay uniqueness set (`usedLongDelays`).
-
-Formally, implementation key:
-
-\[
-\text{state}_{impl} = (\text{chainSig},\ \text{boundarySig},\ \text{voiceEndTimes},\ \text{quotas},\ U)
-\]
-
-This is encoded by `getDagNodeKey` in `strettoGenerator.ts`.
 
 When appending a candidate successor triplet that contributes new delay `d_new`:
 
@@ -153,11 +135,11 @@ When appending a candidate successor triplet that contributes new delay `d_new`:
 
 This makes uniqueness checking `O(1)` average-time per extension with hash-set membership (or worst-case `O(1)` deterministic with fixed-grid bitset indexing), and avoids generating invalid full chains before rejection.
 
-### Stage 5B — Dominance pruning on equivalent boundaries (conceptual)
+### Stage 5B — Dominance pruning on equivalent boundaries
 
 For fixed `(boundaryPairKey, i)`, if two frontier states have uniqueness sets `U1` and `U2` with `U1 ⊆ U2`, then state `(boundaryPairKey, i, U2)` is dominated and can be pruned because any continuation valid from `U2` is also valid from `U1`.
 
-Note: the current implementation performs deterministic DAG deduplication with `state_impl`; subset-dominance pruning over `(boundaryPairKey, i, U)` remains an optimization target rather than an active pass.
+This converts global uniqueness from a late filter into a low-cost, monotone feasibility constraint during assembly.
 
 ---
 
