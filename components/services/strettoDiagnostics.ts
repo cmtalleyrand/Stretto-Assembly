@@ -78,6 +78,15 @@ async function runDiagnostics() {
 
     console.log(`PASS: ${testCase.name}`);
     console.log(`  stopReason=${result.stats.stopReason} maxDepth=${result.stats.maxDepthReached} nodes=${result.stats.nodesVisited} results=${result.results.length} elapsedMs=${elapsedMs}`);
+    const stats = result.stats as any;
+    if (stats.stageStats) {
+      console.log(`  stage(pair/triplet/global rejects)=${stats.stageStats.pairStageRejected}/${stats.stageStats.tripletStageRejected}/${stats.stageStats.globalLineageStageRejected}`);
+      console.log(`  triplet failures(pairwise/lower/parallel/voice/p4bass)=${stats.stageStats.triplePairwiseRejected}/${stats.stageStats.tripleLowerBoundRejected}/${stats.stageStats.tripleParallelRejected}/${stats.stageStats.tripleVoiceRejected}/${stats.stageStats.tripleP4BassRejected}`);
+      console.log(`  compatible pairs=${stats.stageStats.pairwiseCompatible}/${stats.stageStats.pairwiseTotal} harmonicTriples=${stats.stageStats.harmonicallyValidTriples}/${stats.stageStats.tripleCandidates} scans=${stats.stageStats.structuralScanInvocations}`);
+    }
+    if (stats.coverage) {
+      console.log(`  coverage(nodeBudget/completionLowerBound/maxFrontier/classes)=${stats.coverage.nodeBudgetUsedPercent}%/${stats.coverage.completionRatioLowerBound}%/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
+    }
   }
 
   console.log('=== DIAGNOSTIC SUITE COMPLETE ===');

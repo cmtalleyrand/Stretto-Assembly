@@ -396,9 +396,10 @@ export function isVoicePairAllowedForTransposition(
 
 
 export function shouldPruneLowestVoicePair(bassStrictACompatible: boolean, bassStrictBCompatible: boolean): boolean {
-    // Conservative pruning policy requested: if either bass orientation is incompatible,
-    // remove tenor-bass pair assignments for this pair key in both ordered directions.
-    return !bassStrictACompatible || !bassStrictBCompatible;
+    // A tenor-bass assignment should be pruned only when BOTH bass orientations are
+    // incompatible. If only one orientation fails, the opposite orientation can still
+    // participate in valid triplets where another voice carries the true bass function.
+    return !bassStrictACompatible && !bassStrictBCompatible;
 }
 
 export function buildAllowedVoicePairs(

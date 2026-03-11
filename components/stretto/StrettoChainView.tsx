@@ -108,6 +108,17 @@ export default function StrettoChainView({
         return deriveSearchStatusPresentation(searchReport, searchOptions.targetChainLength);
     }, [searchReport, searchOptions.targetChainLength]);
 
+    const diagnostics = React.useMemo(() => {
+        if (!searchReport || !(searchReport.stats as any).stageStats) return null;
+        const stats = searchReport.stats as any;
+        return {
+            stage: stats.stageStats,
+            coverage: stats.coverage ?? null,
+            edgesTraversed: stats.edgesTraversed ?? 0,
+            timeoutExtensionAppliedMs: stats.timeoutExtensionAppliedMs ?? 0
+        };
+    }, [searchReport]);
+
     return (
         <>
             <StrettoSearchPanel 
@@ -137,6 +148,20 @@ export default function StrettoChainView({
                             <div className="mt-1 text-[9px] text-gray-300">
                                 Progress {searchStatus.progressPercent}% · Target {searchOptions.targetChainLength} · Reached {searchReport?.stats.maxDepthReached ?? 0}
                             </div>
+                        </div>
+                    )}
+                    {diagnostics && (
+                        <div className="border-b border-gray-700 p-2 text-[9px] text-gray-300 bg-gray-850">
+                            <div className="font-semibold text-gray-200 mb-1">Search diagnostics</div>
+                            <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}</div>
+                            <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()} · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()} · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}</div>
+                            <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
+                            {diagnostics.coverage && (
+                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent}% · completion lower bound: {diagnostics.coverage.completionRatioLowerBound}% · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()} ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
+                            )}
+                            {diagnostics.timeoutExtensionAppliedMs > 0 && (
+                                <div>Timeout extension applied: +{diagnostics.timeoutExtensionAppliedMs}ms near completion.</div>
+                            )}
                         </div>
                     )}
                     <StrettoResultsList 

@@ -174,12 +174,12 @@ assert.equal(asymmetricBassStrictA.compatible, false, 'fixture must include a ba
 assert.equal(asymmetricBassStrictB.compatible, true, 'fixture must include a bass-role asymmetry where side B-as-bass remains admissible');
 assert.equal(
   shouldPruneLowestVoicePair(asymmetricBassStrictA.compatible, asymmetricBassStrictB.compatible),
-  true,
-  'lowest-voice pair pruning must trigger when either bass orientation is incompatible'
+  false,
+  'lowest-voice pair pruning must not trigger for asymmetric bass-role incompatibility'
 );
 const conservativePairs = buildAllowedVoicePairs(0, 4, shouldPruneLowestVoicePair(asymmetricBassStrictA.compatible, asymmetricBassStrictB.compatible));
-assert.equal(conservativePairs.has('2->3'), false, 'conservative lowest-pair pruning must remove tenor->bass assignment under asymmetric bass-role incompatibility');
-assert.equal(conservativePairs.has('3->2'), false, 'conservative lowest-pair pruning must remove bass->tenor assignment under asymmetric bass-role incompatibility');
+assert.equal(conservativePairs.has('2->3'), true, 'asymmetric bass-role incompatibility must preserve tenor->bass assignment for later triplet resolution');
+assert.equal(conservativePairs.has('3->2'), true, 'asymmetric bass-role incompatibility must preserve bass->tenor assignment for later triplet resolution');
 
 const allowedPairs = buildAllowedVoicePairs(0, 4, true);
 assert.equal(allowedPairs.has('2->3'), false, 'precomputed voice-pair metadata must exclude lowest-pair assignment when disallowed');
