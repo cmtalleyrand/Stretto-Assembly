@@ -61,6 +61,12 @@ assert.equal(
 );
 
 
+assert.equal(
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1, maxDissonanceRunTicks: 720, maxAllowedContinuousDissonanceTicks: 480, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true }, 0.75),
+  true,
+  'pairwise lower-bound helper must reject records exceeding continuous dissonance-duration threshold'
+);
+
 
 const stageCounterFixture = { pairStageRejected: 0, tripletStageRejected: 0, globalLineageStageRejected: 0 } as any;
 assert.equal(passesPairStage(stageCounterFixture, true), true, 'pair-stage predicate helper must pass true predicates without side effects');

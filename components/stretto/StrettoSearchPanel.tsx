@@ -374,6 +374,9 @@ export default function StrettoSearchPanel({
                                 onChange={(e) => handleChange('maxPairwiseDissonance', parseFloat(e.target.value))}
                                 className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-red-500"
                             />
+                            <p className="mt-1 text-[9px] text-gray-400 leading-tight">
+                                Hard pairwise policy: dissonance ratio ≤ cap, maximum consecutive dissonance run length ≤ 2 events, and continuous dissonance duration ≤ 1 beat.
+                            </p>
                         </div>
                     </div>
                 </div>

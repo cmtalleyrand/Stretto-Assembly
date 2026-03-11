@@ -17,6 +17,7 @@ import StrettoList from './stretto/StrettoList';
 import StrettoInspector from './stretto/StrettoInspector';
 import StrettoFooter from './stretto/StrettoFooter';
 import StrettoChainView from './stretto/StrettoChainView';
+import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
 
 interface StrettoViewProps {
@@ -258,18 +259,26 @@ export default function StrettoView({
         intervalsToCheck.forEach(interval => {
             for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
                 // PASS pivotMidi and derived root from searchOptions
-                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot));
+                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 if (includeInversions) {
-                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot));
+                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 }
             }
         });
         return candidates;
-    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, ts, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot]);
+    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, ts, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const processedDiscoveryResults = useMemo(() => {
-        return pairwiseResults.filter(r => gradeFilter[r.grade]);
-    }, [pairwiseResults, gradeFilter]);
+        return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
+    }, [pairwiseResults, gradeFilter, searchOptions.maxPairwiseDissonance]);
+
+    useEffect(() => {
+        setCheckedIds((prev) => pruneCheckedIdsByHardPairwisePolicy(prev, pairwiseResults, searchOptions.maxPairwiseDissonance));
+        setSelectedCandidate((prev) => {
+            if (!prev) return null;
+            return isCandidateAllowedByHardPairwisePolicy(prev, searchOptions.maxPairwiseDissonance) ? prev : null;
+        });
+    }, [pairwiseResults, searchOptions.maxPairwiseDissonance]);
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
@@ -349,7 +358,7 @@ export default function StrettoView({
         const chainRegions = generatePolyphonicHarmonicRegions(allNotes, searchOptions.scaleRoot);
 
         return { id: selectedChain.id, intervalLabel: "Chain", intervalSemis: 0, delayBeats: 0, delayTicks: 0, grade: 'STRONG', errors: [], notes: allNotes, regions: chainRegions, dissonanceRatio: 0, pairDissonanceScore: 0, endsOnDissonance: false };
-    }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot]);
+    }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const handlePlay = (notes: RawNote[]) => {
         if (isPlaying) { stopPlayback(); setIsPlaying(false); return; }

@@ -27,6 +27,8 @@ interface PairwiseCompatibilityRecord {
     p4SimultaneityCount: number;
     hasVoiceCrossing: boolean;
     maxDissonanceRunEvents: number;
+    maxDissonanceRunTicks?: number;
+    maxAllowedContinuousDissonanceTicks?: number;
     hasParallelPerfect58: boolean;
     disallowLowestPair: boolean;
     allowedVoicePairs: Set<string>;
@@ -74,7 +76,9 @@ export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: num
 }
 
 export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, maxPairwiseDissonance: number): boolean {
-    return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
+    const maxAllowedContinuousDissonanceTicks = record.maxAllowedContinuousDissonanceTicks ?? 480;
+    const runTicks = record.maxDissonanceRunTicks ?? 0;
+    return record.maxDissonanceRunEvents > 2 || runTicks > maxAllowedContinuousDissonanceTicks || record.dissonanceRatio > maxPairwiseDissonance;
 }
 
 export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
@@ -200,7 +204,7 @@ export function checkCounterpointStructure(
     transposition: number,
     maxDissonanceRatio: number,
     ppqParam: number = 480
-): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, p4SimultaneityCount: number, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, hasParallelPerfect58: boolean } {
+ ): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, p4SimultaneityCount: number, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, maxDissonanceRunTicks: number, hasParallelPerfect58: boolean } {
     return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam);
 }
 
@@ -212,7 +216,7 @@ export function checkCounterpointStructureWithBassRole(
     maxDissonanceRatio: number,
     bassRole: PairwiseBassRole,
     ppqParam: number = 480
-): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, p4SimultaneityCount: number, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, hasParallelPerfect58: boolean } {
+ ): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, p4SimultaneityCount: number, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, maxDissonanceRunTicks: number, hasParallelPerfect58: boolean } {
     
     // Collect all time points
     const timePoints = new Set<number>();
@@ -245,6 +249,7 @@ export function checkCounterpointStructureWithBassRole(
     let prevP2: number | null = null;
 
     let dissRunLength = 0;
+    let dissRunTicks = 0;
     let lastIsDiss = false;
 
     let overlapTicks = 0;
@@ -257,6 +262,8 @@ export function checkCounterpointStructureWithBassRole(
     let hasParallelPerfect58 = false;
     let previousOrderingSign = 0;
     let maxDissonanceRunEvents = 0;
+    let maxDissonanceRunTicks = 0;
+    const maxAllowedContinuousDissonanceTicks = ppqParam;
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -278,6 +285,7 @@ export function checkCounterpointStructureWithBassRole(
         if (!activeA || !activeB) {
             prevP1 = null; prevP2 = null;
             dissRunLength = 0;
+            dissRunTicks = 0;
             lastIsDiss = false;
             continue;
         }
@@ -334,17 +342,27 @@ export function checkCounterpointStructureWithBassRole(
             dissonantTicks += dur;
             
             // For run length, we count *events* (intervals), not ticks
-            if (!lastIsDiss) dissRunLength = 1;
-            else dissRunLength++;
+            if (!lastIsDiss) {
+                dissRunLength = 1;
+                dissRunTicks = dur;
+            } else {
+                dissRunLength++;
+                dissRunTicks += dur;
+            }
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
+            maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, hasParallelPerfect58 };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
+
+            // Rule C2b: Continuous dissonance must resolve within one beat.
+            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
 
             lastIsDiss = true;
         } else {
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             dissRunLength = 0;
+            dissRunTicks = 0;
             lastIsDiss = false;
         }
 
@@ -354,11 +372,12 @@ export function checkCounterpointStructureWithBassRole(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, hasParallelPerfect58 };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
     }
 
     maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, hasParallelPerfect58 };
+    maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
 }
 
 // Helper: Determine beat strength
@@ -725,7 +744,7 @@ export async function searchStrettoChains(
 
                     // Neutral scan (P4 treated as provisionally consonant)
                     stageStats.structuralScanInvocations++;
-                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
+                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance, ppq);
                     if (!pairScan.compatible) {
                         stageStats.pairStageRejected++;
                         continue;
@@ -734,9 +753,9 @@ export async function searchStrettoChains(
                     // Bass-role scans: P4 resolved as dissonant when lower note is bass.
                     // These are the authoritative results for voice-specific pruning.
                     stageStats.structuralScanInvocations++;
-                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'a', ppq);
+                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq);
                     stageStats.structuralScanInvocations++;
-                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'b', ppq);
+                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq);
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
@@ -764,6 +783,8 @@ export async function searchStrettoChains(
                         p4SimultaneityCount: pairScan.p4SimultaneityCount,
                         hasVoiceCrossing: pairScan.hasVoiceCrossing,
                         maxDissonanceRunEvents: pairScan.maxDissonanceRunEvents,
+                        maxDissonanceRunTicks: pairScan.maxDissonanceRunTicks,
+                        maxAllowedContinuousDissonanceTicks: ppq,
                         hasParallelPerfect58: pairScan.hasParallelPerfect58,
                         disallowLowestPair,
                         allowedVoicePairs,
