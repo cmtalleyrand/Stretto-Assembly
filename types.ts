@@ -569,6 +569,10 @@ export interface StrettoSearchReport {
             tripleVoiceRejected: number;
             harmonicallyValidTriples: number;
             deterministicDagMergedNodes: number;
+            pairStageRejected: number;
+            tripletStageRejected: number;
+            globalLineageStageRejected: number;
+            structuralScanInvocations: number;
         };
     };
 }

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
+import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -60,6 +60,18 @@ assert.equal(
   'pairwise lower-bound helper must accept records that satisfy both hard bounds'
 );
 
+
+
+const stageCounterFixture = { pairStageRejected: 0, tripletStageRejected: 0, globalLineageStageRejected: 0 } as any;
+assert.equal(passesPairStage(stageCounterFixture, true), true, 'pair-stage predicate helper must pass true predicates without side effects');
+assert.equal(passesTripletStage(stageCounterFixture, true), true, 'triplet-stage predicate helper must pass true predicates without side effects');
+assert.equal(passesGlobalLineageStage(stageCounterFixture, true), true, 'global-lineage predicate helper must pass true predicates without side effects');
+assert.equal(passesPairStage(stageCounterFixture, false), false, 'pair-stage predicate helper must reject false predicates');
+assert.equal(passesTripletStage(stageCounterFixture, false), false, 'triplet-stage predicate helper must reject false predicates');
+assert.equal(passesGlobalLineageStage(stageCounterFixture, false), false, 'global-lineage predicate helper must reject false predicates');
+assert.equal(stageCounterFixture.pairStageRejected, 1, 'pair-stage helper must increment pair-stage rejection counter exactly once for one rejected predicate');
+assert.equal(stageCounterFixture.tripletStageRejected, 1, 'triplet-stage helper must increment triplet-stage rejection counter exactly once for one rejected predicate');
+assert.equal(stageCounterFixture.globalLineageStageRejected, 1, 'global-lineage helper must increment global-lineage rejection counter exactly once for one rejected predicate');
 
 const p4UpperVoiceA = {
   type: 'N' as const,
@@ -215,6 +227,13 @@ assert.equal(typeof reportA.stats.stageStats.pairwiseWithFourth, 'number', 'pair
 assert.equal(typeof reportA.stats.stageStats.pairwiseWithVoiceCrossing, 'number', 'pairwise voice-crossing counter must be numeric');
 assert.equal(typeof reportA.stats.stageStats.tripleLowerBoundRejected, 'number', 'triplet lower-bound rejection counter must be numeric');
 assert.equal(typeof reportA.stats.stageStats.tripleParallelRejected, 'number', 'triplet parallel rejection counter must be numeric');
+
+assert.equal(typeof reportA.stats.stageStats.pairStageRejected, 'number', 'stage stats must include pair-stage rejection counter');
+assert.equal(typeof reportA.stats.stageStats.tripletStageRejected, 'number', 'stage stats must include triplet-stage rejection counter');
+assert.equal(typeof reportA.stats.stageStats.globalLineageStageRejected, 'number', 'stage stats must include global-lineage-stage rejection counter');
+assert.equal(typeof reportA.stats.stageStats.structuralScanInvocations, 'number', 'stage stats must include structural scan invocation counter');
+assert.ok(reportA.stats.stageStats.structuralScanInvocations > 0, 'stage stats must report at least one guarded structural scan invocation');
+assert.ok(reportA.stats.stageStats.tripletStageRejected > 0, 'triplet-stage rejection counter must record pre-scan pruning events');
 assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
 assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');
 assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason), 'search must terminate with an explicit completion reason');
