@@ -45,6 +45,26 @@ interface PairwiseCompatibilityRecord {
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
 
+interface TransitionStep {
+    variantIndex: number;
+    delayTicks: number;
+    transpositionDelta: number;
+    isRestrictedInterval: boolean;
+    isFreeInterval: boolean;
+    admissibleNextVoices: Set<number>;
+}
+
+function toWindowKey(
+    variantNm2: number,
+    variantNm1: number,
+    delayNm1: number,
+    transpositionNm1: number,
+    voiceNm2: number,
+    voiceNm1: number
+): string {
+    return `${variantNm2}|${variantNm1}|${delayNm1}|${transpositionNm1}|${voiceNm2}|${voiceNm1}`;
+}
+
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
 }
@@ -999,6 +1019,56 @@ export async function searchStrettoChains(
         }
     }
 
+    const transitionGraph = new Map<string, TransitionStep[]>();
+    const bassVoiceIndex = options.ensembleTotal - 1;
+    for (const tripleKey of harmonicallyValidTriples) {
+        const [vA, vB, vC, d1, d2, t1, t2] = tripleKey.split('|').map(Number);
+        const pairAB = pairwiseCompatibleTriplets.get(toPairKey(vA, vB, d1, t1));
+        const pairBC = pairwiseCompatibleTriplets.get(toPairKey(vB, vC, d2, t2));
+        if (!pairAB || !pairBC) continue;
+
+        for (let voiceA = 0; voiceA < options.ensembleTotal; voiceA++) {
+            for (let voiceB = 0; voiceB < options.ensembleTotal; voiceB++) {
+                if (voiceA === voiceB) continue;
+                if (!pairAB.allowedVoicePairs.has(`${voiceA}->${voiceB}`)) continue;
+
+                if (pairAB.hasFourth) {
+                    let roleAB: PairwiseBassRole = 'none';
+                    if (voiceA === bassVoiceIndex && voiceB !== bassVoiceIndex) roleAB = 'a';
+                    else if (voiceB === bassVoiceIndex && voiceA !== bassVoiceIndex) roleAB = 'b';
+                    if (roleAB !== 'none' && !pairAB.bassRoleCompatible[roleAB]) continue;
+                }
+
+                const admissibleNextVoices = new Set<number>();
+                for (let voiceC = 0; voiceC < options.ensembleTotal; voiceC++) {
+                    if (voiceC === voiceA || voiceC === voiceB) continue;
+                    if (!pairBC.allowedVoicePairs.has(`${voiceB}->${voiceC}`)) continue;
+
+                    if (pairBC.hasFourth) {
+                        let roleBC: PairwiseBassRole = 'none';
+                        if (voiceB === bassVoiceIndex && voiceC !== bassVoiceIndex) roleBC = 'a';
+                        else if (voiceC === bassVoiceIndex && voiceB !== bassVoiceIndex) roleBC = 'b';
+                        if (roleBC !== 'none' && !pairBC.bassRoleCompatible[roleBC]) continue;
+                    }
+                    admissibleNextVoices.add(voiceC);
+                }
+
+                if (admissibleNextVoices.size === 0) continue;
+
+                const stateKey = toWindowKey(vA, vB, d1, t1, voiceA, voiceB);
+                if (!transitionGraph.has(stateKey)) transitionGraph.set(stateKey, []);
+                transitionGraph.get(stateKey)!.push({
+                    variantIndex: vC,
+                    delayTicks: d2,
+                    transpositionDelta: t2,
+                    isRestrictedInterval: pairBC.isRestrictedInterval,
+                    isFreeInterval: pairBC.isFreeInterval,
+                    admissibleNextVoices
+                });
+            }
+        }
+    }
+
     // Deferred scoring: store unscored chains during search, score after
     interface UnscoredChain {
         entries: StrettoChainOption[];
@@ -1106,168 +1176,151 @@ export async function searchStrettoChains(
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
-            const seenClasses = new Set<number>();
-            const fresh: number[] = [];
-            const deferred: number[] = [];
             const prevTransposition = chain[chain.length - 1].transposition;
-            for (const t of transpositions) {
-                const tClass = ((t - prevTransposition) % 12 + 12) % 12;
-                if (seenClasses.has(tClass)) {
-                    deferred.push(t);
-                    continue;
-                }
-                if (t === prevTransposition) {
-                    fresh.push(t);
-                    continue;
-                }
-                fresh.push(t);
-                seenClasses.add(tClass);
-            }
-            const orderedTranspositions = [...fresh, ...deferred];
+            const prevVariant = variants[variantIndices[depth - 1]];
+            const prevIsInv = prevVariant.type === 'I';
+            const prevIsTrunc = prevVariant.truncationBeats > 0;
 
-            for (const t of orderedTranspositions) {
+            const candidateSteps: TransitionStep[] = [];
+            if (depth >= 2) {
+                const windowKey = toWindowKey(
+                    variantIndices[depth - 2],
+                    variantIndices[depth - 1],
+                    Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq),
+                    chain[depth - 1].transposition - chain[depth - 2].transposition,
+                    chain[depth - 2].voiceIndex,
+                    chain[depth - 1].voiceIndex
+                );
+                const localTransitions = transitionGraph.get(windowKey) || [];
+                for (const step of localTransitions) {
+                    if (step.delayTicks !== delayTicks) continue;
+                    candidateSteps.push(step);
+                }
+            } else {
+                const seenClasses = new Set<number>();
+                const fresh: TransitionStep[] = [];
+                const deferred: TransitionStep[] = [];
+                for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                    for (const t of transpositions) {
+                        if (t === prevTransposition) continue;
+                        const relTrans = t - prevTransposition;
+                        const pair = pairwiseCompatibleTriplets.get(toPairKey(variantIndices[depth - 1], varIdx, delayTicks, relTrans));
+                        if (!pair) continue;
+                        const tClass = ((relTrans % 12) + 12) % 12;
+                        const step: TransitionStep = {
+                            variantIndex: varIdx,
+                            delayTicks,
+                            transpositionDelta: relTrans,
+                            isRestrictedInterval: pair.isRestrictedInterval,
+                            isFreeInterval: pair.isFreeInterval,
+                            admissibleNextVoices: new Set<number>()
+                        };
+                        for (let v = 0; v < options.ensembleTotal; v++) step.admissibleNextVoices.add(v);
+                        if (seenClasses.has(tClass)) deferred.push(step);
+                        else {
+                            fresh.push(step);
+                            seenClasses.add(tClass);
+                        }
+                    }
+                }
+                candidateSteps.push(...fresh, ...deferred);
+            }
+
+            for (const step of candidateSteps) {
+                const varIdx = step.variantIndex;
+                const t = prevTransposition + step.transpositionDelta;
                 if (t === prevTransposition) continue;
 
-                for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-                    if (depth >= 2) {
-                        const vA = variantIndices[depth - 2];
-                        const vB = variantIndices[depth - 1];
-                        const vC = varIdx;
-                        const d1 = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-                        const d2 = delayTicks;
-                        const t1 = chain[depth - 1].transposition - chain[depth - 2].transposition;
-                        const t2 = t - chain[depth - 1].transposition;
-                        const tripleKey = toTripleKey(vA, vB, vC, d1, d2, t1, t2);
-                        if (!harmonicallyValidTriples.has(tripleKey)) continue;
-                    }
+                const variant = variants[varIdx];
+                const isInv = variant.type === 'I';
+                const isTrunc = variant.truncationBeats > 0;
 
-                    const variant = variants[varIdx];
-                    const isInv = variant.type === 'I';
-                    const isTrunc = variant.truncationBeats > 0;
+                if ((prevIsInv && isInv) || (prevIsTrunc && isTrunc)) continue;
+                if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
+                if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
 
-                    // Structural transform adjacency rule:
-                    // prohibit immediate repetition of inversion and truncation transforms.
-                    // This is an O(1) local-state check using the predecessor variant index.
-                    const prevVariant = variants[variantIndices[depth - 1]];
-                    const prevIsInv = prevVariant.type === 'I';
-                    const prevIsTrunc = prevVariant.truncationBeats > 0;
-                    if ((prevIsInv && isInv) || (prevIsTrunc && isTrunc)) continue;
+                const nextRestricted = nRestricted + (step.isRestrictedInterval ? 1 : 0);
+                const nextFree = nFree + (step.isFreeInterval ? 1 : 0);
 
-                    if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
-                    if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
+                if (nextRestricted > 1 && nextRestricted >= nextFree) continue;
+                if (step.isRestrictedInterval && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
+                if (options.disallowComplexExceptions && (isInv || isTrunc) && step.isRestrictedInterval) continue;
 
-                    // Use precomputed interval class from the pairwise record of the
-                    // immediate predecessor pair. For the first entry after root (depth 1),
-                    // compute inline since there's no predecessor triplet yet.
-                    let isRestricted: boolean;
-                    let isFree: boolean;
-                    if (depth >= 2) {
-                        // The immediate predecessor pair key exists — look up its interval class.
-                        const immPrevVarIdx = variantIndices[depth - 1];
-                        const immRelDelay = delayTicks;
-                        const immRelTrans = t - chain[depth - 1].transposition;
-                        const immKey = toPairKey(immPrevVarIdx, varIdx, immRelDelay, immRelTrans);
-                        const immPair = pairwiseCompatibleTriplets.get(immKey);
-                        if (immPair) {
-                            isRestricted = immPair.isRestrictedInterval;
-                            isFree = immPair.isFreeInterval;
-                        } else {
-                            const ic = ((t % 12) + 12) % 12;
-                            isRestricted = [3, 4, 8, 9].includes(ic);
-                            isFree = [0, 5, 7].includes(ic);
+                const overlappingPairs: { entry: StrettoChainOption; pairRecord: PairwiseCompatibilityRecord }[] = [];
+                let harmonicFail = false;
+                for (let k = 0; k < chain.length; k++) {
+                    const prevE = chain[k];
+                    const prevVarIdx = variantIndices[k];
+                    const prevStartTicks = Math.round(prevE.startBeat * ppq);
+                    const prevEndTicks = prevStartTicks + variants[prevVarIdx].lengthTicks;
+
+                    if (absStartTicks < prevEndTicks) {
+                        const relDelay = absStartTicks - prevStartTicks;
+                        const relTrans = t - prevE.transposition;
+                        const key = toPairKey(prevVarIdx, varIdx, relDelay, relTrans);
+                        const pairRecord = pairwiseCompatibleTriplets.get(key);
+                        if (!pairRecord) {
+                            harmonicFail = true;
+                            break;
                         }
-                    } else {
-                        const ic = ((t % 12) + 12) % 12;
-                        isRestricted = [3, 4, 8, 9].includes(ic);
-                        isFree = [0, 5, 7].includes(ic);
+                        overlappingPairs.push({ entry: prevE, pairRecord });
                     }
-                    const nextRestricted = nRestricted + (isRestricted ? 1 : 0);
-                    const nextFree = nFree + (isFree ? 1 : 0);
+                }
+                if (harmonicFail) continue;
 
-                    if (nextRestricted > 1 && nextRestricted >= nextFree) continue;
-                    if (isRestricted && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
-                    if (options.disallowComplexExceptions && (isInv || isTrunc) && isRestricted) continue;
+                for (let v = 0; v < options.ensembleTotal; v++) {
+                    if (depth >= 2 && !step.admissibleNextVoices.has(v)) continue;
+                    if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
 
-                    // Collect overlapping pairwise records for this candidate
-                    const overlappingPairs: { entry: StrettoChainOption; pairRecord: PairwiseCompatibilityRecord }[] = [];
-                    let harmonicFail = false;
-                    for (let k = 0; k < chain.length; k++) {
-                        const prevE = chain[k];
-                        const prevVarIdx = variantIndices[k];
-                        const prevStartTicks = Math.round(prevE.startBeat * ppq);
-                        const prevEndTicks = prevStartTicks + variants[prevVarIdx].lengthTicks;
-
-                        if (absStartTicks < prevEndTicks) {
-                            const relDelay = absStartTicks - prevStartTicks;
-                            const relTrans = t - prevE.transposition;
-                            const key = toPairKey(prevVarIdx, varIdx, relDelay, relTrans);
-                            const pairRecord = pairwiseCompatibleTriplets.get(key);
-                            if (!pairRecord) {
-                                harmonicFail = true;
-                                break;
-                            }
-                            overlappingPairs.push({ entry: prevE, pairRecord });
+                    let stratFail = false;
+                    for (const { entry: e, pairRecord } of overlappingPairs) {
+                        if (!pairRecord.allowedVoicePairs.has(`${e.voiceIndex}->${v}`)) {
+                            stratFail = true;
+                            break;
                         }
-                    }
-                    if (harmonicFail) continue;
 
-                    for (let v = 0; v < options.ensembleTotal; v++) {
-                        if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
+                        const pairBassIdx = options.ensembleTotal - 1;
+                        if (pairRecord.hasFourth) {
+                            let bassRole: PairwiseBassRole = 'none';
+                            if (e.voiceIndex === pairBassIdx && v !== pairBassIdx) bassRole = 'a';
+                            else if (v === pairBassIdx && e.voiceIndex !== pairBassIdx) bassRole = 'b';
 
-                        let stratFail = false;
-                        for (const { entry: e, pairRecord } of overlappingPairs) {
-                            // Voice-pair admissibility (precomputed, includes spacing rules)
-                            if (!pairRecord.allowedVoicePairs.has(`${e.voiceIndex}->${v}`)) {
+                            if (bassRole !== 'none' && !pairRecord.bassRoleCompatible[bassRole]) {
                                 stratFail = true;
                                 break;
                             }
-
-                            // P4 bass-role check: use precomputed per-bass-role compatibility.
-                            // No re-scanning needed — results are cached in the pairwise record.
-                            const pairBassIdx = options.ensembleTotal - 1;
-                            if (pairRecord.hasFourth) {
-                                let bassRole: PairwiseBassRole = 'none';
-                                if (e.voiceIndex === pairBassIdx && v !== pairBassIdx) bassRole = 'a';
-                                else if (v === pairBassIdx && e.voiceIndex !== pairBassIdx) bassRole = 'b';
-
-                                if (bassRole !== 'none' && !pairRecord.bassRoleCompatible[bassRole]) {
-                                    stratFail = true;
-                                    break;
-                                }
-                            }
                         }
-                        if (stratFail) continue;
-
-                        const tempNextEntry: StrettoChainOption = {
-                            startBeat: absStartBeat,
-                            transposition: t,
-                            type: variant.type,
-                            length: variant.lengthTicks,
-                            voiceIndex: v
-                        };
-
-                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks)) continue;
-
-                        const newVoiceState = [...voiceEndTimesTicks];
-                        newVoiceState[v] = absStartTicks + variant.lengthTicks;
-
-                        edgesTraversed++;
-                        // Propagate A.1 delay-set: add this delay if it's > Sb/3
-                        const newUsedLongDelays = delayTicks > oneThirdSubjectTicks
-                            ? new Set(usedLongDelays).add(delayTicks)
-                            : usedLongDelays;
-
-                        successors.push({
-                            chain: [...chain, tempNextEntry],
-                            variantIndices: [...variantIndices, varIdx],
-                            voiceEndTimesTicks: newVoiceState,
-                            nInv: nInv + (isInv ? 1 : 0),
-                            nTrunc: nTrunc + (isTrunc ? 1 : 0),
-                            nRestricted: nextRestricted,
-                            nFree: nextFree,
-                            usedLongDelays: newUsedLongDelays
-                        });
                     }
+                    if (stratFail) continue;
+
+                    const tempNextEntry: StrettoChainOption = {
+                        startBeat: absStartBeat,
+                        transposition: t,
+                        type: variant.type,
+                        length: variant.lengthTicks,
+                        voiceIndex: v
+                    };
+
+                    if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks)) continue;
+
+                    const newVoiceState = [...voiceEndTimesTicks];
+                    newVoiceState[v] = absStartTicks + variant.lengthTicks;
+
+                    edgesTraversed++;
+                    const newUsedLongDelays = delayTicks > oneThirdSubjectTicks
+                        ? new Set(usedLongDelays).add(delayTicks)
+                        : usedLongDelays;
+
+                    successors.push({
+                        chain: [...chain, tempNextEntry],
+                        variantIndices: [...variantIndices, varIdx],
+                        voiceEndTimesTicks: newVoiceState,
+                        nInv: nInv + (isInv ? 1 : 0),
+                        nTrunc: nTrunc + (isTrunc ? 1 : 0),
+                        nRestricted: nextRestricted,
+                        nFree: nextFree,
+                        usedLongDelays: newUsedLongDelays
+                    });
                 }
             }
         }
