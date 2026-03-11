@@ -245,4 +245,45 @@ assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage 
 assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason), 'search must terminate with an explicit completion reason');
 assert.ok(reportA.stats.maxDepthReached >= 1, 'search run-to-completion test fixture must explore at least one expansion depth');
 
+const transformConstrainedOptions: StrettoSearchOptions = {
+  ...options,
+  subjectVoiceIndex: 0,
+  inversionMode: 'Unlimited',
+  truncationMode: 'Unlimited',
+  truncationTargetBeats: 2,
+  thirdSixthMode: 'Unlimited',
+  useChromaticInversion: true,
+  maxPairwiseDissonance: 1,
+  targetChainLength: 4
+};
+
+const transformConstrainedReport = await searchStrettoChains(subject, transformConstrainedOptions, ppq);
+assert.ok(transformConstrainedReport.results.length > 0, 'transform-adjacency fixture must produce candidates for invariant validation');
+
+for (const result of transformConstrainedReport.results) {
+  for (let i = 1; i < result.entries.length; i++) {
+    const prev = result.entries[i - 1];
+    const curr = result.entries[i];
+
+    assert.notEqual(
+      prev.type === 'I' && curr.type === 'I',
+      true,
+      `consecutive inversion entries must be pruned (chain id: ${result.id}, index: ${i})`
+    );
+
+    const prevIsTruncated = prev.length < ppq * 4;
+    const currIsTruncated = curr.length < ppq * 4;
+    assert.notEqual(
+      prevIsTruncated && currIsTruncated,
+      true,
+      `consecutive truncation entries must be pruned (chain id: ${result.id}, index: ${i})`
+    );
+
+    assert.ok(
+      Math.abs(curr.transposition - prev.transposition) >= 5,
+      `adjacent transpositions must differ by at least a perfect fourth (chain id: ${result.id}, index: ${i})`
+    );
+  }
+}
+
 console.log('stretto canonical key + deterministic DAG traversal tests passed');

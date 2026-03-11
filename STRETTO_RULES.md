@@ -28,6 +28,10 @@ Any chain candidate that violates *any* of these rules is immediately discarded 
 3.  **Expansion Recoil:** If previous delay expanded and exceeded one-third subject length, current delay must contract by at least 0.5 beat relative to two entries ago.
 4.  **Post-Truncation Contraction:** After a truncated entry, next delay must contract by at least 1 beat unless previous delay is below one-third subject length.
 5.  **Universal Distance Limits:** All entries are allowed a maximum delay of **66% (2/3)** of the subject length.
+6.  **Adjacent Transposition Separation:** For every adjacent pair `(e_i, e_{i+1})`, enforce `|t_i - t_{i+1}| >= 5` semitones (perfect fourth minimum).
+7.  **Transform Adjacency Prohibition:** Consecutive inversion entries are forbidden, and consecutive truncated entries are forbidden.
+
+Implementation invariant: Rule A.6 is pairwise and is therefore enforced during pairwise candidate precomputation (`Δt` domain) to prune inadmissible edges before expensive structural/harmonic scans.
 
 ### B. Voice Interval Constraints (Relative)
 The algorithm strictly enforces vertical ordering:
