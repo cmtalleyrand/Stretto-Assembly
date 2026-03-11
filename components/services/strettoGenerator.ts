@@ -74,6 +74,64 @@ export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTrave
 export function shouldYieldToEventLoop(iteration: number, interval: number = EVENT_LOOP_YIELD_INTERVAL): boolean {
     return iteration > 0 && iteration % interval === 0;
 }
+
+interface StageStats {
+    validDelayCount: number;
+    transpositionCount: number;
+    pairwiseTotal: number;
+    pairwiseCompatible: number;
+    pairwiseWithFourth: number;
+    pairwiseWithVoiceCrossing: number;
+    tripleCandidates: number;
+    triplePairwiseRejected: number;
+    tripleLowerBoundRejected: number;
+    tripleParallelRejected: number;
+    tripleVoiceRejected: number;
+    harmonicallyValidTriples: number;
+    deterministicDagMergedNodes: number;
+    pairStageRejected: number;
+    tripletStageRejected: number;
+    globalLineageStageRejected: number;
+    structuralScanInvocations: number;
+}
+
+export function passesPairStage(stageStats: StageStats, predicate: boolean): boolean {
+    if (!predicate) {
+        stageStats.pairStageRejected++;
+        return false;
+    }
+    return true;
+}
+
+export function passesTripletStage(stageStats: StageStats, predicate: boolean): boolean {
+    if (!predicate) {
+        stageStats.tripletStageRejected++;
+        return false;
+    }
+    return true;
+}
+
+export function passesGlobalLineageStage(stageStats: StageStats, predicate: boolean): boolean {
+    if (!predicate) {
+        stageStats.globalLineageStageRejected++;
+        return false;
+    }
+    return true;
+}
+
+function runStructuralScanGuard<T>(
+    stageStats: StageStats,
+    pairPredicate: boolean,
+    tripletPredicate: boolean,
+    globalLineagePredicate: boolean,
+    scan: () => T
+): T | null {
+    if (!passesPairStage(stageStats, pairPredicate)) return null;
+    if (!passesTripletStage(stageStats, tripletPredicate)) return null;
+    if (!passesGlobalLineageStage(stageStats, globalLineagePredicate)) return null;
+    stageStats.structuralScanInvocations++;
+    return scan();
+}
 // --- Precomputation: Scales & Inversion ---
 
 function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offsetTicks: number } {
@@ -545,7 +603,11 @@ export async function searchStrettoChains(
                     tripleParallelRejected: 0,
                     tripleVoiceRejected: 0,
                     harmonicallyValidTriples: 0,
-                    deterministicDagMergedNodes: 0
+                    deterministicDagMergedNodes: 0,
+                    pairStageRejected: 0,
+                    tripletStageRejected: 0,
+                    globalLineageStageRejected: 0,
+                    structuralScanInvocations: 0
                 }
             }
         };
@@ -606,7 +668,7 @@ export async function searchStrettoChains(
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
     
-    const stageStats = {
+    const stageStats: StageStats = {
         validDelayCount: validDelays.length,
         transpositionCount: transpositions.length,
         pairwiseTotal: 0,
@@ -619,7 +681,11 @@ export async function searchStrettoChains(
         tripleParallelRejected: 0,
         tripleVoiceRejected: 0,
         harmonicallyValidTriples: 0,
-        deterministicDagMergedNodes: 0
+        deterministicDagMergedNodes: 0,
+        pairStageRejected: 0,
+        tripletStageRejected: 0,
+        globalLineageStageRejected: 0,
+        structuralScanInvocations: 0
     };
 
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
@@ -635,27 +701,47 @@ export async function searchStrettoChains(
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
                     }
                     const key = toPairKey(iA, iB, d, t);
-                    const res = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq);
-                    if (res.compatible) {
-                        const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'a', ppq);
-                        const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'b', ppq);
-                        const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
-                        const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
-                        if (allowedVoicePairs.size === 0) continue;
+                    const pairScan = runStructuralScanGuard(
+                        stageStats,
+                        d > 0,
+                        true,
+                        true,
+                        () => checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq)
+                    );
+                    if (!pairScan || !pairScan.compatible) continue;
 
-                        pairwiseCompatibleTriplets.set(key, {
-                            dissonanceRatio: res.dissonanceRatio,
-                            hasFourth: res.hasFourth,
-                            hasVoiceCrossing: res.hasVoiceCrossing,
-                            maxDissonanceRunEvents: res.maxDissonanceRunEvents,
-                            hasParallelPerfect58: res.hasParallelPerfect58,
-                            disallowLowestPair,
-                            allowedVoicePairs
-                        });
-                        stageStats.pairwiseCompatible++;
-                        if (res.hasFourth) stageStats.pairwiseWithFourth++;
-                        if (res.hasVoiceCrossing) stageStats.pairwiseWithVoiceCrossing++;
-                    }
+                    const bassStrictA = runStructuralScanGuard(
+                        stageStats,
+                        true,
+                        true,
+                        true,
+                        () => checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'a', ppq)
+                    );
+                    const bassStrictB = runStructuralScanGuard(
+                        stageStats,
+                        true,
+                        true,
+                        true,
+                        () => checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'b', ppq)
+                    );
+                    if (!bassStrictA || !bassStrictB) continue;
+
+                    const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
+                    const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
+                    if (!passesGlobalLineageStage(stageStats, allowedVoicePairs.size > 0)) continue;
+
+                    pairwiseCompatibleTriplets.set(key, {
+                        dissonanceRatio: pairScan.dissonanceRatio,
+                        hasFourth: pairScan.hasFourth,
+                        hasVoiceCrossing: pairScan.hasVoiceCrossing,
+                        maxDissonanceRunEvents: pairScan.maxDissonanceRunEvents,
+                        hasParallelPerfect58: pairScan.hasParallelPerfect58,
+                        disallowLowestPair,
+                        allowedVoicePairs
+                    });
+                    stageStats.pairwiseCompatible++;
+                    if (pairScan.hasFourth) stageStats.pairwiseWithFourth++;
+                    if (pairScan.hasVoiceCrossing) stageStats.pairwiseWithVoiceCrossing++;
                 }
             }
         }
@@ -694,13 +780,13 @@ export async function searchStrettoChains(
             const d1 = p1.d;
             const d2 = p2.d;
 
-            if (violatesTripletParallelPolicy(pairAB, pairBC, d1, d2, subjectLengthTicks)) {
+            if (!passesTripletStage(stageStats, !violatesTripletParallelPolicy(pairAB, pairBC, d1, d2, subjectLengthTicks))) {
                 stageStats.tripleParallelRejected++;
                 continue;
             }
             
             // Rule: Max Expansion (using ticks, assuming step size)
-            if (d2 > d1 + delayStep) continue;
+            if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
             
             // Rule: Pair A->C compatibility (if overlapping)
             const vA = p1.vA;
@@ -712,22 +798,22 @@ export async function searchStrettoChains(
             if (dAC < lenA) {
                 const keyAC = toPairKey(vA, vC, dAC, tAC);
                 const pairAC = pairwiseCompatibleTriplets.get(keyAC);
-                if (!pairAC) {
+                if (!passesTripletStage(stageStats, !!pairAC)) {
                     stageStats.triplePairwiseRejected++;
                     continue;
                 }
-                if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairAC, options.maxPairwiseDissonance)) {
+                if (!passesTripletStage(stageStats, !violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) && !violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance) && !violatesPairwiseLowerBound(pairAC, options.maxPairwiseDissonance))) {
                     stageStats.tripleLowerBoundRejected++;
                     continue;
                 }
-            } else if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance)) {
+            } else if (!passesTripletStage(stageStats, !violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) && !violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance))) {
                 stageStats.tripleLowerBoundRejected++;
                 continue;
             }
             
             // Rule: Voice Spacing for the Triple
             const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
-            if (trans[2] - trans[0] < 7) continue;
+            if (!passesGlobalLineageStage(stageStats, trans[2] - trans[0] >= 7)) continue;
             
             let possibleAssignment = false;
             for (let v1=0; v1<options.ensembleTotal; v1++) {
@@ -775,7 +861,7 @@ export async function searchStrettoChains(
                 if (possibleAssignment) break;
             }
             
-            if (!possibleAssignment) {
+            if (!passesGlobalLineageStage(stageStats, possibleAssignment)) {
                 stageStats.tripleVoiceRejected++;
                 continue;
             }
@@ -979,15 +1065,22 @@ export async function searchStrettoChains(
                                     const strictKey = `${pairInfo.key}|bass:${bassRole}`;
                                     let strictCompatible = strictPairwiseBassCache.get(strictKey);
                                     if (strictCompatible === undefined) {
-                                        strictCompatible = checkCounterpointStructureWithBassRole(
-                                            variants[pairInfo.prevVarIdx],
-                                            variant,
-                                            pairInfo.relDelay,
-                                            pairInfo.relTrans,
-                                            options.maxPairwiseDissonance + 0.05,
-                                            bassRole,
-                                            ppq
-                                        ).compatible;
+                                        const strictScan = runStructuralScanGuard(
+                                            stageStats,
+                                            true,
+                                            true,
+                                            true,
+                                            () => checkCounterpointStructureWithBassRole(
+                                                variants[pairInfo.prevVarIdx],
+                                                variant,
+                                                pairInfo.relDelay,
+                                                pairInfo.relTrans,
+                                                options.maxPairwiseDissonance + 0.05,
+                                                bassRole,
+                                                ppq
+                                            )
+                                        );
+                                        strictCompatible = strictScan?.compatible ?? false;
                                         strictPairwiseBassCache.set(strictKey, strictCompatible);
                                     }
                                     if (!strictCompatible) {
