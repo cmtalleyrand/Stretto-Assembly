@@ -736,6 +736,16 @@ export async function searchStrettoChains(
             for (const d of validDelays) {
                 for (const t of transpositions) {
                     stageStats.pairwiseTotal++;
+
+                    // Adjacent-transposition gatekeeper (pairwise form):
+                    // each pair (e_i, e_{i+1}) must satisfy |t_{i+1} - t_i| >= 5 semitones.
+                    // In pairwise precomputation, `t` is exactly that adjacent delta, so prune
+                    // sub-P4 intervals before any structural scan to reduce work.
+                    if (Math.abs(t) < 5) {
+                        stageStats.pairStageRejected++;
+                        continue;
+                    }
+
                     operationCounter++;
                     if (shouldYieldToEventLoop(operationCounter)) {
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1134,6 +1144,15 @@ export async function searchStrettoChains(
                     const variant = variants[varIdx];
                     const isInv = variant.type === 'I';
                     const isTrunc = variant.truncationBeats > 0;
+
+                    // Structural transform adjacency rule:
+                    // prohibit immediate repetition of inversion and truncation transforms.
+                    // This is an O(1) local-state check using the predecessor variant index.
+                    const prevVariant = variants[variantIndices[depth - 1]];
+                    const prevIsInv = prevVariant.type === 'I';
+                    const prevIsTrunc = prevVariant.truncationBeats > 0;
+                    if ((prevIsInv && isInv) || (prevIsTrunc && isTrunc)) continue;
+
                     if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
                     if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
 

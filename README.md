@@ -61,6 +61,8 @@ Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that
 | **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
 | **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
 | **A.5 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
+| **A.6 Adjacent transposition separation** | For every adjacent pair, `|t_i - t_{i+1}| ≥ 5` semitones (perfect fourth minimum). |
+| **A.7 Transform adjacency prohibition** | Consecutive inversion entries are invalid, and consecutive truncated entries are invalid. |
 
 **Start entries** (index 0) are valid if their delay is within the universal max.
 **End entries** have relaxed rules: any delay `< Sb/3` is acceptable regardless of contraction direction.
@@ -75,7 +77,10 @@ For each delay triplet from Stage 1, enumerate all combinations of three transpo
 
 - **Neighbour ordering:** higher voice index must have lower or equal transposition (no voice crossing)
 - **Bass–alto separation:** alto transposition must be ≥ bass transposition + 12 semitones
-- **No consecutive same transposition** (Gatekeeper B: `t_n ≠ t_{n-1}`)
+- **Adjacent transposition minimum distance:** `|t_n - t_{n-1}| >= 5` semitones (perfect fourth lower bound)
+- **No consecutive inversion forms** and **no consecutive truncation forms**
+
+Implementation note: this transposition-distance gate is enforced in the pairwise precomputation keyspace (relative transposition `Δt`), so candidates with `|Δt| < 5` are rejected before structural/harmonic scans.
 
 The output is `validTranspositionTriplets: Set<(d₁,d₂,d₃, t₁,t₂,t₃)>` with provisional voice assignments.
 
@@ -99,7 +104,8 @@ The output is `validTriplets: Map<tripletKey, TripletData>`.
 
 ### Stage 5 — Chain Assembly
 
-Assemble chains of length `N` by joining valid triplets that share their overlapping boundary pair:
+Assemble chains of length `N` by joining valid triplets that share their overlapping boundary pair.
+Operationally, Stage 5 evaluates **candidate extensions**: for a frontier node representing partial chain `e_0..e_k`, each extension is one admissible `(delay, transposition, variant, voice)` tuple that proposes `e_{k+1}` and is accepted only if all pair/triplet/global invariants remain true.
 
 ```
 Triplet A covers entries [i, i+1, i+2]
