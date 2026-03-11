@@ -13,6 +13,22 @@
 
 ## Phase 6: Mandatory Triplet-Assembly Architecture Completion (Revised)
 
+### 6.0A Authoritative Staging Order (Supersedes prior informal sequencing)
+The stretto assembly pipeline SHALL execute in the following dependency order:
+
+1. **Evaluate pairwise dissonance** as a precomputed artifact over canonical pair-relation keys `(inv_i, trunc_i, inv_{i+1}, trunc_{i+1}, voice_i, voice_{i+1}, t_i, t_{i+1}, d_{i+1})`.
+2. **Evaluate pair-local predicates** (delay-domain, start-delay boundary, repeat whitelist semantics, local forward-budget derivation).
+3. **Evaluate triplet-local predicates** for voicing and delay rules.
+4. **Evaluate triplet dissonance** (including A–C checks only when overlap exists).
+5. **Enumerate candidate transitions only after feasible triplets are fully identified.**
+6. **Evaluate global-lineage predicates** during path extension.
+7. **Cache and propagate accepted state with forward-budget payload.**
+
+Normative clarifications attached to this order:
+- Pairwise dissonance for `(e_i, e_{i+1})` is invariant to predecessor delay. Formally, `PairDissonance(..., d_{i+1})` is independent of `d_i`; therefore `d_i` MUST NOT appear in the pairwise dissonance key domain.
+- Pairwise dissonance output is a first-class product and remains useful independently of assembly traversal.
+- Therefore, pregenerated pairwise outputs are mandatory pruning inputs (map lookups), not optional recomputation hints.
+
 ### 6.0 Architectural Clarifications (Normative Inputs)
 1. **A.1 Interpretation:** Global uniqueness is the chain-level rule; local uniqueness is the relevant pruning condition during triplet-set construction.
 2. **Subject length `Sb`:** Compute from subject length after rest truncation.
@@ -24,10 +40,11 @@
 > Rationale: The staged algorithm and its observability are not separable; introducing one without the other prevents correctness auditing.
 
 - Introduce explicit typed artifacts for each stage:
-  - `validDelayTriplets`
-  - `validTranspositionTriplets`
-  - `pairwiseCompatibleTriplets`
-  - `harmonicallyValidTriplets`
+  - `pairwiseDissonanceArtifact` (precomputed, canonical, reusable; keyed by flags/voices/transpositions and `d_{i+1}`, invariant to predecessor delay)
+  - `pairLocalAdmissiblePairs`
+  - `tripletLocalAdmissibleTriplets`
+  - `tripletDissonanceAdmissibleTriplets`
+- For pair-local and triplet-local predicate stages, persist predecessor-aware state payloads that include the two-delay tuple `(d_i, d_{i+1})` wherever predecessor delay is defined.
 - Introduce canonical triplet keys and boundary-pair keys to support deterministic joins.
 - Persist per-stage cardinalities and rejection counters in the search report contract.
 
@@ -36,9 +53,9 @@
 ### 6.2 Integrated Core Engine Replacement (Single inseparable implementation unit)
 > Rationale: Replacing DFS while deferring global-rule enforcement would preserve known correctness defects.
 
-- Replace recursive DFS `solve()` chain growth with DAG-based path extension over triplet nodes.
+- Replace recursive DFS `solve()` chain growth with DAG-based path extension over prevalidated triplet nodes.
 - Enforce A.1 global uniqueness during path extension using delay sets keyed by delays `> Sb/3`.
-- Preserve local uniqueness checks during triplet-set generation for early pruning efficiency.
+- Enforce pair-local and triplet-local predicates before a triplet is admitted into transition enumeration.
 - Retain hard constraints A.2–A.5 in stage-appropriate locations; remove redundant inline DFS-era checks.
 - Keep deterministic traversal ordering.
 
@@ -53,6 +70,11 @@
   - edges traversed,
   - frontier size at termination,
   - estimated completion ratio (lower/upper bounds where exact value is unavailable).
+- Track precompute-vs-expansion efficiency counters:
+  - pairwise structural scans executed,
+  - overlap lookups attempted,
+  - overlap lookup misses,
+  - strict-role recomputation count (if fallback paths remain).
 - Return stop reasons with quantitative coverage payload.
 
 **Exit criteria:** Timeout results include a quantitative exploration report sufficient to distinguish shallow aborts from high-coverage near-complete runs.
@@ -87,7 +109,7 @@ Use this board to instantiate tickets directly. Each row is a minimally independ
 
 | ID | Title | Scope | Depends On | Est. | Acceptance Criteria |
 |---|---|---|---|---:|---|
-| P6-T01 | Define stage artifact types and canonical keys | Add typed structures for delay/transposition/harmonic triplet sets and join keys in `components/services/strettoGenerator.ts` and associated types in `types.ts`. | None | 1.5d | All Stage 1–4 artifacts are represented by explicit types; key serialization is deterministic and collision-free under property-order invariance. |
+| P6-T01 | Define stage artifact types and canonical keys | Add typed structures for pair/triplet artifacts using canonical pairwise dissonance keys `(inv_i, trunc_i, inv_{i+1}, trunc_{i+1}, voice_i, voice_{i+1}, t_i, t_{i+1}, d_{i+1})`, plus predecessor-aware predicate-state payloads carrying `(d_i, d_{i+1})` where defined, and triplet join keys in `components/services/strettoGenerator.ts` and associated types in `types.ts`. | None | 1.5d | All Stage 1–4 artifacts are represented by explicit types; pairwise dissonance keys exclude predecessor delay by construction; predicate-state payloads encode the two-delay tuple where defined; key serialization is deterministic and collision-free under property-order invariance. |
 | P6-T02 | Add stage counters and rejection reason taxonomy | Extend `StrettoSearchReport` with per-stage survivor counts and categorized rejection counters. | P6-T01 | 1.0d | Search report exposes deterministic cardinalities for each stage and non-empty rejection taxonomy on realistic inputs. |
 | P6-T03 | Implement Stage 1 delay-triplet generator with local uniqueness pruning | Build delay triplet generation using `Sb` after rest truncation and A.2–A.5 predicates, including local pruning semantics. | P6-T01 | 2.0d | Generator returns all admissible delay triplets over configured grid; rule checks pass fixture-level assertions. |
 | P6-T04 | Implement Stage 2 transposition-triplet generator | Generate transposition triplets with neighbor ordering, bass-alto separation, and Gatekeeper B constraints. | P6-T01, P6-T03 | 2.0d | Output transposition triplets satisfy spacing and ordering constraints for all sampled fixtures. |
