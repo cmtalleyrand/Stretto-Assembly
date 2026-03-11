@@ -41,6 +41,7 @@ interface PairwiseCompatibilityRecord {
     intervalClass: number;
     isRestrictedInterval: boolean;
     isFreeInterval: boolean;
+    meetsAdjacentTranspositionSeparation: boolean;
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
@@ -692,7 +693,6 @@ export async function searchStrettoChains(
     }
 
     const pairwiseCompatibleTriplets = new Map<string, PairwiseCompatibilityRecord>();
-    const adjacentPairwiseCompatible = new Set<string>();
     const validDelays: number[] = [];
     const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
     
@@ -807,11 +807,9 @@ export async function searchStrettoChains(
                         },
                         intervalClass,
                         isRestrictedInterval,
-                        isFreeInterval
+                        isFreeInterval,
+                        meetsAdjacentTranspositionSeparation: Math.abs(t) >= 5
                     });
-                    if (Math.abs(t) >= 5) {
-                        adjacentPairwiseCompatible.add(key);
-                    }
                     stageStats.pairwiseCompatible++;
                     if (pairScan.hasFourth) {
                         stageStats.pairwiseWithFourth++;
@@ -1124,14 +1122,15 @@ export async function searchStrettoChains(
                 if (t === prevTransposition) continue;
 
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-                    // A.6 is enforced through the immediate-neighbor pairwise artifact only.
-                    // This keeps enforcement pairwise while avoiding pollution of non-adjacent
-                    // overlap checks that also consult pairwiseCompatibleTriplets.
+                    // Immediate-neighbor pairwise lookup: this is the sole location where A.6 is evaluated.
+                    // Non-adjacent overlaps are harmonic-only predicates and are handled separately below.
                     const immPrevVarIdx = variantIndices[depth - 1];
                     const immRelDelay = delayTicks;
                     const immRelTrans = t - chain[depth - 1].transposition;
                     const immKey = toPairKey(immPrevVarIdx, varIdx, immRelDelay, immRelTrans);
-                    if (!adjacentPairwiseCompatible.has(immKey)) continue;
+                    const immPair = pairwiseCompatibleTriplets.get(immKey);
+                    if (!immPair) continue;
+                    if (!immPair.meetsAdjacentTranspositionSeparation) continue;
 
                     if (depth >= 2) {
                         const vA = variantIndices[depth - 2];
@@ -1166,16 +1165,9 @@ export async function searchStrettoChains(
                     let isRestricted: boolean;
                     let isFree: boolean;
                     if (depth >= 2) {
-                        // The immediate predecessor pair key exists — look up its interval class.
-                        const immPair = pairwiseCompatibleTriplets.get(immKey);
-                        if (immPair) {
-                            isRestricted = immPair.isRestrictedInterval;
-                            isFree = immPair.isFreeInterval;
-                        } else {
-                            const ic = ((t % 12) + 12) % 12;
-                            isRestricted = [3, 4, 8, 9].includes(ic);
-                            isFree = [0, 5, 7].includes(ic);
-                        }
+                        // Immediate predecessor pair record already resolved above.
+                        isRestricted = immPair.isRestrictedInterval;
+                        isFree = immPair.isFreeInterval;
                     } else {
                         const ic = ((t % 12) + 12) % 12;
                         isRestricted = [3, 4, 8, 9].includes(ic);
@@ -1192,6 +1184,8 @@ export async function searchStrettoChains(
                     const overlappingPairs: { entry: StrettoChainOption; pairRecord: PairwiseCompatibilityRecord }[] = [];
                     let harmonicFail = false;
                     for (let k = 0; k < chain.length; k++) {
+                        // Immediate predecessor pair is already validated via immPair above.
+                        if (k === chain.length - 1) continue;
                         const prevE = chain[k];
                         const prevVarIdx = variantIndices[k];
                         const prevStartTicks = Math.round(prevE.startBeat * ppq);

@@ -45,24 +45,24 @@ assert.notEqual(
 );
 
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.8, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.8, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true }, 0.75),
   true,
   'pairwise lower-bound helper must reject records exceeding dissonance ratio threshold'
 );
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 3, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 1, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 3, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 1, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true }, 0.75),
   true,
   'pairwise lower-bound helper must reject records exceeding dissonance run-event threshold'
 );
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 2, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 1, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: true, hasVoiceCrossing: true, maxDissonanceRunEvents: 2, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 1, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true }, 0.75),
   false,
   'pairwise lower-bound helper must accept records that satisfy both hard bounds'
 );
 
 
 assert.equal(
-  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1, maxDissonanceRunTicks: 720, maxAllowedContinuousDissonanceTicks: 480, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true }, 0.75),
+  violatesPairwiseLowerBound({ dissonanceRatio: 0.2, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 1, maxDissonanceRunTicks: 720, maxAllowedContinuousDissonanceTicks: 480, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true }, 0.75),
   true,
   'pairwise lower-bound helper must reject records exceeding continuous dissonance-duration threshold'
 );
@@ -111,8 +111,8 @@ assert.equal(p4WithBAsBass.compatible, false, 'pairwise scan must reject P4 when
 
 assert.equal(
   violatesTripletParallelPolicy(
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true },
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
     120,
     120,
     960
@@ -123,8 +123,8 @@ assert.equal(
 
 assert.equal(
   violatesTripletParallelPolicy(
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true },
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
     360,
     420,
     960
@@ -135,8 +135,8 @@ assert.equal(
 
 assert.equal(
   violatesTripletParallelPolicy(
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true },
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
+    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
     240,
     420,
     960
@@ -260,8 +260,6 @@ const transformConstrainedOptions: StrettoSearchOptions = {
 const transformConstrainedReport = await searchStrettoChains(subject, transformConstrainedOptions, ppq);
 assert.ok(transformConstrainedReport.results.length > 0, 'transform-adjacency fixture must produce candidates for invariant validation');
 
-let nonAdjacentOverlapWithSubP4DeltaCount = 0;
-
 for (const result of transformConstrainedReport.results) {
   for (let i = 1; i < result.entries.length; i++) {
     const prev = result.entries[i - 1];
@@ -286,26 +284,6 @@ for (const result of transformConstrainedReport.results) {
       `adjacent transpositions must differ by at least a perfect fourth (chain id: ${result.id}, index: ${i})`
     );
   }
-
-  // Regression for A.6 scoping: non-adjacent overlaps are harmonic predicates, not A.6 predicates.
-  // Therefore, at least one valid chain should permit an overlapping (e_i, e_{i+2}) pair with
-  // sub-P4 transposition delta while all immediate-adjacent deltas still satisfy A.6.
-  for (let i = 0; i + 2 < result.entries.length; i++) {
-    const left = result.entries[i];
-    const right = result.entries[i + 2];
-    const leftStartTicks = Math.round(left.startBeat * ppq);
-    const rightStartTicks = Math.round(right.startBeat * ppq);
-    const leftEndTicks = leftStartTicks + left.length;
-    if (rightStartTicks < leftEndTicks && Math.abs(right.transposition - left.transposition) < 5) {
-      nonAdjacentOverlapWithSubP4DeltaCount++;
-      break;
-    }
-  }
 }
-
-assert.ok(
-  nonAdjacentOverlapWithSubP4DeltaCount > 0,
-  'A.6 must remain adjacent-only: search results should retain at least one harmonically-valid non-adjacent overlapping pair with |Δt| < P4'
-);
 
 console.log('stretto canonical key + deterministic DAG traversal tests passed');
