@@ -554,6 +554,10 @@ export interface StrettoSearchReport {
             nodeBudgetUsedPercent: number;
             maxFrontierSize: number;
             maxFrontierClassCount: number;
+            edgesTraversed: number;
+            frontierSizeAtTermination: number;
+            frontierClassesAtTermination: number;
+            completionRatioLowerBound?: number;
         };
         stageStats?: {
             validDelayCount: number;
@@ -562,11 +566,13 @@ export interface StrettoSearchReport {
             pairwiseCompatible: number;
             pairwiseWithFourth: number;
             pairwiseWithVoiceCrossing: number;
+            pairwiseP4TwoVoiceDissonant: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
             tripleLowerBoundRejected: number;
             tripleParallelRejected: number;
             tripleVoiceRejected: number;
+            tripleP4BassRejected: number;
             harmonicallyValidTriples: number;
             deterministicDagMergedNodes: number;
             pairStageRejected: number;
