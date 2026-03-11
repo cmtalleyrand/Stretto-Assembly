@@ -1,5 +1,5 @@
 
-import { RawNote, StrettoChainResult, StrettoSearchOptions, StrettoChainOption, StrettoConstraintMode, StrettoSearchReport } from '../../types';
+import { RawNote, StrettoChainResult, StrettoSearchOptions, StrettoChainOption, StrettoConstraintMode, StrettoSearchReport, TripletKeyParts, PairRelationKeyParts, PairStateKeyParts, BoundaryPairKeyParts, StrettoStageArtifacts, PairwiseDissonanceArtifactRecord, PairLocalAdmissiblePairRecord, TripletLocalAdmissibleRecord, TripletDissonanceAdmissibleRecord } from '../../types';
 import { INTERVALS, SCALE_INTERVALS } from './strettoConstants';
 import { calculateStrettoScore, SubjectVariant, InternalNote } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
@@ -11,15 +11,6 @@ const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 2048;
 
-interface TripletKeyParts {
-    variantA: number;
-    variantB: number;
-    variantC: number;
-    delayAB: number;
-    delayBC: number;
-    transpositionAB: number;
-    transpositionBC: number;
-}
 
 interface PairwiseCompatibilityRecord {
     dissonanceRatio: number;
@@ -45,12 +36,31 @@ export function toCanonicalTripletKey(parts: TripletKeyParts): string {
     return `${parts.variantA}|${parts.variantB}|${parts.variantC}|${parts.delayAB}|${parts.delayBC}|${parts.transpositionAB}|${parts.transpositionBC}`;
 }
 
+export function toPairRelationKey(parts: PairRelationKeyParts): string {
+    return `${parts.variantA}_${parts.variantB}_${parts.delay}_${parts.transposition}`;
+}
+
+export function toPairStateKey(parts: PairStateKeyParts): string {
+    return `${parts.variantA}_${parts.variantB}_${parts.predecessorDelay}_${parts.delay}_${parts.transposition}`;
+}
+
+export function toBoundaryPairKeyFromParts(parts: BoundaryPairKeyParts): string {
+    return `${parts.leftVoiceIndex}:${parts.leftType}->${parts.rightVoiceIndex}:${parts.rightType}|d${parts.delayTicks}|t${parts.transpositionDelta}`;
+}
+
 export function toBoundaryPairKey(left: StrettoChainOption, right: StrettoChainOption, ppq: number): string {
     const leftStart = Math.round(left.startBeat * ppq);
     const rightStart = Math.round(right.startBeat * ppq);
     const delayTicks = rightStart - leftStart;
     const transpositionDelta = right.transposition - left.transposition;
-    return `${left.voiceIndex}:${left.type}->${right.voiceIndex}:${right.type}|d${delayTicks}|t${transpositionDelta}`;
+    return toBoundaryPairKeyFromParts({
+        leftVoiceIndex: left.voiceIndex,
+        leftType: left.type,
+        rightVoiceIndex: right.voiceIndex,
+        rightType: right.type,
+        delayTicks,
+        transpositionDelta
+    });
 }
 
 export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: number): string {
@@ -561,7 +571,6 @@ export async function searchStrettoChains(
     ppq: number
 ): Promise<StrettoSearchReport> {
 
-    const toPairKey = (vA: number, vB: number, d: number, t: number): string => `${vA}_${vB}_${d}_${t}`;
     const toTripleKey = (vA: number, vB: number, vC: number, d1: number, d2: number, t1: number, t2: number): string => toCanonicalTripletKey({
         variantA: vA,
         variantB: vB,
@@ -580,11 +589,18 @@ export async function searchStrettoChains(
     let activeTimeLimitMs = TIME_LIMIT_MS;
     let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
+    const emptyStageArtifacts: StrettoStageArtifacts = {
+        pairwiseDissonanceArtifact: [],
+        pairLocalAdmissiblePairs: [],
+        tripletLocalAdmissibleTriplets: [],
+        tripletDissonanceAdmissibleTriplets: []
+    };
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
     if (baseNotes.length === 0) {
         return {
             results: [],
+            stageArtifacts: emptyStageArtifacts,
             stats: {
                 nodesVisited: 0,
                 timeMs: 0,
@@ -700,7 +716,7 @@ export async function searchStrettoChains(
                     if (shouldYieldToEventLoop(operationCounter)) {
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
                     }
-                    const key = toPairKey(iA, iB, d, t);
+                    const key = toPairRelationKey({ variantA: iA, variantB: iB, delay: d, transposition: t });
                     const pairScan = runStructuralScanGuard(
                         stageStats,
                         d > 0,
@@ -762,7 +778,7 @@ export async function searchStrettoChains(
     }
 
     for (const p1 of validPairsList) {
-        const keyAB = toPairKey(p1.vA, p1.vB, p1.d, p1.t);
+        const keyAB = toPairRelationKey({ variantA: p1.vA, variantB: p1.vB, delay: p1.d, transposition: p1.t });
         const pairAB = pairwiseCompatibleTriplets.get(keyAB);
         if (!pairAB) continue;
 
@@ -773,7 +789,7 @@ export async function searchStrettoChains(
             if (shouldYieldToEventLoop(operationCounter)) {
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
             }
-            const keyBC = toPairKey(p2.vA, p2.vB, p2.d, p2.t);
+            const keyBC = toPairRelationKey({ variantA: p2.vA, variantB: p2.vB, delay: p2.d, transposition: p2.t });
             const pairBC = pairwiseCompatibleTriplets.get(keyBC);
             if (!pairBC) continue;
 
@@ -796,7 +812,7 @@ export async function searchStrettoChains(
             
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
-                const keyAC = toPairKey(vA, vC, dAC, tAC);
+                const keyAC = toPairRelationKey({ variantA: vA, variantB: vC, delay: dAC, transposition: tAC });
                 const pairAC = pairwiseCompatibleTriplets.get(keyAC);
                 if (!passesTripletStage(stageStats, !!pairAC)) {
                     stageStats.triplePairwiseRejected++;
@@ -1032,7 +1048,7 @@ export async function searchStrettoChains(
                         if (absStartTicks < prevEndTicks) {
                             const relDelay = absStartTicks - prevStartTicks;
                             const relTrans = t - prevE.transposition;
-                            const key = toPairKey(prevVarIdx, varIdx, relDelay, relTrans);
+                            const key = toPairRelationKey({ variantA: prevVarIdx, variantB: varIdx, delay: relDelay, transposition: relTrans });
                             const pairRecord = pairwiseCompatibleTriplets.get(key);
                             if (!pairRecord) {
                                 harmonicFail = true;
@@ -1288,8 +1304,43 @@ export async function searchStrettoChains(
         finalResults.push(leader);
     });
 
+    const pairwiseDissonanceArtifact: PairwiseDissonanceArtifactRecord[] = [];
+    const pairLocalAdmissiblePairs: PairLocalAdmissiblePairRecord[] = [];
+    pairwiseCompatibleTriplets.forEach((record, relationKey) => {
+        const [variantA, variantB, delay, transposition] = relationKey.split('_').map(Number);
+        pairwiseDissonanceArtifact.push({
+            relationKey,
+            stateKey: toPairStateKey({
+                variantA,
+                variantB,
+                predecessorDelay: 0,
+                delay,
+                transposition
+            }),
+            dissonanceRatio: record.dissonanceRatio,
+            hasFourth: record.hasFourth,
+            hasVoiceCrossing: record.hasVoiceCrossing,
+            maxDissonanceRunEvents: record.maxDissonanceRunEvents,
+            hasParallelPerfect58: record.hasParallelPerfect58
+        });
+        pairLocalAdmissiblePairs.push({
+            relationKey,
+            disallowLowestPair: record.disallowLowestPair,
+            allowedVoicePairs: Array.from(record.allowedVoicePairs).sort()
+        });
+    });
+    const tripletLocalAdmissibleTriplets: TripletLocalAdmissibleRecord[] = Array.from(harmonicallyValidTriples).sort().map((tripletKey) => ({ tripletKey }));
+    const tripletDissonanceAdmissibleTriplets: TripletDissonanceAdmissibleRecord[] = Array.from(harmonicallyValidTriples).sort().map((tripletKey) => ({ tripletKey }));
+    const stageArtifacts: StrettoStageArtifacts = {
+        pairwiseDissonanceArtifact: pairwiseDissonanceArtifact.sort((a, b) => a.relationKey.localeCompare(b.relationKey)),
+        pairLocalAdmissiblePairs: pairLocalAdmissiblePairs.sort((a, b) => a.relationKey.localeCompare(b.relationKey)),
+        tripletLocalAdmissibleTriplets,
+        tripletDissonanceAdmissibleTriplets
+    };
+
     return {
         results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),
+        stageArtifacts,
         stats: {
             nodesVisited,
             edgesTraversed,
