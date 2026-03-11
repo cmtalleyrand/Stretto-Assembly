@@ -692,6 +692,7 @@ export async function searchStrettoChains(
     }
 
     const pairwiseCompatibleTriplets = new Map<string, PairwiseCompatibilityRecord>();
+    const adjacentPairwiseCompatible = new Set<string>();
     const validDelays: number[] = [];
     const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
     
@@ -808,6 +809,9 @@ export async function searchStrettoChains(
                         isRestrictedInterval,
                         isFreeInterval
                     });
+                    if (Math.abs(t) >= 5) {
+                        adjacentPairwiseCompatible.add(key);
+                    }
                     stageStats.pairwiseCompatible++;
                     if (pairScan.hasFourth) {
                         stageStats.pairwiseWithFourth++;
@@ -1119,11 +1123,16 @@ export async function searchStrettoChains(
             for (const t of orderedTranspositions) {
                 if (t === prevTransposition) continue;
 
-                // A.6 Adjacent-transposition separation is an immediate-neighbor predicate:
-                // enforce only on (e_{i-1}, e_i), not on all overlapping predecessors.
-                if (Math.abs(t - prevTransposition) < 5) continue;
-
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                    // A.6 is enforced through the immediate-neighbor pairwise artifact only.
+                    // This keeps enforcement pairwise while avoiding pollution of non-adjacent
+                    // overlap checks that also consult pairwiseCompatibleTriplets.
+                    const immPrevVarIdx = variantIndices[depth - 1];
+                    const immRelDelay = delayTicks;
+                    const immRelTrans = t - chain[depth - 1].transposition;
+                    const immKey = toPairKey(immPrevVarIdx, varIdx, immRelDelay, immRelTrans);
+                    if (!adjacentPairwiseCompatible.has(immKey)) continue;
+
                     if (depth >= 2) {
                         const vA = variantIndices[depth - 2];
                         const vB = variantIndices[depth - 1];
@@ -1158,10 +1167,6 @@ export async function searchStrettoChains(
                     let isFree: boolean;
                     if (depth >= 2) {
                         // The immediate predecessor pair key exists — look up its interval class.
-                        const immPrevVarIdx = variantIndices[depth - 1];
-                        const immRelDelay = delayTicks;
-                        const immRelTrans = t - chain[depth - 1].transposition;
-                        const immKey = toPairKey(immPrevVarIdx, varIdx, immRelDelay, immRelTrans);
                         const immPair = pairwiseCompatibleTriplets.get(immKey);
                         if (immPair) {
                             isRestricted = immPair.isRestrictedInterval;
