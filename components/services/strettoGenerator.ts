@@ -30,6 +30,12 @@ interface PairwiseCompatibilityRecord {
     maxDissonanceRunTicks?: number;
     maxAllowedContinuousDissonanceTicks?: number;
     hasParallelPerfect58: boolean;
+    // Span locations where dissonant simultaneities occur in pairwise scan coordinates.
+    dissonanceSpans?: SimultaneitySpan[];
+    // Span locations where P4 simultaneities occur in pairwise scan coordinates.
+    p4Spans?: SimultaneitySpan[];
+    // Tick locations where disallowed parallel-perfect motion starts are observed.
+    parallelPerfectStartTicks?: number[];
     disallowLowestPair: boolean;
     allowedVoicePairs: Set<string>;
     // Per-bass-role compatibility: precomputed so traversal never re-scans.
@@ -44,6 +50,27 @@ interface PairwiseCompatibilityRecord {
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
+
+interface SimultaneitySpan {
+    startTick: number;
+    endTick: number;
+}
+
+interface PairwiseScanResult {
+    compatible: boolean;
+    dissonanceRatio: number;
+    strongBeatParallels: number;
+    weakBeatParallels: number;
+    hasFourth: boolean;
+    p4SimultaneityCount: number;
+    hasVoiceCrossing: boolean;
+    maxDissonanceRunEvents: number;
+    maxDissonanceRunTicks: number;
+    hasParallelPerfect58: boolean;
+    dissonanceSpans: SimultaneitySpan[];
+    p4Spans: SimultaneitySpan[];
+    parallelPerfectStartTicks: number[];
+}
 
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
@@ -89,6 +116,24 @@ export function shouldYieldToEventLoop(iteration: number, interval: number = EVE
     return iteration > 0 && iteration % interval === 0;
 }
 
+function appendUniqueCapped(target: number[], source: number[] | undefined, cap: number = 256): void {
+    if (!source || source.length === 0 || target.length >= cap) return;
+    for (const tick of source) {
+        if (target.length >= cap) break;
+        if (!target.includes(tick)) target.push(tick);
+    }
+}
+
+function appendUniqueSpansCapped(target: SimultaneitySpan[], source: SimultaneitySpan[] | undefined, cap: number = 256): void {
+    if (!source || source.length === 0 || target.length >= cap) return;
+    for (const span of source) {
+        if (target.length >= cap) break;
+        if (!target.some((s) => s.startTick === span.startTick && s.endTick === span.endTick)) {
+            target.push(span);
+        }
+    }
+}
+
 interface StageStats {
     validDelayCount: number;
     transpositionCount: number;
@@ -97,6 +142,7 @@ interface StageStats {
     pairwiseWithFourth: number;
     pairwiseWithVoiceCrossing: number;
     pairwiseP4TwoVoiceDissonant: number;
+    pairwiseParallelRejected: number;
     tripleCandidates: number;
     triplePairwiseRejected: number;
     tripleLowerBoundRejected: number;
@@ -109,6 +155,9 @@ interface StageStats {
     tripletStageRejected: number;
     globalLineageStageRejected: number;
     structuralScanInvocations: number;
+    dissonanceSpans: SimultaneitySpan[];
+    p4Spans: SimultaneitySpan[];
+    parallelPerfectLocationTicks: number[];
 }
 
 export function passesPairStage(stageStats: StageStats, predicate: boolean): boolean {
@@ -157,8 +206,9 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
     // No quantization here - preserve original ticks relative to start
     const startTick = valid[0].ticks;
     
-    // We still need an offset for metric alignment (strong beat detection)
-    // Assuming startTick is absolute, offsetTicks = startTick
+    // Metric offset is the absolute tick of the first subject onset.
+    // It aligns local scan coordinates (relTick-based) to the global metric grid
+    // when evaluating strong-beat predicates.
     const offsetTicks = startTick;
 
     const internalNotes: InternalNote[] = valid.map(n => ({
@@ -174,6 +224,22 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
 
 // Parallel hard-fail policy applies only to P5/P8 classes, never P4.
 const PERFECT_PARALLEL_INTERVALS = new Set([0, 7]);
+
+
+function isForbiddenParallelPerfectMotion(
+    prevIntervalClass: number,
+    deltaVoice1: number,
+    deltaVoice2: number
+): boolean {
+    // Forbidden parallel-perfect motion is defined as:
+    // 1) Previous simultaneity is perfect (P1/P8 class 0 or P5 class 7), and
+    // 2) Both voices move simultaneously by the same non-zero signed amount.
+    // Equal signed deltas preserve interval class, so a perfect previous interval
+    // remains perfect at the current simultaneity.
+    return PERFECT_PARALLEL_INTERVALS.has(prevIntervalClass)
+        && deltaVoice1 !== 0
+        && deltaVoice1 === deltaVoice2;
+}
 
 export function violatesTripletParallelPolicy(
     pairAB: PairwiseCompatibilityRecord,
@@ -203,9 +269,11 @@ export function checkCounterpointStructure(
     delayTicks: number,
     transposition: number,
     maxDissonanceRatio: number,
-    ppqParam: number = 480
- ): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, p4SimultaneityCount: number, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, maxDissonanceRunTicks: number, hasParallelPerfect58: boolean } {
-    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam);
+    ppqParam: number = 480,
+    tsNum: number = 4,
+    tsDenom: number = 4
+ ): PairwiseScanResult {
+    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam, tsNum, tsDenom);
 }
 
 export function checkCounterpointStructureWithBassRole(
@@ -215,8 +283,10 @@ export function checkCounterpointStructureWithBassRole(
     transposition: number,
     maxDissonanceRatio: number,
     bassRole: PairwiseBassRole,
-    ppqParam: number = 480
- ): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, p4SimultaneityCount: number, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, maxDissonanceRunTicks: number, hasParallelPerfect58: boolean } {
+    ppqParam: number = 480,
+    tsNum: number = 4,
+    tsDenom: number = 4
+ ): PairwiseScanResult {
     
     // Collect all time points
     const timePoints = new Set<number>();
@@ -260,6 +330,9 @@ export function checkCounterpointStructureWithBassRole(
     let p4SimultaneityCount = 0;
     let hasVoiceCrossing = false;
     let hasParallelPerfect58 = false;
+    const dissonanceSpans: SimultaneitySpan[] = [];
+    const p4Spans: SimultaneitySpan[] = [];
+    const parallelPerfectStartTicks: number[] = [];
     let previousOrderingSign = 0;
     let maxDissonanceRunEvents = 0;
     let maxDissonanceRunTicks = 0;
@@ -305,6 +378,7 @@ export function checkCounterpointStructureWithBassRole(
         if (interval === 5) {
             hasFourth = true;
             p4SimultaneityCount++;
+            p4Spans.push({ startTick: start, endTick: end });
         }
 
         // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
@@ -312,19 +386,18 @@ export function checkCounterpointStructureWithBassRole(
             const p1Moved = p1 !== prevP1;
             const p2Moved = p2 !== prevP2;
 
-            if (p1Moved && p2Moved) {
-                if (PERFECT_PARALLEL_INTERVALS.has(interval)) {
-                    const prevLo = Math.min(prevP1, prevP2);
-                    const prevHi = Math.max(prevP1, prevP2);
-                    const prevInt = (prevHi - prevLo) % 12;
-                    if (prevInt === interval) {
-                        hasParallelPerfect58 = true;
-                        if (isStrongBeat(start, ppqParam)) {
-                            strongBeatParallels++;
-                        } else {
-                            weakBeatParallels++;
-                        }
-                    }
+            const prevLo = Math.min(prevP1, prevP2);
+            const prevHi = Math.max(prevP1, prevP2);
+            const prevInt = (prevHi - prevLo) % 12;
+            const deltaVoice1 = p1 - prevP1;
+            const deltaVoice2 = p2 - prevP2;
+            if (isForbiddenParallelPerfectMotion(prevInt, deltaVoice1, deltaVoice2)) {
+                hasParallelPerfect58 = true;
+                parallelPerfectStartTicks.push(start);
+                if (isStrongBeat(start, ppqParam, tsNum, tsDenom)) {
+                    strongBeatParallels++;
+                } else {
+                    weakBeatParallels++;
                 }
             }
         }
@@ -339,6 +412,7 @@ export function checkCounterpointStructureWithBassRole(
         }
         
         if (isDiss) {
+            dissonanceSpans.push({ startTick: start, endTick: end });
             dissonantTicks += dur;
             
             // For run length, we count *events* (intervals), not ticks
@@ -353,10 +427,10 @@ export function checkCounterpointStructureWithBassRole(
             maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
 
             // Rule C2b: Continuous dissonance must resolve within one beat.
-            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
+            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
 
             lastIsDiss = true;
         } else {
@@ -372,19 +446,35 @@ export function checkCounterpointStructureWithBassRole(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
     }
 
     maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
     maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58 };
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
 }
 
 // Helper: Determine beat strength
-function isStrongBeat(tick: number, ppq: number): boolean {
-    // Strong if on Beat 1 (0) or Beat 3 (PPQ*2) in 4/4
-    // Generalized: Strong if tick % (PPQ * 2) === 0
-    return (tick % (ppq * 2)) === 0;
+function resolveBeatAndMeasureTicks(ppq: number, tsNum: number, tsDenom: number): { beatTicks: number; measureTicks: number } {
+    const measureTicks = ppq * tsNum * (4 / tsDenom);
+    const isCompound = tsDenom === 8 && tsNum % 3 === 0 && tsNum >= 6;
+    const beatTicks = isCompound ? (3 * ppq) / 2 : ppq * (4 / tsDenom);
+    return { beatTicks, measureTicks };
+}
+
+export function isStrongBeat(tick: number, ppq: number, tsNum: number = 4, tsDenom: number = 4): boolean {
+    const { beatTicks, measureTicks } = resolveBeatAndMeasureTicks(ppq, tsNum, tsDenom);
+    const posInMeasure = ((tick % measureTicks) + measureTicks) % measureTicks;
+    const eps = 1e-6;
+
+    if (Math.abs(posInMeasure) < eps) return true;
+
+    // Rule: only 4/4 and 12/8 carry a second strong pulse at beat 3.
+    const hasSecondStrongPulse = (tsNum === 4 && tsDenom === 4) || (tsNum === 12 && tsDenom === 8);
+    if (!hasSecondStrongPulse) return false;
+
+    const secondStrongTick = 2 * beatTicks;
+    return Math.abs(posInMeasure - secondStrongTick) < eps;
 }
 
 export function isVoicePairAllowedForTransposition(
@@ -449,7 +539,9 @@ function checkMetricCompliance(
     variants: SubjectVariant[], 
     variantIndices: number[],
     ppq: number,
-    metricOffset: number = 0
+    metricOffset: number = 0,
+    tsNum: number = 4,
+    tsDenom: number = 4
 ): boolean {
 
     const newStartTick = Math.round(newEntry.startBeat * ppq);
@@ -557,7 +649,7 @@ function checkMetricCompliance(
             if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
             // Corrected Metric Check using Absolute Grid alignment
-            const isStrong = isStrongBeat(start + metricOffset, ppq);
+            const isStrong = isStrongBeat(start + metricOffset, ppq, tsNum, tsDenom);
 
             if (isDiss) {
                 if (!lastIsDiss) dissRunLength = 1; else dissRunLength++;
@@ -572,7 +664,7 @@ function checkMetricCompliance(
                     // Original logic: if current is strong, fail.
                     // Also check if previous was strong.
                     const prevStart = sortedPoints[i-1]; // Safe because dissRunLength=2 implies i>=1
-                    const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq);
+                    const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq, tsNum, tsDenom);
                     if (isStrong || prevIsStrong) return false; 
                 }
                 
@@ -617,6 +709,8 @@ export async function searchStrettoChains(
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
+    const tsNum = options.meterNumerator ?? 4;
+    const tsDenom = options.meterDenominator ?? 4;
     if (baseNotes.length === 0) {
         return {
             results: [],
@@ -625,6 +719,7 @@ export async function searchStrettoChains(
                 timeMs: 0,
                 stopReason: 'Exhausted',
                 maxDepthReached: 0,
+                metricOffsetTicks: offsetTicks,
                 stageStats: {
                     validDelayCount: 0,
                     transpositionCount: 0,
@@ -633,6 +728,7 @@ export async function searchStrettoChains(
                     pairwiseWithFourth: 0,
                     pairwiseWithVoiceCrossing: 0,
                     pairwiseP4TwoVoiceDissonant: 0,
+                    pairwiseParallelRejected: 0,
                     tripleCandidates: 0,
                     triplePairwiseRejected: 0,
                     tripleLowerBoundRejected: 0,
@@ -644,7 +740,10 @@ export async function searchStrettoChains(
                     pairStageRejected: 0,
                     tripletStageRejected: 0,
                     globalLineageStageRejected: 0,
-                    structuralScanInvocations: 0
+                    structuralScanInvocations: 0,
+                    dissonanceSpans: [],
+                    p4Spans: [],
+                    parallelPerfectLocationTicks: []
                 }
             }
         };
@@ -712,6 +811,7 @@ export async function searchStrettoChains(
         pairwiseWithFourth: 0,
         pairwiseWithVoiceCrossing: 0,
         pairwiseP4TwoVoiceDissonant: 0,
+        pairwiseParallelRejected: 0,
         tripleCandidates: 0,
         triplePairwiseRejected: 0,
         tripleLowerBoundRejected: 0,
@@ -723,7 +823,10 @@ export async function searchStrettoChains(
         pairStageRejected: 0,
         tripletStageRejected: 0,
         globalLineageStageRejected: 0,
-        structuralScanInvocations: 0
+        structuralScanInvocations: 0,
+        dissonanceSpans: [],
+        p4Spans: [],
+        parallelPerfectLocationTicks: []
     };
 
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
@@ -744,8 +847,19 @@ export async function searchStrettoChains(
 
                     // Neutral scan (P4 treated as provisionally consonant)
                     stageStats.structuralScanInvocations++;
-                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance, ppq);
+                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance, ppq, tsNum, tsDenom);
+                    appendUniqueSpansCapped(stageStats.dissonanceSpans, pairScan.dissonanceSpans);
+                    appendUniqueSpansCapped(stageStats.p4Spans, pairScan.p4Spans);
+                    appendUniqueCapped(stageStats.parallelPerfectLocationTicks, pairScan.parallelPerfectStartTicks);
                     if (!pairScan.compatible) {
+                        stageStats.pairStageRejected++;
+                        continue;
+                    }
+
+                    // Disallowed parallel perfects are strict pairwise failures:
+                    // perfect fifth (P5 class 7) and perfect octave/unison (P8/P1 class 0).
+                    if (pairScan.hasParallelPerfect58) {
+                        stageStats.pairwiseParallelRejected++;
                         stageStats.pairStageRejected++;
                         continue;
                     }
@@ -753,9 +867,9 @@ export async function searchStrettoChains(
                     // Bass-role scans: P4 resolved as dissonant when lower note is bass.
                     // These are the authoritative results for voice-specific pruning.
                     stageStats.structuralScanInvocations++;
-                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq);
+                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom);
                     stageStats.structuralScanInvocations++;
-                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq);
+                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom);
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
@@ -786,6 +900,9 @@ export async function searchStrettoChains(
                         maxDissonanceRunTicks: pairScan.maxDissonanceRunTicks,
                         maxAllowedContinuousDissonanceTicks: ppq,
                         hasParallelPerfect58: pairScan.hasParallelPerfect58,
+                        dissonanceSpans: pairScan.dissonanceSpans,
+                        p4Spans: pairScan.p4Spans,
+                        parallelPerfectStartTicks: pairScan.parallelPerfectStartTicks,
                         disallowLowestPair,
                         allowedVoicePairs,
                         bassRoleCompatible: {
@@ -855,11 +972,6 @@ export async function searchStrettoChains(
             const d1 = p1.d;
             const d2 = p2.d;
 
-            if (!passesTripletStage(stageStats, !violatesTripletParallelPolicy(pairAB, pairBC, d1, d2, subjectLengthTicks))) {
-                stageStats.tripleParallelRejected++;
-                continue;
-            }
-            
             // Rule: Max Expansion (using ticks, assuming step size)
             if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
             
@@ -1227,7 +1339,7 @@ export async function searchStrettoChains(
                             voiceIndex: v
                         };
 
-                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks)) continue;
+                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                         const newVoiceState = [...voiceEndTimesTicks];
                         newVoiceState[v] = absStartTicks + variant.lengthTicks;
@@ -1413,6 +1525,7 @@ export async function searchStrettoChains(
             timeMs: Date.now() - startTime,
             stopReason: stopReason,
             maxDepthReached: maxDepth,
+            metricOffsetTicks: offsetTicks,
             timeoutExtensionAppliedMs,
             coverage: {
                 nodeBudgetUsedPercent: roundToWholePercent(Math.min(1, nodesVisited / MAX_SEARCH_NODES)),

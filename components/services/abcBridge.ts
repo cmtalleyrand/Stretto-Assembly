@@ -91,6 +91,21 @@ export function extractKeyFromAbc(abc: string): { root: number, mode: string } |
     return null;
 }
 
+
+export function extractMeterFromAbc(abc: string): { num: number, den: number } | null {
+    const lines = abc.split(/\r?\n/);
+    for (const line of lines) {
+        const m = line.trim().match(/^M\s*:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
+        if (!m) continue;
+        const num = parseInt(m[1], 10);
+        const den = parseInt(m[2], 10);
+        if (Number.isFinite(num) && Number.isFinite(den) && num > 0 && den > 0) {
+            return { num, den };
+        }
+    }
+    return null;
+}
+
 export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] {
     const lines = abcString.split(/\r?\n/);
     

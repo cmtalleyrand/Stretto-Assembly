@@ -549,6 +549,7 @@ export interface StrettoSearchReport {
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
         coverage?: {
             nodeBudgetUsedPercent: number;
@@ -567,6 +568,7 @@ export interface StrettoSearchReport {
             pairwiseWithFourth: number;
             pairwiseWithVoiceCrossing: number;
             pairwiseP4TwoVoiceDissonant: number;
+            pairwiseParallelRejected?: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
             tripleLowerBoundRejected: number;
@@ -579,6 +581,9 @@ export interface StrettoSearchReport {
             tripletStageRejected: number;
             globalLineageStageRejected: number;
             structuralScanInvocations: number;
+            dissonanceSpans?: { startTick: number; endTick: number }[];
+            p4Spans?: { startTick: number; endTick: number }[];
+            parallelPerfectLocationTicks?: number[];
         };
     };
 }
@@ -599,6 +604,8 @@ export interface StrettoSearchOptions {
     disallowComplexExceptions: boolean;
     maxPairwiseDissonance: number;
     voiceNames?: Record<number, string>;
+    meterNumerator?: number;
+    meterDenominator?: number;
     scaleRoot: number; // 0-11
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.
 }
