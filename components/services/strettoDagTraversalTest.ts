@@ -260,6 +260,8 @@ const transformConstrainedOptions: StrettoSearchOptions = {
 const transformConstrainedReport = await searchStrettoChains(subject, transformConstrainedOptions, ppq);
 assert.ok(transformConstrainedReport.results.length > 0, 'transform-adjacency fixture must produce candidates for invariant validation');
 
+let nonAdjacentOverlapWithSubP4DeltaCount = 0;
+
 for (const result of transformConstrainedReport.results) {
   for (let i = 1; i < result.entries.length; i++) {
     const prev = result.entries[i - 1];
@@ -284,6 +286,26 @@ for (const result of transformConstrainedReport.results) {
       `adjacent transpositions must differ by at least a perfect fourth (chain id: ${result.id}, index: ${i})`
     );
   }
+
+  // Regression for A.6 scoping: non-adjacent overlaps are harmonic predicates, not A.6 predicates.
+  // Therefore, at least one valid chain should permit an overlapping (e_i, e_{i+2}) pair with
+  // sub-P4 transposition delta while all immediate-adjacent deltas still satisfy A.6.
+  for (let i = 0; i + 2 < result.entries.length; i++) {
+    const left = result.entries[i];
+    const right = result.entries[i + 2];
+    const leftStartTicks = Math.round(left.startBeat * ppq);
+    const rightStartTicks = Math.round(right.startBeat * ppq);
+    const leftEndTicks = leftStartTicks + left.length;
+    if (rightStartTicks < leftEndTicks && Math.abs(right.transposition - left.transposition) < 5) {
+      nonAdjacentOverlapWithSubP4DeltaCount++;
+      break;
+    }
+  }
 }
+
+assert.ok(
+  nonAdjacentOverlapWithSubP4DeltaCount > 0,
+  'A.6 must remain adjacent-only: search results should retain at least one harmonically-valid non-adjacent overlapping pair with |Δt| < P4'
+);
 
 console.log('stretto canonical key + deterministic DAG traversal tests passed');

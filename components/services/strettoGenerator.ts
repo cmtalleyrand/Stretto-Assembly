@@ -737,15 +737,6 @@ export async function searchStrettoChains(
                 for (const t of transpositions) {
                     stageStats.pairwiseTotal++;
 
-                    // Adjacent-transposition gatekeeper (pairwise form):
-                    // each pair (e_i, e_{i+1}) must satisfy |t_{i+1} - t_i| >= 5 semitones.
-                    // In pairwise precomputation, `t` is exactly that adjacent delta, so prune
-                    // sub-P4 intervals before any structural scan to reduce work.
-                    if (Math.abs(t) < 5) {
-                        stageStats.pairStageRejected++;
-                        continue;
-                    }
-
                     operationCounter++;
                     if (shouldYieldToEventLoop(operationCounter)) {
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1127,6 +1118,10 @@ export async function searchStrettoChains(
 
             for (const t of orderedTranspositions) {
                 if (t === prevTransposition) continue;
+
+                // A.6 Adjacent-transposition separation is an immediate-neighbor predicate:
+                // enforce only on (e_{i-1}, e_i), not on all overlapping predecessors.
+                if (Math.abs(t - prevTransposition) < 5) continue;
 
                 for (let varIdx = 0; varIdx < variants.length; varIdx++) {
                     if (depth >= 2) {
