@@ -336,15 +336,34 @@ for (const result of transformConstrainedReport.results) {
     const prevIsTruncated = prev.length < ppq * 4;
     const currIsTruncated = curr.length < ppq * 4;
     assert.notEqual(
-      prevIsTruncated && currIsTruncated,
+      (prev.type === 'I' || prevIsTruncated) && (curr.type === 'I' || currIsTruncated),
       true,
-      `consecutive truncation entries must be pruned (chain id: ${result.id}, index: ${i})`
+      `transformed entries must be followed by normal entries (chain id: ${result.id}, index: ${i})`
     );
 
     assert.ok(
       Math.abs(curr.transposition - prev.transposition) >= 5,
       `adjacent transpositions must differ by at least a perfect fourth (chain id: ${result.id}, index: ${i})`
     );
+
+    if (i >= 2) {
+      const prevPrev = result.entries[i - 2];
+      const prevDelay = prev.startBeat - prevPrev.startBeat;
+      const currDelay = curr.startBeat - prev.startBeat;
+      const subjectLengthBeats = prev.length / ppq;
+
+      if (prevDelay >= subjectLengthBeats / 2 || currDelay >= subjectLengthBeats / 2) {
+        assert.ok(
+          currDelay < prevDelay,
+          `half-length OR trigger must enforce contraction (chain id: ${result.id}, index: ${i})`
+        );
+      }
+
+      assert.ok(
+        prevDelay - currDelay <= subjectLengthBeats / 4,
+        `maximum contraction must be bounded by quarter subject length (chain id: ${result.id}, index: ${i})`
+      );
+    }
   }
 }
 

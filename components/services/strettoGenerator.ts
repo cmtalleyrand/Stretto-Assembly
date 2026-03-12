@@ -61,12 +61,18 @@ interface WindowKeyParts {
 }
 
 interface NextTransition {
-    nextVariantIndex: number;
     delayTicks: number;
+    nextVariantIndex: number;
     transpositionDelta: number;
-    pairRecord: PairwiseCompatibilityRecord;
-    isRestrictedInterval: boolean;
-    isFreeInterval: boolean;
+    // Present for window-indexed transitions used during deep expansion.
+    pairRecord?: PairwiseCompatibilityRecord;
+    isRestrictedInterval?: boolean;
+    isFreeInterval?: boolean;
+    // Present for boundary/root transition caches used before full overlap collection.
+    isInv?: boolean;
+    isTrunc?: boolean;
+    isRestricted?: boolean;
+    isFree?: boolean;
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
@@ -188,16 +194,6 @@ type TransitionRuleClass = 'local' | 'prefix-global' | 'terminal/output';
 interface RuleClassification {
     name: string;
     class: TransitionRuleClass;
-}
-
-interface NextTransition {
-    delayTicks: number;
-    nextVariantIndex: number;
-    transpositionDelta: number;
-    isInv: boolean;
-    isTrunc: boolean;
-    isRestricted: boolean;
-    isFree: boolean;
 }
 
 const TRANSITION_RULE_CLASSIFICATIONS: RuleClassification[] = [
@@ -1234,7 +1230,9 @@ export async function searchStrettoChains(
             const isTrunc = variant.truncationBeats > 0;
             const prevIsInv = prevVariant.type === 'I';
             const prevIsTrunc = prevVariant.truncationBeats > 0;
-            if ((prevIsInv && isInv) || (prevIsTrunc && isTrunc)) continue;
+            // Transform-following constraint:
+            // if the predecessor is transformed (inverted OR truncated), the successor must be normal.
+            if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
 
             pushNextTransition(nextTransitionsByBoundary, `${p1.vA}|${p1.vB}|${p1.d}|${p1.t}|${p2.d}`, {
                 delayTicks: p2.d,
@@ -1331,8 +1329,15 @@ export async function searchStrettoChains(
             const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const prevSubjectLengthTicks = chain[depth - 1].length;
 
-            if (prevDelayTicks > (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
+            // Long-delay contraction (OR form):
+            // if d_i >= 0.5*Sl OR d_{i+1} >= 0.5*Sl, then d_{i+1} < d_i.
+            // Candidate-side (d_{i+1}) portion is applied below during per-candidate filtering.
+            if (prevDelayTicks >= (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
             else maxD = Math.min(maxD, prevDelayTicks + delayStep);
+
+            // Maximum contraction bound:
+            // d_i - d_{i+1} <= 0.25*Sl  =>  d_{i+1} >= d_i - 0.25*Sl.
+            minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
 
             if (depth >= 3) {
                 const prevPrevDelayTicks = Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq);
@@ -1454,13 +1459,23 @@ export async function searchStrettoChains(
                 const isInv = variant.type === 'I';
                 const isTrunc = variant.truncationBeats > 0;
 
-                // Structural transform adjacency rule:
-                // prohibit immediate repetition of inversion and truncation transforms.
+                // Structural transform-following rule:
+                // any transformed predecessor (inversion OR truncation) must be followed by a normal entry.
                 // This is an O(1) local-state check using the predecessor variant index.
                 const prevVariant = variants[variantIndices[depth - 1]];
                 const prevIsInv = prevVariant.type === 'I';
                 const prevIsTrunc = prevVariant.truncationBeats > 0;
-                if ((prevIsInv && isInv) || (prevIsTrunc && isTrunc)) continue;
+                if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+
+                if (depth >= 2) {
+                    const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
+                    const prevSubjectLengthTicks = chain[depth - 1].length;
+                    const halfSubjectTicks = prevSubjectLengthTicks / 2;
+
+                    // Long-delay contraction (OR form):
+                    // if either previous or current delay is at least half subject length, enforce contraction.
+                    if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
+                }
 
                 if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
                 if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
