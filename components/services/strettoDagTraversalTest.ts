@@ -348,4 +348,130 @@ for (const result of transformConstrainedReport.results) {
   }
 }
 
+
+
+const normalizeChainSignatureSet = (report: Awaited<ReturnType<typeof searchStrettoChains>>): Set<string> => {
+  const signatures = new Set<string>();
+  for (const result of report.results) {
+    const chainSig = result.entries
+      .map((entry) => `${Math.round(entry.startBeat * ppq)}:${((entry.transposition % 12) + 12) % 12}:${entry.type}:${entry.voiceIndex}`)
+      .join('|');
+    signatures.add(chainSig);
+  }
+  return signatures;
+};
+
+const sortedSet = (input: Set<string>): string[] => Array.from(input).sort((a, b) => a.localeCompare(b));
+
+interface TraversalFixture {
+  name: string;
+  subject: RawNote[];
+  options: StrettoSearchOptions;
+}
+
+const fixtureEntry7Regime: TraversalFixture = {
+  name: 'entry-7-regime',
+  subject: [
+    { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
+    { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
+    { midi: 64, ticks: 960, durationTicks: 480, velocity: 90, name: 'E4' },
+    { midi: 65, ticks: 1440, durationTicks: 480, velocity: 90, name: 'F4' },
+    { midi: 67, ticks: 1920, durationTicks: 480, velocity: 90, name: 'G4' }
+  ],
+  options: {
+    ...options,
+    targetChainLength: 7,
+    thirdSixthMode: 'Unlimited',
+    maxPairwiseDissonance: 0.9
+  }
+};
+
+const fixtureBeyondEntry7: TraversalFixture = {
+  name: 'beyond-entry-7',
+  subject: [
+    { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
+    { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
+    { midi: 64, ticks: 960, durationTicks: 480, velocity: 90, name: 'E4' },
+    { midi: 65, ticks: 1440, durationTicks: 480, velocity: 90, name: 'F4' },
+    { midi: 67, ticks: 1920, durationTicks: 480, velocity: 90, name: 'G4' },
+    { midi: 69, ticks: 2400, durationTicks: 480, velocity: 90, name: 'A4' }
+  ],
+  options: {
+    ...options,
+    targetChainLength: 8,
+    thirdSixthMode: 'None',
+    inversionMode: 'None',
+    truncationMode: 'None',
+    maxPairwiseDissonance: 0.75
+  }
+};
+
+const fixtureStressNearLimits: TraversalFixture = {
+  name: 'stress-near-limits',
+  subject: [
+    { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
+    { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
+    { midi: 64, ticks: 960, durationTicks: 480, velocity: 90, name: 'E4' },
+    { midi: 65, ticks: 1440, durationTicks: 480, velocity: 90, name: 'F4' },
+    { midi: 67, ticks: 1920, durationTicks: 480, velocity: 90, name: 'G4' },
+    { midi: 69, ticks: 2400, durationTicks: 480, velocity: 90, name: 'A4' },
+    { midi: 71, ticks: 2880, durationTicks: 480, velocity: 90, name: 'B4' },
+    { midi: 72, ticks: 3360, durationTicks: 480, velocity: 90, name: 'C5' }
+  ],
+  options: {
+    ...options,
+    ensembleTotal: 5,
+    targetChainLength: 10,
+    thirdSixthMode: 'Unlimited',
+    inversionMode: 'Unlimited',
+    truncationMode: 'Unlimited',
+    truncationTargetBeats: 2,
+    useChromaticInversion: true,
+    maxPairwiseDissonance: 1
+  }
+};
+
+const traversalFixtures: TraversalFixture[] = [fixtureEntry7Regime, fixtureBeyondEntry7, fixtureStressNearLimits];
+
+for (const fixture of traversalFixtures) {
+  const [legacyReport, tripletNativeReport] = await Promise.all([
+    searchStrettoChains(fixture.subject, { ...fixture.options, traversalMode: 'legacy-boundary' }, ppq),
+    searchStrettoChains(fixture.subject, { ...fixture.options, traversalMode: 'triplet-native' }, ppq)
+  ]);
+
+  const legacySignatures = normalizeChainSignatureSet(legacyReport);
+  const nativeSignatures = normalizeChainSignatureSet(tripletNativeReport);
+  assert.deepEqual(
+    sortedSet(nativeSignatures),
+    sortedSet(legacySignatures),
+    `set-level parity must hold for fixture ${fixture.name}`
+  );
+
+  const legacyNodes = legacyReport.stats.nodesVisited;
+  const nativeNodes = tripletNativeReport.stats.nodesVisited;
+  const legacyEdges = legacyReport.stats.coverage?.edgesTraversed ?? legacyReport.stats.edgesTraversed ?? 0;
+  const nativeEdges = tripletNativeReport.stats.coverage?.edgesTraversed ?? tripletNativeReport.stats.edgesTraversed ?? 0;
+
+  assert.ok(
+    nativeNodes <= legacyNodes,
+    `triplet-native nodes visited must be non-regressive for fixture ${fixture.name} (legacy=${legacyNodes}, native=${nativeNodes})`
+  );
+  assert.ok(
+    nativeEdges <= legacyEdges,
+    `triplet-native edges traversed must be non-regressive for fixture ${fixture.name} (legacy=${legacyEdges}, native=${nativeEdges})`
+  );
+
+  const mergeDelta = (tripletNativeReport.stats.stageStats?.deterministicDagMergedNodes ?? 0) - (legacyReport.stats.stageStats?.deterministicDagMergedNodes ?? 0);
+  const pairRejectDelta = (tripletNativeReport.stats.stageStats?.pairStageRejected ?? 0) - (legacyReport.stats.stageStats?.pairStageRejected ?? 0);
+  const tripletRejectDelta = (tripletNativeReport.stats.stageStats?.tripletStageRejected ?? 0) - (legacyReport.stats.stageStats?.tripletStageRejected ?? 0);
+  const globalRejectDelta = (tripletNativeReport.stats.stageStats?.globalLineageStageRejected ?? 0) - (legacyReport.stats.stageStats?.globalLineageStageRejected ?? 0);
+
+  console.log(
+    `[traversal-parity:${fixture.name}] parity=OK ` +
+    `nodeDelta=${nativeNodes - legacyNodes} edgeDelta=${nativeEdges - legacyEdges} ` +
+    `mergeDelta=${mergeDelta} pairRejectDelta=${pairRejectDelta} ` +
+    `tripletRejectDelta=${tripletRejectDelta} globalRejectDelta=${globalRejectDelta}`
+  );
+}
+
 console.log('stretto canonical key + deterministic DAG traversal tests passed');
