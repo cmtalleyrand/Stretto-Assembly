@@ -7,6 +7,7 @@
 3. **Perfect 5th / octave parallels are invalid when either:**
    - They occur across two consecutive pair boundaries, or
    - Any such parallel occurs while both adjacent delays are `>= Sb/3` (i.e., neither delay is under one-third subject length).
+   - NOTE: current code treats all parallel fifths and octaves as invalid - should be revised to align with above
 
 ## ⚠️ CRITICAL: DO NOT REVERT THE SEARCH ARCHITECTURE
 
