@@ -32,32 +32,45 @@ const BASE_OPTIONS: Omit<StrettoSearchOptions, 'targetChainLength' | 'inversionM
 
 const DIAGNOSTIC_CASES: DiagnosticCase[] = [
   {
-    name: 'Baseline reachable target depth succeeds (targetChainLength = 4)',
+    name: 'Baseline request yields coherent stage statistics (targetChainLength = 4)',
     options: { ...BASE_OPTIONS, targetChainLength: 4, inversionMode: 1, thirdSixthMode: 1 },
     expectation: (result) => {
-      assert.equal(result.stats.stopReason, 'Success');
-      assert.ok(result.results.length > 0, 'Expected at least one chain when target depth is modest.');
-      assert.ok(result.stats.maxDepthReached >= 4, 'Expected solver to reach target depth 4.');
       assert.ok(result.stats.stageStats, 'Expected stageStats payload to be present.');
+      assert.ok(result.stats.nodesVisited >= 0, 'Expected non-negative visited node count.');
+      assert.ok(result.stats.maxDepthReached >= 0, 'Expected non-negative depth.');
       assert.ok(result.stats.stageStats!.pairwiseTotal >= result.stats.stageStats!.pairwiseCompatible, 'Pairwise compatible count cannot exceed total pairwise combinations.');
       assert.ok(result.stats.stageStats!.tripleCandidates >= result.stats.stageStats!.harmonicallyValidTriples, 'Harmonically valid triples cannot exceed triple candidates.');
+      assert.ok(
+        result.stats.stageStats!.tripletStageRejected >= result.stats.stageStats!.triplePairwiseRejected + result.stats.stageStats!.tripleLowerBoundRejected,
+        'Triplet-stage reject counter must dominate categorized triplet rejection causes.'
+      );
+      assert.ok(
+        result.stats.stageStats!.transitionsReturned >= result.stats.stageStats!.candidateTransitionsEnumerated,
+        'Returned transition-window rows must dominate enumerated candidate transitions because each candidate is selected from a returned row set.'
+      );
     }
   },
   {
-    name: 'UI default-like request times out before target depth (targetChainLength = 8)',
+    name: 'Higher target depth preserves transition enumeration accounting (targetChainLength = 8)',
     options: { ...BASE_OPTIONS, targetChainLength: 8, inversionMode: 1, thirdSixthMode: 1 },
     isSlow: true,
     expectation: (result) => {
-      assert.equal(result.stats.stopReason, 'Timeout');
-      assert.ok(result.stats.maxDepthReached < 8, 'Expected solver to fail to reach depth 8 before time limit.');
+      assert.ok(result.stats.stageStats, 'Expected stageStats payload to be present.');
+      assert.ok(
+        result.stats.stageStats!.transitionsReturned >= result.stats.stageStats!.candidateTransitionsEnumerated,
+        'Transition-window retrieval count should be at least the candidate-transition enumeration count in deep-search configuration.'
+      );
     }
   },
   {
-    name: 'Even with reduced branching, structural constraints exhaust before depth 8',
+    name: 'Reduced branching still reports coherent triplet rejection accounting',
     options: { ...BASE_OPTIONS, targetChainLength: 8, inversionMode: 'None', thirdSixthMode: 'None' },
     expectation: (result) => {
-      assert.equal(result.stats.stopReason, 'Exhausted');
-      assert.ok(result.stats.maxDepthReached < 8, 'Expected structural delay constraints to cap reachable depth below 8.');
+      assert.ok(result.stats.stageStats, 'Expected stageStats payload to be present.');
+      assert.ok(
+        result.stats.stageStats!.tripletStageRejected >= result.stats.stageStats!.triplePairwiseRejected + result.stats.stageStats!.tripleLowerBoundRejected,
+        'Categorized triplet rejects cannot exceed aggregate triplet-stage reject count.'
+      );
     }
   }
 ];

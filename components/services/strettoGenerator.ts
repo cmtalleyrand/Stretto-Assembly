@@ -1217,10 +1217,9 @@ export async function searchStrettoChains(
                     delayTicks: d,
                     nextVariantIndex: varIdx,
                     transpositionDelta: t,
-                    isInv,
-                    isTrunc,
-                    isRestricted: immPair.isRestrictedInterval,
-                    isFree: immPair.isFreeInterval
+                    pairRecord: immPair,
+                    isRestrictedInterval: immPair.isRestrictedInterval,
+                    isFreeInterval: immPair.isFreeInterval
                 });
             }
         }
@@ -1248,10 +1247,9 @@ export async function searchStrettoChains(
                 delayTicks: p2.d,
                 nextVariantIndex: p2.vB,
                 transpositionDelta: p2.t,
-                isInv,
-                isTrunc,
-                isRestricted: immPair.isRestrictedInterval,
-                isFree: immPair.isFreeInterval
+                pairRecord: immPair,
+                isRestrictedInterval: immPair.isRestrictedInterval,
+                isFreeInterval: immPair.isFreeInterval
             });
         }
     }

@@ -111,11 +111,16 @@ export default function StrettoChainView({
     const diagnostics = React.useMemo(() => {
         if (!searchReport || !(searchReport.stats as any).stageStats) return null;
         const stats = searchReport.stats as any;
+        const transitionRowsReturned = stats.stageStats.transitionsReturned ?? 0;
+        const transitionCandidatesEnumerated = stats.stageStats.candidateTransitionsEnumerated ?? 0;
         return {
             stage: stats.stageStats,
             coverage: stats.coverage ?? null,
             edgesTraversed: stats.edgesTraversed ?? 0,
-            timeoutExtensionAppliedMs: stats.timeoutExtensionAppliedMs ?? 0
+            timeoutExtensionAppliedMs: stats.timeoutExtensionAppliedMs ?? 0,
+            transitionRowsReturned,
+            transitionCandidatesEnumerated,
+            transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated
         };
     }, [searchReport]);
 
@@ -156,6 +161,12 @@ export default function StrettoChainView({
                             <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}</div>
                             <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()} · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()} · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}</div>
                             <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
+                            <div>
+                                Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()} · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()} · invariant: 
+                                <span className={diagnostics.transitionAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
+                                    {diagnostics.transitionAccountingHolds ? 'holds' : 'violated'}
+                                </span>
+                            </div>
                             {diagnostics.coverage && (
                                 <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent}% · completion lower bound: {diagnostics.coverage.completionRatioLowerBound}% · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()} ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
                             )}
