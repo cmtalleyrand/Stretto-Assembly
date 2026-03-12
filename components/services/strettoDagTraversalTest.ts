@@ -291,10 +291,16 @@ assert.equal(typeof reportA.stats.stageStats.tripletStageRejected, 'number', 'st
 assert.equal(typeof reportA.stats.stageStats.globalLineageStageRejected, 'number', 'stage stats must include global-lineage-stage rejection counter');
 assert.equal(typeof reportA.stats.stageStats.structuralScanInvocations, 'number', 'stage stats must include structural scan invocation counter');
 assert.equal(typeof reportA.stats.stageStats.pairwiseParallelRejected, 'number', 'stage stats must include pairwise parallel-perfect rejection counter');
+assert.equal(typeof reportA.stats.stageStats.transitionWindowLookups, 'number', 'stage stats must include transition-window lookup counter');
+assert.equal(typeof reportA.stats.stageStats.transitionsReturned, 'number', 'stage stats must include transition-window return-volume counter');
+assert.equal(typeof reportA.stats.stageStats.candidateTransitionsEnumerated, 'number', 'stage stats must include candidate-transition enumeration counter');
 assert.ok(Array.isArray(reportA.stats.stageStats.dissonanceSpans), 'stage stats must expose dissonance span metadata');
 assert.ok(Array.isArray(reportA.stats.stageStats.p4Spans), 'stage stats must expose P4 span metadata');
 assert.ok(Array.isArray(reportA.stats.stageStats.parallelPerfectLocationTicks), 'stage stats must expose parallel-perfect location metadata');
 assert.ok(reportA.stats.stageStats.structuralScanInvocations > 0, 'stage stats must report at least one guarded structural scan invocation');
+assert.ok((reportA.stats.stageStats.transitionWindowLookups ?? 0) >= 0, 'transition-window lookup counter must be non-negative');
+assert.ok((reportA.stats.stageStats.transitionsReturned ?? 0) >= 0, 'transition-window return-volume counter must be non-negative');
+assert.ok((reportA.stats.stageStats.candidateTransitionsEnumerated ?? 0) > 0, 'candidate-transition enumeration counter must report positive traversal volume on this fixture');
 assert.ok(reportA.stats.stageStats.tripletStageRejected > 0, 'triplet-stage rejection counter must record pre-scan pruning events');
 assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
 assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');

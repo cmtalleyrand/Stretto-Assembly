@@ -584,6 +584,9 @@ export interface StrettoSearchReport {
             dissonanceSpans?: { startTick: number; endTick: number }[];
             p4Spans?: { startTick: number; endTick: number }[];
             parallelPerfectLocationTicks?: number[];
+            transitionWindowLookups?: number;
+            transitionsReturned?: number;
+            candidateTransitionsEnumerated?: number;
         };
     };
 }
