@@ -60,13 +60,19 @@ interface WindowKeyParts {
     transpositionDelta: number;
 }
 
-interface WindowNextTransition {
-    nextVariantIndex: number;
+interface NextTransition {
     delayTicks: number;
+    nextVariantIndex: number;
     transpositionDelta: number;
-    pairRecord: PairwiseCompatibilityRecord;
-    isRestrictedInterval: boolean;
-    isFreeInterval: boolean;
+    // Present for window-indexed transitions used during deep expansion.
+    pairRecord?: PairwiseCompatibilityRecord;
+    isRestrictedInterval?: boolean;
+    isFreeInterval?: boolean;
+    // Present for boundary/root transition caches used before full overlap collection.
+    isInv?: boolean;
+    isTrunc?: boolean;
+    isRestricted?: boolean;
+    isFree?: boolean;
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
@@ -188,16 +194,6 @@ type TransitionRuleClass = 'local' | 'prefix-global' | 'terminal/output';
 interface RuleClassification {
     name: string;
     class: TransitionRuleClass;
-}
-
-interface NextTransition {
-    delayTicks: number;
-    nextVariantIndex: number;
-    transpositionDelta: number;
-    isInv: boolean;
-    isTrunc: boolean;
-    isRestricted: boolean;
-    isFree: boolean;
 }
 
 const TRANSITION_RULE_CLASSIFICATIONS: RuleClassification[] = [
@@ -1014,7 +1010,7 @@ export async function searchStrettoChains(
 
     // --- PRECOMPUTE TRIPLES ---
     const harmonicallyValidTriples = new Set<string>();
-    const transitionsByWindow = new Map<WindowKey, WindowNextTransition[]>();
+    const transitionsByWindow = new Map<WindowKey, NextTransition[]>();
     const validPairsList: {vA: number, vB: number, d: number, t: number}[] = [];
     pairwiseCompatibleTriplets.forEach((_, key) => {
         const [vA, vB, d, t] = key.split('_').map(Number);
@@ -1178,7 +1174,7 @@ export async function searchStrettoChains(
                 delayTicks: d1,
                 transpositionDelta: p1.t
             });
-            const nextTransition: WindowNextTransition = {
+            const nextTransition: NextTransition = {
                 nextVariantIndex: vC,
                 delayTicks: d2,
                 transpositionDelta: p2.t,
@@ -1362,7 +1358,7 @@ export async function searchStrettoChains(
         for (let d = minD; d <= maxD; d += delayStep) possibleDelaysTicks.push(d);
         possibleDelaysTicks.sort((a, b) => a - b);
 
-        let indexedTransitionsByDelay: Map<number, WindowNextTransition[]> | null = null;
+        let indexedTransitionsByDelay: Map<number, NextTransition[]> | null = null;
         if (depth >= 2) {
             const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
@@ -1375,7 +1371,7 @@ export async function searchStrettoChains(
             stageStats.transitionWindowLookups++;
             const indexedTransitions = transitionsByWindow.get(windowKey) ?? [];
             stageStats.transitionsReturned += indexedTransitions.length;
-            indexedTransitionsByDelay = new Map<number, WindowNextTransition[]>();
+            indexedTransitionsByDelay = new Map<number, NextTransition[]>();
             for (const transition of indexedTransitions) {
                 const bucket = indexedTransitionsByDelay.get(transition.delayTicks);
                 if (bucket) bucket.push(transition);
