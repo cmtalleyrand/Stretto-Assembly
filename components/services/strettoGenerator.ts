@@ -182,6 +182,35 @@ interface StageStats {
     candidateTransitionsEnumerated: number;
 }
 
+type TransitionRuleClass = 'local' | 'prefix-global' | 'terminal/output';
+
+interface RuleClassification {
+    name: string;
+    class: TransitionRuleClass;
+}
+
+interface NextTransition {
+    delayTicks: number;
+    nextVariantIndex: number;
+    transpositionDelta: number;
+    isInv: boolean;
+    isTrunc: boolean;
+    isRestricted: boolean;
+    isFree: boolean;
+}
+
+const TRANSITION_RULE_CLASSIFICATIONS: RuleClassification[] = [
+    { name: 'pairwise structural compatibility', class: 'local' },
+    { name: 'adjacent transposition separation', class: 'local' },
+    { name: 'triplet harmonic compatibility', class: 'local' },
+    { name: 'structural transform adjacency (inv/trunc repetition)', class: 'local' },
+    { name: 'delay-shape constraints (max expansion / anti-stagnation)', class: 'local' },
+    { name: 'long-delay uniqueness', class: 'prefix-global' },
+    { name: 'voice occupancy and pair-role admissibility', class: 'prefix-global' },
+    { name: 'quota and exception policies', class: 'prefix-global' },
+    { name: 'metric compliance and final scoring', class: 'terminal/output' }
+];
+
 export function passesPairStage(stageStats: StageStats, predicate: boolean): boolean {
     if (!predicate) {
         stageStats.pairStageRejected++;
@@ -1151,6 +1180,70 @@ export async function searchStrettoChains(
             else transitionsByWindow.set(windowKey, [nextTransition]);
 
             stageStats.harmonicallyValidTriples++;
+        }
+    }
+
+    const nextTransitionsFromRoot = new Map<string, NextTransition[]>();
+    const nextTransitionsByBoundary = new Map<string, NextTransition[]>();
+
+    const pushNextTransition = (store: Map<string, NextTransition[]>, key: string, transition: NextTransition): void => {
+        const curr = store.get(key);
+        if (!curr) {
+            store.set(key, [transition]);
+            return;
+        }
+        curr.push(transition);
+    };
+
+    for (const d of validDelays) {
+        for (const t of transpositions) {
+            for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                const immKey = toPairKey(0, varIdx, d, t);
+                const immPair = pairwiseCompatibleTriplets.get(immKey);
+                if (!immPair || !immPair.meetsAdjacentTranspositionSeparation) continue;
+                const variant = variants[varIdx];
+                const isInv = variant.type === 'I';
+                const isTrunc = variant.truncationBeats > 0;
+                if (isInv && variants[0].type === 'I') continue;
+                if (isTrunc && variants[0].truncationBeats > 0) continue;
+                pushNextTransition(nextTransitionsFromRoot, `${0}|${d}`, {
+                    delayTicks: d,
+                    nextVariantIndex: varIdx,
+                    transpositionDelta: t,
+                    isInv,
+                    isTrunc,
+                    isRestricted: immPair.isRestrictedInterval,
+                    isFree: immPair.isFreeInterval
+                });
+            }
+        }
+    }
+
+    for (const p1 of validPairsList) {
+        for (const p2 of (pairsByFirst.get(p1.vB) || [])) {
+            const tripleKey = toTripleKey(p1.vA, p1.vB, p2.vB, p1.d, p2.d, p1.t, p2.t);
+            if (!harmonicallyValidTriples.has(tripleKey)) continue;
+            const immKey = toPairKey(p1.vB, p2.vB, p2.d, p2.t);
+            const immPair = pairwiseCompatibleTriplets.get(immKey);
+            if (!immPair || !immPair.meetsAdjacentTranspositionSeparation) continue;
+
+            const variant = variants[p2.vB];
+            const prevVariant = variants[p1.vB];
+            const isInv = variant.type === 'I';
+            const isTrunc = variant.truncationBeats > 0;
+            const prevIsInv = prevVariant.type === 'I';
+            const prevIsTrunc = prevVariant.truncationBeats > 0;
+            if ((prevIsInv && isInv) || (prevIsTrunc && isTrunc)) continue;
+
+            pushNextTransition(nextTransitionsByBoundary, `${p1.vA}|${p1.vB}|${p1.d}|${p1.t}|${p2.d}`, {
+                delayTicks: p2.d,
+                nextVariantIndex: p2.vB,
+                transpositionDelta: p2.t,
+                isInv,
+                isTrunc,
+                isRestricted: immPair.isRestrictedInterval,
+                isFree: immPair.isFreeInterval
+            });
         }
     }
 
