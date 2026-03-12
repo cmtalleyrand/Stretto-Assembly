@@ -749,6 +749,7 @@ export async function searchStrettoChains(
     });
 
     const toWindowKey = (parts: WindowKeyParts): WindowKey => `${parts.variantLeft}|${parts.variantRight}|${parts.delayTicks}|${parts.transpositionDelta}`;
+    const traversalMode = options.traversalMode ?? 'triplet-native';
     
     const startTime = Date.now();
     let nodesVisited = 0;
@@ -1193,7 +1194,7 @@ export async function searchStrettoChains(
     const nextTransitionsFromRoot = new Map<string, NextTransition[]>();
     const nextTransitionsByBoundary = new Map<string, NextTransition[]>();
 
-    const pushNextTransition = (store: Map<string, NextTransition[]>, key: string, transition: NextTransition): void => {
+    const pushNextTransition = <T>(store: Map<string, T[]>, key: string, transition: T): void => {
         const curr = store.get(key);
         if (!curr) {
             store.set(key, [transition]);
@@ -1366,23 +1367,27 @@ export async function searchStrettoChains(
         possibleDelaysTicks.sort((a, b) => a - b);
 
         let indexedTransitionsByDelay: Map<number, NextTransition[]> | null = null;
+        let windowDelayTicks = 0;
+        let windowTranspositionDelta = 0;
         if (depth >= 2) {
-            const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-            const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
-            const windowKey = toWindowKey({
-                variantLeft: variantIndices[depth - 2],
-                variantRight: variantIndices[depth - 1],
-                delayTicks: windowDelayTicks,
-                transpositionDelta: windowTranspositionDelta
-            });
-            stageStats.transitionWindowLookups++;
-            const indexedTransitions = transitionsByWindow.get(windowKey) ?? [];
-            stageStats.transitionsReturned += indexedTransitions.length;
-            indexedTransitionsByDelay = new Map<number, NextTransition[]>();
-            for (const transition of indexedTransitions) {
-                const bucket = indexedTransitionsByDelay.get(transition.delayTicks);
-                if (bucket) bucket.push(transition);
-                else indexedTransitionsByDelay.set(transition.delayTicks, [transition]);
+            windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
+            windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
+            if (traversalMode === 'triplet-native') {
+                const windowKey = toWindowKey({
+                    variantLeft: variantIndices[depth - 2],
+                    variantRight: variantIndices[depth - 1],
+                    delayTicks: windowDelayTicks,
+                    transpositionDelta: windowTranspositionDelta
+                });
+                stageStats.transitionWindowLookups++;
+                const indexedTransitions = transitionsByWindow.get(windowKey) ?? [];
+                stageStats.transitionsReturned += indexedTransitions.length;
+                indexedTransitionsByDelay = new Map<number, NextTransition[]>();
+                for (const transition of indexedTransitions) {
+                    const bucket = indexedTransitionsByDelay.get(transition.delayTicks);
+                    if (bucket) bucket.push(transition);
+                    else indexedTransitionsByDelay.set(transition.delayTicks, [transition]);
+                }
             }
         }
 
@@ -1409,19 +1414,80 @@ export async function searchStrettoChains(
             const candidateTransitions: { varIdx: number; t: number; immPair: PairwiseCompatibilityRecord; isRestricted: boolean; isFree: boolean }[] = [];
 
             if (depth >= 2) {
-                const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks) ?? [];
-                for (const transition of indexedTransitions) {
-                    const t = prevTransposition + transition.transpositionDelta;
-                    if (t === prevTransposition) continue;
-                    if (!transition.pairRecord.meetsAdjacentTranspositionSeparation) continue;
-                    stageStats.candidateTransitionsEnumerated++;
-                    candidateTransitions.push({
-                        varIdx: transition.nextVariantIndex,
-                        t,
-                        immPair: transition.pairRecord,
-                        isRestricted: transition.isRestrictedInterval,
-                        isFree: transition.isFreeInterval
-                    });
+                if (traversalMode === 'triplet-native') {
+                    const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks) ?? [];
+                    for (const transition of indexedTransitions) {
+                        const t = prevTransposition + transition.transpositionDelta;
+                        if (t === prevTransposition) continue;
+                        if (!transition.pairRecord.meetsAdjacentTranspositionSeparation) continue;
+                        stageStats.candidateTransitionsEnumerated++;
+                        candidateTransitions.push({
+                            varIdx: transition.nextVariantIndex,
+                            t,
+                            immPair: transition.pairRecord,
+                            isRestricted: transition.isRestrictedInterval,
+                            isFree: transition.isFreeInterval
+                        });
+                    }
+                } else {
+                    const boundaryKey = `${variantIndices[depth - 2]}|${variantIndices[depth - 1]}|${windowDelayTicks}|${windowTranspositionDelta}|${delayTicks}`;
+                    const boundaryTransitions = nextTransitionsByBoundary.get(boundaryKey) ?? [];
+                    if (boundaryTransitions.length > 0) {
+                        stageStats.transitionWindowLookups++;
+                        stageStats.transitionsReturned += boundaryTransitions.length;
+                        for (const transition of boundaryTransitions) {
+                            const t = prevTransposition + transition.transpositionDelta;
+                            if (t === prevTransposition) continue;
+                            const immKey = toPairKey(variantIndices[depth - 1], transition.nextVariantIndex, delayTicks, transition.transpositionDelta);
+                            const immPair = pairwiseCompatibleTriplets.get(immKey);
+                            if (!immPair || !immPair.meetsAdjacentTranspositionSeparation) continue;
+                            stageStats.candidateTransitionsEnumerated++;
+                            candidateTransitions.push({
+                                varIdx: transition.nextVariantIndex,
+                                t,
+                                immPair,
+                                isRestricted: transition.isRestricted,
+                                isFree: transition.isFree
+                            });
+                        }
+                    } else {
+                        const seenClasses = new Set<number>();
+                        const fresh: number[] = [];
+                        const deferred: number[] = [];
+                        for (const t of transpositions) {
+                            const tClass = ((t - prevTransposition) % 12 + 12) % 12;
+                            if (seenClasses.has(tClass)) {
+                                deferred.push(t);
+                                continue;
+                            }
+                            if (t === prevTransposition) {
+                                fresh.push(t);
+                                continue;
+                            }
+                            fresh.push(t);
+                            seenClasses.add(tClass);
+                        }
+                        const orderedTranspositions = [...fresh, ...deferred];
+                        for (const t of orderedTranspositions) {
+                            if (t === prevTransposition) continue;
+                            for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                                const immPrevVarIdx = variantIndices[depth - 1];
+                                const immRelTrans = t - chain[depth - 1].transposition;
+                                const immKey = toPairKey(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
+                                const immPair = pairwiseCompatibleTriplets.get(immKey);
+                                if (!immPair) continue;
+                                if (!immPair.meetsAdjacentTranspositionSeparation) continue;
+                                stageStats.candidateTransitionsEnumerated++;
+                                candidateTransitions.push({
+                                    varIdx,
+                                    t,
+                                    immPair,
+                                    isRestricted: immPair.isRestrictedInterval,
+                                    isFree: immPair.isFreeInterval
+                                });
+                            }
+                        }
+                    }
                 }
             } else {
                 const seenClasses = new Set<number>();
