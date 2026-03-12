@@ -189,16 +189,6 @@ interface RuleClassification {
     class: TransitionRuleClass;
 }
 
-interface NextTransition {
-    delayTicks: number;
-    nextVariantIndex: number;
-    transpositionDelta: number;
-    isInv: boolean;
-    isTrunc: boolean;
-    isRestricted: boolean;
-    isFree: boolean;
-}
-
 const TRANSITION_RULE_CLASSIFICATIONS: RuleClassification[] = [
     { name: 'pairwise structural compatibility', class: 'local' },
     { name: 'adjacent transposition separation', class: 'local' },
@@ -1210,10 +1200,9 @@ export async function searchStrettoChains(
                     delayTicks: d,
                     nextVariantIndex: varIdx,
                     transpositionDelta: t,
-                    isInv,
-                    isTrunc,
-                    isRestricted: immPair.isRestrictedInterval,
-                    isFree: immPair.isFreeInterval
+                    pairRecord: immPair,
+                    isRestrictedInterval: immPair.isRestrictedInterval,
+                    isFreeInterval: immPair.isFreeInterval
                 });
             }
         }
@@ -1239,10 +1228,9 @@ export async function searchStrettoChains(
                 delayTicks: p2.d,
                 nextVariantIndex: p2.vB,
                 transpositionDelta: p2.t,
-                isInv,
-                isTrunc,
-                isRestricted: immPair.isRestrictedInterval,
-                isFree: immPair.isFreeInterval
+                pairRecord: immPair,
+                isRestrictedInterval: immPair.isRestrictedInterval,
+                isFreeInterval: immPair.isFreeInterval
             });
         }
     }
