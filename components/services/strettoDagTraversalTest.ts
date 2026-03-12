@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
+import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toBoundaryPairKeyFromParts, toCanonicalTripletKey, toOrderedBoundarySignature, toPairRelationKey, toPairStateKey, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -18,6 +18,29 @@ assert.equal(
   'triplet key must be positionally canonical and deterministic'
 );
 
+
+assert.equal(
+  toPairRelationKey({ variantA: 0, variantB: 1, delay: 240, transposition: 7 }),
+  '0_1_240_7',
+  'pair relation key must be positionally canonical for (variantA,variantB,d_i,t_i)'
+);
+assert.equal(
+  toPairStateKey({ variantA: 0, variantB: 1, predecessorDelay: 120, delay: 240, transposition: 7 }),
+  '0_1_120_240_7',
+  'pair state key must include predecessor delay for non-start pair-state joins'
+);
+assert.equal(
+  toBoundaryPairKeyFromParts({
+    leftVoiceIndex: 1,
+    leftType: 'N',
+    rightVoiceIndex: 2,
+    rightType: 'I',
+    delayTicks: 480,
+    transpositionDelta: -5
+  }),
+  '1:N->2:I|d480|t-5',
+  'boundary-pair key from parts must be canonical and deterministic'
+);
 const left: StrettoChainOption = { startBeat: 0, transposition: 0, type: 'N', length: 960, voiceIndex: 1 };
 const right: StrettoChainOption = { startBeat: 1, transposition: 7, type: 'N', length: 960, voiceIndex: 2 };
 assert.equal(
@@ -220,6 +243,11 @@ const signaturesA = reportA.results.map((r) => structureSignature(r.entries));
 const signaturesB = reportB.results.map((r) => structureSignature(r.entries));
 assert.deepEqual(signaturesA, signaturesB, 'deterministic DAG traversal must produce stable structural ordering for identical input');
 
+assert.ok(reportA.stageArtifacts, 'stage artifacts must be emitted for staged triplet architecture observability');
+assert.ok(Array.isArray(reportA.stageArtifacts?.pairwiseDissonanceArtifact), 'pairwise dissonance artifact must be materialized as an array');
+assert.ok(Array.isArray(reportA.stageArtifacts?.pairLocalAdmissiblePairs), 'pair-local admissible pairs artifact must be materialized as an array');
+assert.ok(Array.isArray(reportA.stageArtifacts?.tripletLocalAdmissibleTriplets), 'triplet-local admissible triplets artifact must be materialized as an array');
+assert.ok(Array.isArray(reportA.stageArtifacts?.tripletDissonanceAdmissibleTriplets), 'triplet dissonance-admissible triplets artifact must be materialized as an array');
 assert.ok(reportA.stats.stageStats, 'stageStats must be emitted');
 assert.equal(typeof reportA.stats.stageStats.deterministicDagMergedNodes, 'number', 'deterministic DAG merge counter must be numeric');
 assert.ok(reportA.stats.stageStats.deterministicDagMergedNodes >= 0, 'merge counter must be non-negative');

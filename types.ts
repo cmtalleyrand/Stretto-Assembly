@@ -334,6 +334,76 @@ export interface StrettoChainOption {
 }
 
 /**
+ * Canonical key for the start-pair relation `(variantA, variantB, d_i, t_i)`.
+ * This key intentionally excludes predecessor delay and is used for pairwise
+ * dissonance artifacts that are independent of path lineage.
+ */
+export interface PairRelationKeyParts {
+    variantA: number;
+    variantB: number;
+    delay: number;
+    transposition: number;
+}
+
+/**
+ * Canonical key for non-start pair-state records
+ * `(variantA, variantB, d_{i-1}, d_i, t_i)`.
+ */
+export interface PairStateKeyParts extends PairRelationKeyParts {
+    predecessorDelay: number;
+}
+
+export interface TripletKeyParts {
+    variantA: number;
+    variantB: number;
+    variantC: number;
+    delayAB: number;
+    delayBC: number;
+    transpositionAB: number;
+    transpositionBC: number;
+}
+
+export interface BoundaryPairKeyParts {
+    leftVoiceIndex: number;
+    leftType: 'N' | 'I';
+    rightVoiceIndex: number;
+    rightType: 'N' | 'I';
+    delayTicks: number;
+    transpositionDelta: number;
+}
+
+export interface PairwiseDissonanceArtifactRecord {
+    relationKey: string;
+    stateKey: string;
+    dissonanceRatio: number;
+    hasFourth: boolean;
+    hasVoiceCrossing: boolean;
+    maxDissonanceRunEvents: number;
+    hasParallelPerfect58: boolean;
+}
+
+export interface PairLocalAdmissiblePairRecord {
+    relationKey: string;
+    disallowLowestPair: boolean;
+    allowedVoicePairs: string[];
+}
+
+export interface TripletLocalAdmissibleRecord {
+    tripletKey: string;
+}
+
+export interface TripletDissonanceAdmissibleRecord {
+    tripletKey: string;
+}
+
+export interface StrettoStageArtifacts {
+    pairwiseDissonanceArtifact: PairwiseDissonanceArtifactRecord[];
+    pairLocalAdmissiblePairs: PairLocalAdmissiblePairRecord[];
+    tripletLocalAdmissibleTriplets: TripletLocalAdmissibleRecord[];
+    tripletDissonanceAdmissibleTriplets: TripletDissonanceAdmissibleRecord[];
+}
+
+/**
  * Canonical representation for chain entries, where delay is measured from the
  * immediately previous entry (`d_i`), not from the origin entry `e0`.
  * `delayBeatsFromPreviousEntry` is a first-class stored value in canonical form.
@@ -543,6 +613,7 @@ export interface StrettoChainResult {
 
 export interface StrettoSearchReport {
     results: StrettoChainResult[];
+    stageArtifacts?: StrettoStageArtifacts;
     stats: {
         nodesVisited: number;
         edgesTraversed?: number;
