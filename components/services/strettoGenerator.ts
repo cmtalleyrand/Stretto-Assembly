@@ -10,6 +10,7 @@ const TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 2048;
+const EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY = 7;
 
 interface TripletKeyParts {
     variantA: number;
@@ -1292,6 +1293,22 @@ export async function searchStrettoChains(
         const chainSig = getChainSignature(node.chain);
         const boundarySig = getBoundarySignature(node.chain);
         const longDelaysSig = Array.from(node.usedLongDelays).sort((a, b) => a - b).join(',');
+
+        if (node.chain.length <= EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY) {
+            // Invariant (entries 1-4): retain full history in the key while all prefixes remain dense;
+            // this preserves strict baseline-equivalent identity before early-window compression starts.
+            if (node.chain.length <= 4) {
+                return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${longDelaysSig}`;
+            }
+
+            // Invariant (entries 5-7): frontier transitions are generated from immediate window metadata
+            // (delay/transposition deltas and precomputed local compatibility), so ordered boundary
+            // history is derivable for feasibility and can be dropped from DAG identity.
+            return `ew:${node.chain.length}|${chainSig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${longDelaysSig}`;
+        }
+
+        // Invariant (entry > 7): restore history-heavy identity to avoid over-merging once longer
+        // prefixes can influence late-stage feasibility through accumulated boundary structure.
         return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${longDelaysSig}`;
     }
 
