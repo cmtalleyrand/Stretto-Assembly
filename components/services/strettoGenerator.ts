@@ -60,7 +60,7 @@ interface WindowKeyParts {
     transpositionDelta: number;
 }
 
-interface NextTransition {
+interface WindowNextTransition {
     nextVariantIndex: number;
     delayTicks: number;
     transpositionDelta: number;
@@ -190,7 +190,7 @@ interface RuleClassification {
     class: TransitionRuleClass;
 }
 
-interface ExpansionTransition {
+interface NextTransition {
     delayTicks: number;
     nextVariantIndex: number;
     transpositionDelta: number;
@@ -1014,7 +1014,7 @@ export async function searchStrettoChains(
 
     // --- PRECOMPUTE TRIPLES ---
     const harmonicallyValidTriples = new Set<string>();
-    const transitionsByWindow = new Map<WindowKey, NextTransition[]>();
+    const transitionsByWindow = new Map<WindowKey, WindowNextTransition[]>();
     const validPairsList: {vA: number, vB: number, d: number, t: number}[] = [];
     pairwiseCompatibleTriplets.forEach((_, key) => {
         const [vA, vB, d, t] = key.split('_').map(Number);
@@ -1178,7 +1178,7 @@ export async function searchStrettoChains(
                 delayTicks: d1,
                 transpositionDelta: p1.t
             });
-            const nextTransition: NextTransition = {
+            const nextTransition: WindowNextTransition = {
                 nextVariantIndex: vC,
                 delayTicks: d2,
                 transpositionDelta: p2.t,
@@ -1194,10 +1194,10 @@ export async function searchStrettoChains(
         }
     }
 
-    const nextTransitionsFromRoot = new Map<string, ExpansionTransition[]>();
-    const nextTransitionsByBoundary = new Map<string, ExpansionTransition[]>();
+    const nextTransitionsFromRoot = new Map<string, NextTransition[]>();
+    const nextTransitionsByBoundary = new Map<string, NextTransition[]>();
 
-    const pushNextTransition = (store: Map<string, ExpansionTransition[]>, key: string, transition: ExpansionTransition): void => {
+    const pushNextTransition = (store: Map<string, NextTransition[]>, key: string, transition: NextTransition): void => {
         const curr = store.get(key);
         if (!curr) {
             store.set(key, [transition]);
@@ -1362,7 +1362,7 @@ export async function searchStrettoChains(
         for (let d = minD; d <= maxD; d += delayStep) possibleDelaysTicks.push(d);
         possibleDelaysTicks.sort((a, b) => a - b);
 
-        let indexedTransitionsByDelay: Map<number, NextTransition[]> | null = null;
+        let indexedTransitionsByDelay: Map<number, WindowNextTransition[]> | null = null;
         if (depth >= 2) {
             const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
@@ -1375,7 +1375,7 @@ export async function searchStrettoChains(
             stageStats.transitionWindowLookups++;
             const indexedTransitions = transitionsByWindow.get(windowKey) ?? [];
             stageStats.transitionsReturned += indexedTransitions.length;
-            indexedTransitionsByDelay = new Map<number, NextTransition[]>();
+            indexedTransitionsByDelay = new Map<number, WindowNextTransition[]>();
             for (const transition of indexedTransitions) {
                 const bucket = indexedTransitionsByDelay.get(transition.delayTicks);
                 if (bucket) bucket.push(transition);
