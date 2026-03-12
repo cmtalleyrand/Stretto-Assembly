@@ -72,10 +72,11 @@ Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that
 | Rule | Condition |
 |------|-----------|
 | **A.1 Global Uniqueness (deferred enforcement target)** | All delays `> Sb/3` must be distinct across the **entire chain**. Stage 1 does not prove this globally; it only emits triplets that remain admissible for incremental uniqueness enforcement in Stage 5. |
-| **A.2 Half-length trigger** | If `d_{n-1} > Sb/2`, then `d_n < d_{n-1} − 0.5` |
+| **A.2 Half-length trigger (OR form)** | If `d_{n-1} >= Sb/2` **or** `d_n >= Sb/2`, then `d_n < d_{n-1}` |
 | **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
 | **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
-| **A.5 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
+| **A.5 Maximum contraction bound** | `d_{n-1} - d_n <= 0.25 * Sb` |
+| **A.6 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
 
 **Start entries** (index 0) are valid if their delay is within the universal max.
 **End entries** have relaxed rules: any delay `< Sb/3` is acceptable regardless of contraction direction.
