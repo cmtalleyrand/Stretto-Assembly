@@ -922,12 +922,22 @@ export async function searchStrettoChains(
                         continue;
                     }
 
-                    // Bass-role scans: P4 resolved as dissonant when lower note is bass.
-                    // These are the authoritative results for voice-specific pruning.
-                    stageStats.structuralScanInvocations++;
-                    const bassStrictA = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom);
-                    stageStats.structuralScanInvocations++;
-                    const bassStrictB = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom);
+                    // Bass-role scans are only needed when at least one P4 occurs.
+                    // Without P4 simultaneities, bassRole cannot change dissonance classification,
+                    // so neutral scan data is exact for roles a/b as well.
+                    const requiresBassRoleRescan = pairScan.hasFourth;
+                    const bassStrictA = requiresBassRoleRescan
+                        ? (() => {
+                            stageStats.structuralScanInvocations++;
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom);
+                        })()
+                        : pairScan;
+                    const bassStrictB = requiresBassRoleRescan
+                        ? (() => {
+                            stageStats.structuralScanInvocations++;
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom);
+                        })()
+                        : pairScan;
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
