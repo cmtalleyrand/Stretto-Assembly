@@ -374,4 +374,5 @@ export interface StrettoSearchOptions {
     meterDenominator?: number;
     scaleRoot: number; // 0-11
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.
+    maxSearchTimeMs?: number;
 }
