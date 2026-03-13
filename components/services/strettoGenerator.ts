@@ -6,7 +6,7 @@ import { getInvertedPitch } from './strettoCore';
 
 // --- Constants & Types ---
 const MAX_SEARCH_NODES = 2000000; // Increased to allow deeper search
-const TIME_LIMIT_MS = 30000;
+const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 2048;
@@ -756,7 +756,8 @@ export async function searchStrettoChains(
     let edgesTraversed = 0;
     let maxDepth = 0;
     let operationCounter = 0;
-    let activeTimeLimitMs = TIME_LIMIT_MS;
+    const configuredTimeLimitMs = Number.isFinite(options.maxSearchTimeMs) ? Math.max(1, Math.floor(options.maxSearchTimeMs as number)) : DEFAULT_TIME_LIMIT_MS;
+    let activeTimeLimitMs = configuredTimeLimitMs;
     let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     
