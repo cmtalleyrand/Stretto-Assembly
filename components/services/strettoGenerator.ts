@@ -1586,6 +1586,18 @@ export async function searchStrettoChains(
                     }
                     if (harmonicFail) continue;
 
+                    const metricProbeEntry: StrettoChainOption = {
+                        startBeat: absStartBeat,
+                        transposition: t,
+                        type: variant.type,
+                        length: variant.lengthTicks,
+                        voiceIndex: 0
+                    };
+                    // Metric compliance is independent of output-voice assignment because it only
+                    // inspects temporal/pitch overlap against existing entries. Evaluate once per
+                    // (variant, delay, transposition) candidate and reuse across voice placements.
+                    if (!checkMetricCompliance(variant, metricProbeEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom)) continue;
+
                     for (let v = 0; v < options.ensembleTotal; v++) {
                         if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
 
@@ -1614,14 +1626,9 @@ export async function searchStrettoChains(
                         if (stratFail) continue;
 
                         const tempNextEntry: StrettoChainOption = {
-                            startBeat: absStartBeat,
-                            transposition: t,
-                            type: variant.type,
-                            length: variant.lengthTicks,
+                            ...metricProbeEntry,
                             voiceIndex: v
                         };
-
-                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                         const newVoiceState = [...voiceEndTimesTicks];
                         newVoiceState[v] = absStartTicks + variant.lengthTicks;
