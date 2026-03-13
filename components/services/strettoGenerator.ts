@@ -1297,6 +1297,17 @@ export async function searchStrettoChains(
         return toOrderedBoundarySignature(chain, ppq);
     }
 
+
+    function getMergeDeterminismSignature(node: DagNode): string {
+        const parts: string[] = [];
+        for (let i = 0; i < node.chain.length; i++) {
+            const entry = node.chain[i];
+            const startTicks = Math.round(entry.startBeat * ppq);
+            parts.push(`${startTicks}:${entry.transposition}:${entry.type}:${entry.voiceIndex}:${entry.length}:${node.variantIndices[i] ?? -1}`);
+        }
+        return parts.join('|');
+    }
+
     function getDagNodeKey(node: DagNode): string {
         const chainSig = getChainSignature(node.chain);
         const boundarySig = getBoundarySignature(node.chain);
@@ -1452,6 +1463,15 @@ export async function searchStrettoChains(
                             });
                         }
                     } else {
+                        // `legacy-boundary` parity mode must draw successors exclusively
+                        // from prevalidated boundary transitions. A synthetic fallback
+                        // over global transposition candidates changes the accepted state
+                        // space relative to window-indexed/native traversal and can
+                        // introduce non-parity chains on deep fixtures.
+                        if (traversalMode === 'legacy-boundary') {
+                            continue;
+                        }
+
                         const seenClasses = new Set<number>();
                         const fresh: number[] = [];
                         const deferred: number[] = [];
@@ -1742,8 +1762,14 @@ export async function searchStrettoChains(
             const successors = expandNode(node);
             for (const successor of successors) {
                 const nodeKey = getDagNodeKey(successor);
-                if (nextLayer.has(nodeKey)) {
+                const existing = nextLayer.get(nodeKey);
+                if (existing) {
                     stageStats.deterministicDagMergedNodes++;
+                    const existingSig = getMergeDeterminismSignature(existing);
+                    const successorSig = getMergeDeterminismSignature(successor);
+                    if (successorSig.localeCompare(existingSig) < 0) {
+                        nextLayer.set(nodeKey, successor);
+                    }
                     continue;
                 }
                 nextLayer.set(nodeKey, successor);
