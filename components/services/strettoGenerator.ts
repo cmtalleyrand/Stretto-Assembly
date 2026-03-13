@@ -45,6 +45,7 @@ interface PairwiseCompatibilityRecord {
     // Per-bass-role dissonance detail for P4-as-bass resolution.
     bassRoleDissonanceRatio: { none: number; a: number; b: number };
     bassRoleMaxRunEvents: { none: number; a: number; b: number };
+    bassRoleDissonantEventStarts: { none: number[]; a: number[]; b: number[] };
     // Interval class of the transposition (mod 12), precomputed for quota checks.
     intervalClass: number;
     isRestrictedInterval: boolean;
@@ -106,6 +107,7 @@ interface PairwiseScanResult {
     dissonanceSpans: SimultaneitySpan[];
     p4Spans: SimultaneitySpan[];
     parallelPerfectStartTicks: number[];
+    dissonantEventStarts: number[];
 }
 
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
@@ -537,6 +539,7 @@ export function checkCounterpointStructureWithBassRole(
     let maxDissonanceRunEvents = 0;
     let maxDissonanceRunTicks = 0;
     const maxAllowedContinuousDissonanceTicks = ppqParam;
+    const dissonantEventStarts: number[] = [];
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -614,6 +617,7 @@ export function checkCounterpointStructureWithBassRole(
         if (isDiss) {
             if (!skipSpans) dissonanceSpans.push({ startTick: start, endTick: end });
             dissonantTicks += dur;
+            dissonantEventStarts.push(start);
             
             // For run length, we count *events* (intervals), not ticks
             if (!lastIsDiss) {
@@ -627,10 +631,10 @@ export function checkCounterpointStructureWithBassRole(
             maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
 
             // Rule C2b: Continuous dissonance must resolve within one beat.
-            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
+            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
 
             lastIsDiss = true;
         } else {
@@ -646,12 +650,12 @@ export function checkCounterpointStructureWithBassRole(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
     }
 
     maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
     maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
 }
 
 // Helper: Determine beat strength
@@ -793,10 +797,10 @@ function hasFeasibleTripletAssignment(
  * REFACTORED: Uses Scan-Line algorithm on raw ticks.
  */
 function checkMetricCompliance(
-    newVariant: SubjectVariant, 
+    newVariant: SubjectVariant,
     newEntry: StrettoChainOption,
-    chain: StrettoChainOption[], 
-    variants: SubjectVariant[], 
+    chain: StrettoChainOption[],
+    variants: SubjectVariant[],
     variantIndices: number[],
     ppq: number,
     metricOffset: number = 0,
@@ -809,9 +813,7 @@ function checkMetricCompliance(
     // Pre-build a flat list of (startTick, endTick, absolutePitch) for every note in every
     // voice (new entry + entire chain). Built once here so the P4-vs-bass lookup inside the
     // pairwise loop is a single linear scan over a cached array rather than a repeated
-    // re-traversal of the chain.  Treating P4 as dissonant against the bass prunes branches:
-    // when the bass-P4 makes `isDiss = true`, the existing dissonance-run counter fires and
-    // returns false immediately, cutting that branch from the search tree.
+    // re-traversal of the chain.
     type NoteEvent = [number, number, number]; // [start, end, pitch]
     const allNoteEvents: NoteEvent[] = [];
     for (const n of newVariant.notes) {
@@ -823,7 +825,6 @@ function checkMetricCompliance(
             allNoteEvents.push([eStart + n.relTick, eStart + n.relTick + n.durationTicks, n.pitch + chain[k].transposition]);
         }
     }
-    // Returns the lowest absolute pitch active at `tick` across all voices, or Infinity if none.
     const overallBassAt = (tick: number): number => {
         let min = Infinity;
         for (const [s, e, p] of allNoteEvents) { if (s <= tick && e > tick && p < min) min = p; }
@@ -835,18 +836,15 @@ function checkMetricCompliance(
         const existEntry = chain[k];
         const existVariant = variants[variantIndices[k]];
         const existStartTick = Math.round(existEntry.startBeat * ppq);
-        
-        // Determine overlapping region
+
         const overlapStart = Math.max(newStartTick, existStartTick);
         const overlapEnd = Math.min(newStartTick + newVariant.lengthTicks, existStartTick + existVariant.lengthTicks);
-        
+
         if (overlapEnd <= overlapStart) continue;
 
-        // Build scan-line points for this pair
         const points = new Set<number>();
         points.add(overlapStart); points.add(overlapEnd);
-        
-        // Add internal note boundaries within overlap
+
         newVariant.notes.forEach(n => {
             const s = newStartTick + n.relTick;
             const e = s + n.durationTicks;
@@ -862,7 +860,6 @@ function checkMetricCompliance(
 
         const sortedPoints = Array.from(points).sort((a,b) => a-b);
 
-        // Pre-sort placed notes for sweep-line
         const placedNew = newVariant.notes.map(n => ({
             start: newStartTick + n.relTick,
             end: newStartTick + n.relTick + n.durationTicks,
@@ -883,13 +880,12 @@ function checkMetricCompliance(
             const start = sortedPoints[i];
             const end = sortedPoints[i+1];
 
-            // Advance sweep-line pointers
             while (pNew < placedNew.length - 1 && placedNew[pNew].end <= start) pNew++;
             while (pExist < placedExist.length - 1 && placedExist[pExist].end <= start) pExist++;
 
             const noteNew = (pNew < placedNew.length && placedNew[pNew].start <= start && placedNew[pNew].end > start) ? placedNew[pNew] : null;
             const noteExist = (pExist < placedExist.length && placedExist[pExist].start <= start && placedExist[pExist].end > start) ? placedExist[pExist] : null;
-            
+
             if (!noteNew || !noteExist) {
                 dissRunLength = 0; lastIsDiss = false; continue;
             }
@@ -901,11 +897,6 @@ function checkMetricCompliance(
             const interval = (hi - lo) % 12;
 
             let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
-
-            // P4 (5 semitones) is consonant between upper voices but dissonant above the bass.
-            // Use the precomputed allNoteEvents to find the lowest active pitch at this tick.
-            // If the lower note of the P4 IS the bass, mark it dissonant so the run-limit
-            // check below can prune the branch immediately.
             if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
             // Corrected Metric Check using Absolute Grid alignment
@@ -913,23 +904,17 @@ function checkMetricCompliance(
 
             if (isDiss) {
                 if (!lastIsDiss) dissRunLength = 1; else dissRunLength++;
-                
-                // Rule C4B: If Strong beat, resolution must be immediate (Length 1 max)
-                if (isStrong && dissRunLength > 1) return false; 
-
-                // Rule C4A: If r=2, BOTH must be weak.
+                if (isStrong && dissRunLength > 1) return false;
                 if (dissRunLength === 2) {
-                    // Check if previous interval started on strong beat? 
+                    // Check if previous interval started on strong beat?
                     // Or check if *this* interval is strong?
                     // Original logic: if current is strong, fail.
                     // Also check if previous was strong.
                     const prevStart = sortedPoints[i-1]; // Safe because dissRunLength=2 implies i>=1
                     const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq, tsNum, tsDenom);
-                    if (isStrong || prevIsStrong) return false; 
+                    if (isStrong || prevIsStrong) return false;
                 }
-                
                 if (dissRunLength > 2) return false;
-
                 lastIsDiss = true;
             } else {
                 dissRunLength = 0;
@@ -938,6 +923,28 @@ function checkMetricCompliance(
         }
     }
     return true;
+}
+
+export function violatesCombinedDissonanceStarts(
+    dissonantStarts: number[],
+    ppq: number,
+    metricOffset: number = 0
+): boolean {
+    if (dissonantStarts.length === 0) return false;
+    const orderedUnique = Array.from(new Set(dissonantStarts)).sort((a, b) => a - b);
+    let run = 0;
+    for (let i = 0; i < orderedUnique.length; i++) {
+        const t = orderedUnique[i];
+        run += 1;
+        const isStrong = isStrongBeat(t + metricOffset, ppq);
+        if (isStrong && run > 1) return true;
+        if (run === 2) {
+            const prevIsStrong = isStrongBeat(orderedUnique[i - 1] + metricOffset, ppq);
+            if (isStrong || prevIsStrong) return true;
+        }
+        if (run > 2) return true;
+    }
+    return false;
 }
 
 // --- Generator ---
@@ -1295,6 +1302,11 @@ export async function searchStrettoChains(
                             none: pairScan.maxDissonanceRunEvents,
                             a: bassStrictA.maxDissonanceRunEvents,
                             b: bassStrictB.maxDissonanceRunEvents
+                        },
+                        bassRoleDissonantEventStarts: {
+                            none: pairScan.dissonantEventStarts,
+                            a: bassStrictA.dissonantEventStarts,
+                            b: bassStrictB.dissonantEventStarts
                         },
                         intervalClass,
                         isRestrictedInterval,
