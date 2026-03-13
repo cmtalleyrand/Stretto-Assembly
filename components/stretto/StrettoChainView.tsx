@@ -7,7 +7,8 @@ import StrettoInspector from './StrettoInspector';
 import { DownloadIcon } from '../Icons';
 import { generatePolyphonicHarmonicRegions, getInvertedPitch } from '../services/strettoCore'; // Use centralized inversion
 import { getStrictPitchName } from '../services/midiSpelling';
-import { deriveSearchStatusPresentation } from './searchStatus';
+import { deriveSearchDiagnosticsPresentation, deriveSearchStatusPresentation } from './searchStatus';
+import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRegions } from './harmonicRegionDiagnostics';
 
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
@@ -108,6 +109,23 @@ export default function StrettoChainView({
         return deriveSearchStatusPresentation(searchReport, searchOptions.targetChainLength);
     }, [searchReport, searchOptions.targetChainLength]);
 
+    const searchDiagnostics = React.useMemo(() => {
+        if (!searchReport) return null;
+        return deriveSearchDiagnosticsPresentation(searchReport);
+    }, [searchReport]);
+
+    const maxConsecutiveDissonanceRegions = React.useMemo(() => {
+        if (!chainCandidate) return 0;
+        return computeMaxConsecutiveDissonanceRegions(chainCandidate.regions);
+    }, [chainCandidate]);
+
+    const dissonanceAudit = React.useMemo(() => {
+        if (!chainCandidate) {
+            return { nctRegions: 0, dissonantRegions: 0, consonantRegionsWithNct: 0 };
+        }
+        return computeHarmonicRegionDissonanceAudit(chainCandidate.regions);
+    }, [chainCandidate]);
+
     return (
         <>
             <StrettoSearchPanel 
@@ -139,6 +157,17 @@ export default function StrettoChainView({
                             </div>
                         </div>
                     )}
+                    {searchDiagnostics && (
+                        <div className="border-b border-gray-700 bg-gray-950/60 p-2 text-[10px] text-gray-300">
+                            <div className="font-semibold text-gray-200">Search Diagnostics</div>
+                            <div className="mt-1 text-[9px] text-amber-300">{searchDiagnostics.summary}</div>
+                            <ul className="mt-1 space-y-0.5 text-[9px] text-gray-400">
+                                {searchDiagnostics.constraintSignals.map((signal, idx) => (
+                                    <li key={`${signal}-${idx}`}>• {signal}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                     <StrettoResultsList 
                         results={chainResults}
                         selectedId={selectedChain?.id || null}
@@ -158,6 +187,17 @@ export default function StrettoChainView({
                         onClearAssembly={() => {}}
                         onDownloadChain={onDownloadChain}
                     />
+                    {selectedChain && (
+                        <div className="mt-3 rounded border border-gray-700 bg-gray-900/60 p-2 text-[10px] text-gray-300">
+                            <span className="font-semibold text-gray-200">Rendered Harmonic-Region Diagnostic:</span>{' '}
+                            Maximum consecutive dissonant regions = <span className="font-mono text-amber-300">{maxConsecutiveDissonanceRegions}</span>
+                            <div className="mt-1 text-[9px] text-gray-400">
+                                NCT regions: <span className="font-mono text-amber-300">{dissonanceAudit.nctRegions}</span> ·
+                                Dissonant regions: <span className="font-mono text-amber-300">{dissonanceAudit.dissonantRegions}</span> ·
+                                Consonant-with-NCT anomalies: <span className={`font-mono ${dissonanceAudit.consonantRegionsWithNct > 0 ? 'text-red-300' : 'text-green-300'}`}>{dissonanceAudit.consonantRegionsWithNct}</span>
+                            </div>
+                        </div>
+                    )}
                     
                     <div className="mt-4 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-800 p-3 rounded border border-gray-700">
                         <div className="flex items-center gap-4">

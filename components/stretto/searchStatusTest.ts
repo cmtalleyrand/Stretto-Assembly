@@ -1,7 +1,12 @@
-import { deriveSearchStatusPresentation } from './searchStatus';
+import { deriveSearchDiagnosticsPresentation, deriveSearchStatusPresentation } from './searchStatus';
 import { StrettoSearchReport } from '../../types';
 
-function mkReport(stopReason: StrettoSearchReport['stats']['stopReason'], maxDepthReached: number, timeoutExtensionAppliedMs: number = 0): StrettoSearchReport {
+function mkReport(
+  stopReason: StrettoSearchReport['stats']['stopReason'],
+  maxDepthReached: number,
+  timeoutExtensionAppliedMs: number = 0,
+  withStats: boolean = false
+): StrettoSearchReport {
   return {
     results: [],
     stats: {
@@ -9,7 +14,41 @@ function mkReport(stopReason: StrettoSearchReport['stats']['stopReason'], maxDep
       timeMs: 5000,
       stopReason,
       maxDepthReached,
-      timeoutExtensionAppliedMs
+      timeoutExtensionAppliedMs,
+      coverage: withStats
+        ? {
+            nodeBudgetUsedPercent: 20,
+            maxFrontierSize: 150,
+            maxFrontierClassCount: 12,
+            edgesTraversed: 500,
+            frontierSizeAtTermination: 40,
+            frontierClassesAtTermination: 8,
+            completionRatioLowerBound: 71
+          }
+        : undefined,
+      stageStats: withStats
+        ? {
+            validDelayCount: 6,
+            transpositionCount: 9,
+            pairwiseTotal: 120,
+            pairwiseCompatible: 30,
+            pairwiseWithFourth: 12,
+            pairwiseWithVoiceCrossing: 5,
+            pairwiseP4TwoVoiceDissonant: 9,
+            tripleCandidates: 80,
+            triplePairwiseRejected: 25,
+            tripleLowerBoundRejected: 10,
+            tripleParallelRejected: 12,
+            tripleVoiceRejected: 8,
+            tripleP4BassRejected: 7,
+            harmonicallyValidTriples: 18,
+            deterministicDagMergedNodes: 11,
+            pairStageRejected: 90,
+            tripletStageRejected: 4,
+            globalLineageStageRejected: 3,
+            structuralScanInvocations: 400
+          }
+        : undefined
     }
   };
 }
@@ -33,6 +72,20 @@ if (!timeoutNear.detail.includes('+10000ms')) {
 const exhaustedNone = deriveSearchStatusPresentation(mkReport('Exhausted', 0), 8);
 if (!exhaustedNone.heading.includes('No Valid Chain')) {
   throw new Error('Exhausted with no depth heading is incorrect.');
+}
+
+const diagnostics = deriveSearchDiagnosticsPresentation(mkReport('Exhausted', 3, 0, true));
+if (!diagnostics.summary.includes('Stage-level counts only')) {
+  throw new Error('Diagnostics summary must explicitly avoid inferred root-cause labels.');
+}
+if (!diagnostics.constraintSignals.some((signal) => signal.includes('120 total; 30 compatible (25%), 90 rejected (75%)'))) {
+  throw new Error('Diagnostics must expose pairwise total/compatible/rejected signal.');
+}
+if (!diagnostics.constraintSignals.some((signal) => signal.includes('Triplet reject breakdown: pairwise=25, lowerBound=10, parallel=12, voice=8, p4Bass=7'))) {
+  throw new Error('Diagnostics must expose triplet reject breakdown signal.');
+}
+if (!diagnostics.constraintSignals.some((signal) => signal.includes('terminationFrontier=40 (8 classes)'))) {
+  throw new Error('Diagnostics must expose termination frontier coverage signal.');
 }
 
 console.log('searchStatusTest passed');
