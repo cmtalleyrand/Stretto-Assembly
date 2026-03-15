@@ -10,7 +10,7 @@ const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 2048;
-const EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY = 7;
+// Removed EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY — no longer needed with active-tail DAG keys.
 
 interface TripletKeyParts {
     variantA: number;
@@ -1428,52 +1428,49 @@ export async function searchStrettoChains(
         longDelaySignature: string;
     }
 
-    function getBoundarySignature(chain: StrettoChainOption[]): string {
-        return toOrderedBoundarySignature(chain, ppq);
-    }
-
-
-    function compareMergeDeterminism(left: DagNode, right: DagNode): number {
-        const len = Math.min(left.chain.length, right.chain.length);
-        for (let i = 0; i < len; i++) {
-            const l = left.chain[i];
-            const r = right.chain[i];
-            const lStartTicks = Math.round(l.startBeat * ppq);
-            const rStartTicks = Math.round(r.startBeat * ppq);
-            if (lStartTicks !== rStartTicks) return lStartTicks - rStartTicks;
-            if (l.transposition !== r.transposition) return l.transposition - r.transposition;
-            if (l.type !== r.type) return l.type.localeCompare(r.type);
-            if (l.voiceIndex !== r.voiceIndex) return l.voiceIndex - r.voiceIndex;
-            if (l.length !== r.length) return l.length - r.length;
-            const lVar = left.variantIndices[i] ?? -1;
-            const rVar = right.variantIndices[i] ?? -1;
-            if (lVar !== rVar) return lVar - rVar;
-        }
-        if (left.chain.length !== right.chain.length) return left.chain.length - right.chain.length;
-        return 0;
-    }
-
+    // --- Active-tail DAG key ---
+    // Two nodes are merge-equivalent if they produce the same set of future expansions.
+    // Future expansion depends ONLY on:
+    //   1. Entries still sounding ("active") — these determine overlap pair checks for new candidates
+    //   2. The transition window (last 2 entries) — for indexed transition lookups
+    //   3. The previous-previous delay — for expansion recoil (when the 3rd-to-last entry is inactive)
+    //   4. Quotas (nInv, nTrunc, nRestricted, nFree)
+    //   5. Used long delays (A.1 uniqueness)
+    // Items 1-2 subsume voice end times: active entries fully determine which voices are occupied;
+    // non-active voices are always available since their end time <= lastEntry.startTick < any candidate.
     function getDagNodeKey(node: DagNode): string {
-        const chainSig = getChainSignature(node.chain);
-        const boundarySig = getBoundarySignature(node.chain);
-        const longDelaysSig = node.longDelaySignature;
+        const depth = node.chain.length;
+        if (depth <= 1) return 'root';
 
-        if (node.chain.length <= EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY) {
-            // Invariant (entries 1-4): retain full history in the key while all prefixes remain dense;
-            // this preserves strict baseline-equivalent identity before early-window compression starts.
-            if (node.chain.length <= 4) {
-                return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${longDelaysSig}`;
+        const lastEntry = node.chain[depth - 1];
+        const lastStartTicks = Math.round(lastEntry.startBeat * ppq);
+
+        // Active entries: entries whose sound extends past the last entry's start time.
+        // Only these can overlap with future candidates (which start after lastEntry).
+        // The last entry itself is always active; encode it and all earlier still-sounding entries.
+        let activeSig = '';
+        for (let k = depth - 1; k >= 0; k--) {
+            const e = node.chain[k];
+            const eStart = Math.round(e.startBeat * ppq);
+            // Upper-bound early termination: if even the longest variant can't reach lastStartTicks
+            // from this entry's start, no earlier entry can either.
+            if (eStart + subjectLengthTicks <= lastStartTicks) break;
+            const eEnd = eStart + variants[node.variantIndices[k]].lengthTicks;
+            if (eEnd > lastStartTicks) {
+                activeSig += `${node.variantIndices[k]},${eStart},${e.transposition},${e.voiceIndex};`;
             }
-
-            // Invariant (entries 5-7): frontier transitions are generated from immediate window metadata
-            // (delay/transposition deltas and precomputed local compatibility), so ordered boundary
-            // history is derivable for feasibility and can be dropped from DAG identity.
-            return `ew:${node.chain.length}|${chainSig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${longDelaysSig}`;
         }
 
-        // Invariant (entry > 7): restore history-heavy identity to avoid over-merging once longer
-        // prefixes can influence late-stage feasibility through accumulated boundary structure.
-        return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${longDelaysSig}`;
+        // Previous-previous delay: needed for expansion recoil (A.3) when depth >= 3.
+        // If the 3rd-to-last entry is active, this is derivable from activeSig; including
+        // it explicitly is cheap and handles the case where it has gone inactive.
+        let prevPrevDelay = -1;
+        if (depth >= 3) {
+            prevPrevDelay = Math.round(node.chain[depth - 2].startBeat * ppq)
+                         - Math.round(node.chain[depth - 3].startBeat * ppq);
+        }
+
+        return `${depth}|${activeSig}|pp:${prevPrevDelay}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${node.longDelaySignature}`;
     }
 
     function expandNode(node: DagNode): DagNode[] {
@@ -1659,27 +1656,28 @@ export async function searchStrettoChains(
                     if (isRestricted && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
                     if (options.disallowComplexExceptions && (isInv || isTrunc) && isRestricted) continue;
 
-                    // Collect overlapping pairwise records for this candidate
+                    // Collect overlapping pairwise records for this candidate.
+                    // Iterate backward: entries are chronologically ordered, so once an
+                    // entry's start + maxVariantLength can't reach the candidate, no
+                    // earlier entry can overlap either.
                     const overlappingPairs: { entry: StrettoChainOption; pairRecord: PairwiseCompatibilityRecord }[] = [];
                     let harmonicFail = false;
-                    for (let k = 0; k < chain.length; k++) {
-                        // Immediate predecessor pair is already validated via immPair above.
-                        if (k === chain.length - 1) continue;
+                    for (let k = chain.length - 2; k >= 0; k--) {
                         const prevE = chain[k];
-                        const prevVarIdx = variantIndices[k];
                         const prevStartTicks = Math.round(prevE.startBeat * ppq);
+                        if (prevStartTicks + subjectLengthTicks <= absStartTicks) break;
+                        const prevVarIdx = variantIndices[k];
                         const prevEndTicks = prevStartTicks + variants[prevVarIdx].lengthTicks;
+                        if (absStartTicks >= prevEndTicks) continue;
 
-                        if (absStartTicks < prevEndTicks) {
-                            const relDelay = absStartTicks - prevStartTicks;
-                            const relTrans = t - prevE.transposition;
-                            const pairRecord = getPairRecord(prevVarIdx, varIdx, relDelay, relTrans);
-                            if (!pairRecord) {
-                                harmonicFail = true;
-                                break;
-                            }
-                            overlappingPairs.push({ entry: prevE, pairRecord });
+                        const relDelay = absStartTicks - prevStartTicks;
+                        const relTrans = t - prevE.transposition;
+                        const pairRecord = getPairRecord(prevVarIdx, varIdx, relDelay, relTrans);
+                        if (!pairRecord) {
+                            harmonicFail = true;
+                            break;
                         }
+                        overlappingPairs.push({ entry: prevE, pairRecord });
                     }
                     if (harmonicFail) continue;
 
@@ -1776,25 +1774,15 @@ export async function searchStrettoChains(
     }];
 
     let maxFrontierSize = frontier.length;
-    let maxFrontierClassCount = 1;
+    let maxFrontierClassCount = 0;
     let frontierSizeAtTermination = 0;
     let frontierClassesAtTermination = 0;
 
-    const frontierClassKey = (chain: StrettoChainOption[]): string => {
-        if (chain.length < 2) return 'root';
-        const delays: number[] = [];
-        for (let i = 1; i < chain.length; i++) {
-            delays.push(Math.round((chain[i].startBeat - chain[i - 1].startBeat) * ppq));
-        }
-        return delays.join(',');
-    };
-
     while (frontier.length > 0) {
         maxFrontierSize = Math.max(maxFrontierSize, frontier.length);
-        const frontierClasses = new Set(frontier.map((n) => frontierClassKey(n.chain)));
-        maxFrontierClassCount = Math.max(maxFrontierClassCount, frontierClasses.size);
-
-        frontier.sort((a, b) => getChainSignature(a.chain).localeCompare(getChainSignature(b.chain)));
+        // Frontier class counting and deterministic sorting removed from hot loop —
+        // they were O(n log n) / O(n) per layer on potentially huge frontiers,
+        // contributing nothing to correctness. Stats are filled at termination.
         const nextLayer = new Map<string, DagNode>();
         let stopTraversal = false;
 
@@ -1844,13 +1832,8 @@ export async function searchStrettoChains(
             const successors = expandNode(node);
             for (const successor of successors) {
                 const nodeKey = getDagNodeKey(successor);
-                const existing = nextLayer.get(nodeKey);
-                if (existing) {
+                if (nextLayer.has(nodeKey)) {
                     stageStats.deterministicDagMergedNodes++;
-                    const mergeOrder = compareMergeDeterminism(successor, existing);
-                    if (mergeOrder < 0 || (mergeOrder === 0 && getChainSignature(successor.chain).localeCompare(getChainSignature(existing.chain)) < 0)) {
-                        nextLayer.set(nodeKey, successor);
-                    }
                     continue;
                 }
                 nextLayer.set(nodeKey, successor);
@@ -1859,11 +1842,13 @@ export async function searchStrettoChains(
 
         frontier = resolveNextFrontierLayer(nextLayer, stopTraversal);
 
-        // Record frontier state at termination (last iteration before loop exits)
+        // Record frontier state at termination (last iteration before loop exits).
+        // Class counting deferred to here instead of per-iteration.
         if (frontier.length === 0 || stopTraversal) {
             const termFrontier = stopTraversal ? Array.from(nextLayer.values()) : [];
             frontierSizeAtTermination = termFrontier.length;
-            frontierClassesAtTermination = new Set(termFrontier.map((n) => frontierClassKey(n.chain))).size;
+            maxFrontierClassCount = maxFrontierSize; // upper-bound estimate (exact counting removed from hot path)
+            frontierClassesAtTermination = termFrontier.length; // conservative estimate
         }
     }
 
