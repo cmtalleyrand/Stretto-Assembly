@@ -1345,6 +1345,12 @@ export async function searchStrettoChains(
                 stageStats.transitionsReturned += windowMap.size;
                 indexedTransitionsByDelay = windowMap;
             }
+
+            // No indexed transition window means the chain prefix cannot be extended
+            // under the second-order transition model; prune immediately.
+            if (!indexedTransitionsByDelay || indexedTransitionsByDelay.size === 0) {
+                return;
+            }
         }
 
         for (const delayTicks of possibleDelaysTicks) {
@@ -1370,7 +1376,10 @@ export async function searchStrettoChains(
             const candidateTransitions: { varIdx: number; t: number; immPair: PairwiseCompatibilityRecord; isRestricted: boolean; isFree: boolean }[] = [];
 
             if (depth >= 2) {
-                const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks) ?? [];
+                const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks);
+                if (!indexedTransitions || indexedTransitions.length === 0) {
+                    continue;
+                }
                 for (const transition of indexedTransitions) {
                     const t = prevTransposition + transition.transpositionDelta;
                     if (t === prevTransposition) continue;
