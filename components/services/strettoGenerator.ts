@@ -1390,6 +1390,82 @@ export async function searchStrettoChains(
         }
     }
 
+    // --- REACHABILITY ANALYSIS on the precomputed transition graph ---
+    // A window state is (variantLeft, variantRight, delayAB, transpositionDelta).
+    // The transition graph maps each window state to successor window states via
+    // the precomputed triplet transitions. We compute the maximum chain depth
+    // reachable from each window state so that during BFS, frontier nodes whose
+    // window state cannot reach the target depth are pruned immediately.
+    //
+    // This is a fixed-point iteration: maxReach(W) = 1 + max(maxReach(successor(W)))
+    // for each successor window state reachable from W. Terminal states (no successors)
+    // have maxReach = 0. We iterate until stable.
+
+    type WindowStateKey = string;
+    const windowStateKey = (vL: number, vR: number, d: number, tDelta: number): WindowStateKey =>
+        `${vL},${vR},${d},${tDelta}`;
+
+    // Collect all window states and their successors from the transition graph.
+    const windowSuccessors = new Map<WindowStateKey, Set<WindowStateKey>>();
+    const windowMaxReach = new Map<WindowStateKey, number>();
+
+    // Walk the transitionsByWindow structure to extract all edges.
+    for (const [vL, byVR] of transitionsByWindow) {
+        for (const [vR, byDelay] of byVR) {
+            for (const [dAB, byTDelta] of byDelay) {
+                for (const [tDelta, buckets] of byTDelta) {
+                    const srcKey = windowStateKey(vL, vR, dAB, tDelta);
+                    if (!windowSuccessors.has(srcKey)) windowSuccessors.set(srcKey, new Set());
+                    const succs = windowSuccessors.get(srcKey)!;
+                    // Each bucket maps delayBC → NextTransition[].
+                    // Each transition yields a new window state: (vR, nextVariant, delayBC, transpositionDelta).
+                    for (const [dBC, transitions] of buckets) {
+                        for (const tr of transitions) {
+                            const dstKey = windowStateKey(vR, tr.nextVariantIndex, dBC, tr.transpositionDelta);
+                            succs.add(dstKey);
+                            if (!windowSuccessors.has(dstKey)) windowSuccessors.set(dstKey, new Set());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fixed-point iteration: propagate reachability until stable.
+    // maxReach(W) = max depth of chain extension achievable starting from window W.
+    // A state with successors can reach at least 1 + max(maxReach(succ)) steps.
+    // Cap at targetChainLength to guarantee convergence — the transition graph can
+    // contain cycles in relative-transposition space, making true maxReach infinite
+    // for states on or reaching a cycle. We only need to know "can reach target?".
+    const maxReachCap = options.targetChainLength;
+    for (const key of windowSuccessors.keys()) {
+        windowMaxReach.set(key, 0);
+    }
+    let reachChanged = true;
+    while (reachChanged) {
+        reachChanged = false;
+        for (const [src, succs] of windowSuccessors) {
+            if (succs.size === 0) continue;
+            let bestSuccReach = 0;
+            for (const dst of succs) {
+                bestSuccReach = Math.max(bestSuccReach, windowMaxReach.get(dst) ?? 0);
+                if (bestSuccReach >= maxReachCap) break; // can't improve beyond cap
+            }
+            const newReach = Math.min(1 + bestSuccReach, maxReachCap);
+            if (newReach > (windowMaxReach.get(src) ?? 0)) {
+                windowMaxReach.set(src, newReach);
+                reachChanged = true;
+            }
+        }
+    }
+
+    // Helper: check if a window state can extend to the needed remaining depth.
+    const canReachTarget = (vL: number, vR: number, d: number, tDelta: number, remainingSteps: number): boolean => {
+        if (remainingSteps <= 0) return true;
+        const reach = windowMaxReach.get(windowStateKey(vL, vR, d, tDelta));
+        return reach !== undefined && reach >= remainingSteps;
+    };
+
     // Deferred scoring: store unscored chains during search, score after
     interface UnscoredChain {
         entries: StrettoChainOption[];
@@ -1635,6 +1711,18 @@ export async function searchStrettoChains(
                 const prevIsInv = prevVariant.type === 'I';
                 const prevIsTrunc = prevVariant.truncationBeats > 0;
                 if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+
+                // Reachability pruning: the new entry creates window state
+                // (prevVariantIndex, varIdx, delayTicks, transpositionDelta).
+                // If the transition graph says this window state can't extend
+                // far enough to reach the target chain length, skip it now —
+                // before the expensive overlap/metric/voice-placement loops.
+                const newDepth = depth + 1;
+                const remainingSteps = options.targetChainLength - newDepth;
+                if (remainingSteps > 0) {
+                    const tDelta = t - chain[depth - 1].transposition;
+                    if (!canReachTarget(variantIndices[depth - 1], varIdx, delayTicks, tDelta, remainingSteps)) continue;
+                }
 
                 if (depth >= 2) {
                     const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
