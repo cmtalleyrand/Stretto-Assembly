@@ -39,6 +39,7 @@ interface PairwiseCompatibilityRecord {
     parallelPerfectStartTicks?: number[];
     disallowLowestPair: boolean;
     allowedVoicePairs: Set<string>;
+    allowedVoiceMaskRows: bigint[];
     // Per-bass-role compatibility: precomputed so traversal never re-scans.
     bassRoleCompatible: { none: boolean; a: boolean; b: boolean };
     // Per-bass-role dissonance detail for P4-as-bass resolution.
@@ -582,6 +583,64 @@ export function buildAllowedVoicePairs(
     return allowed;
 }
 
+function buildAllowedVoiceMaskRows(
+    transpositionAB: number,
+    ensembleTotal: number,
+    disallowLowestPair: boolean
+): bigint[] {
+    const rows = Array.from({ length: ensembleTotal }, () => 0n);
+    for (let voiceA = 0; voiceA < ensembleTotal; voiceA++) {
+        let rowMask = 0n;
+        for (let voiceB = 0; voiceB < ensembleTotal; voiceB++) {
+            if (voiceA === voiceB) continue;
+            if (isVoicePairAllowedForTransposition(voiceA, voiceB, transpositionAB, ensembleTotal, disallowLowestPair)) {
+                rowMask |= (1n << BigInt(voiceB));
+            }
+        }
+        rows[voiceA] = rowMask;
+    }
+    return rows;
+}
+
+function applyBassRoleCompatibilityMaskRows(record: PairwiseCompatibilityRecord, bassIdx: number): bigint[] {
+    if (!record.hasFourth || (record.bassRoleCompatible.a && record.bassRoleCompatible.b)) {
+        return record.allowedVoiceMaskRows;
+    }
+
+    const bassBit = (1n << BigInt(bassIdx));
+    return record.allowedVoiceMaskRows.map((rowMask, sourceVoice) => {
+        if (sourceVoice === bassIdx) {
+            if (record.bassRoleCompatible.a) return rowMask;
+            return rowMask & bassBit;
+        }
+
+        if (record.bassRoleCompatible.b) return rowMask;
+        return rowMask & ~bassBit;
+    });
+}
+
+function hasFeasibleTripletAssignment(
+    abRows: bigint[],
+    bcRows: bigint[],
+    ensembleTotal: number,
+    acRows?: bigint[]
+): boolean {
+    for (let v1 = 0; v1 < ensembleTotal; v1++) {
+        for (let v2 = 0; v2 < ensembleTotal; v2++) {
+            if (v1 === v2) continue;
+            if ((abRows[v1] & (1n << BigInt(v2))) === 0n) continue;
+
+            for (let v3 = 0; v3 < ensembleTotal; v3++) {
+                if (v1 === v3 || v2 === v3) continue;
+                if ((bcRows[v2] & (1n << BigInt(v3))) === 0n) continue;
+                if (acRows && (acRows[v1] & (1n << BigInt(v3))) === 0n) continue;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 
 /**
  * PHASE 5 CHECK: Metric Compliance
@@ -952,6 +1011,7 @@ export async function searchStrettoChains(
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
+                    const allowedVoiceMaskRows = buildAllowedVoiceMaskRows(t, options.ensembleTotal, disallowLowestPair);
                     if (allowedVoicePairs.size === 0) {
                         stageStats.pairStageRejected++;
                         continue;
@@ -984,6 +1044,7 @@ export async function searchStrettoChains(
                         parallelPerfectStartTicks: pairScan.parallelPerfectStartTicks,
                         disallowLowestPair,
                         allowedVoicePairs,
+                        allowedVoiceMaskRows,
                         bassRoleCompatible: {
                             none: pairScan.compatible,
                             a: bassStrictA.compatible,
@@ -1089,86 +1150,23 @@ export async function searchStrettoChains(
             // spacing rules (neighbor, 2-gap, bass-alto), so we intersect them.
             const pairAC_rec = (dAC < lenA) ? pairwiseCompatibleTriplets.get(toPairKey(vA, vC, dAC, tAC)) : null;
 
-            let possibleAssignment = false;
             const bassIdx = options.ensembleTotal - 1;
-            for (let v1 = 0; v1 < options.ensembleTotal; v1++) {
-                for (let v2 = 0; v2 < options.ensembleTotal; v2++) {
-                    if (v1 === v2) continue;
-                    // Check AB voice pair admissibility from precomputed set
-                    if (!pairAB.allowedVoicePairs.has(`${v1}->${v2}`)) continue;
+            const spacingFeasible = hasFeasibleTripletAssignment(
+                pairAB.allowedVoiceMaskRows,
+                pairBC.allowedVoiceMaskRows,
+                options.ensembleTotal,
+                pairAC_rec?.allowedVoiceMaskRows
+            );
 
-                    for (let v3 = 0; v3 < options.ensembleTotal; v3++) {
-                        if (v1 === v3 || v2 === v3) continue;
-                        // Check BC voice pair admissibility from precomputed set
-                        if (!pairBC.allowedVoicePairs.has(`${v2}->${v3}`)) continue;
-                        // Check AC voice pair if overlapping
-                        if (pairAC_rec && !pairAC_rec.allowedVoicePairs.has(`${v1}->${v3}`)) continue;
-
-                        // P4 bass-role check at triplet level:
-                        // With 3 known voices, determine if any P4-containing pair has
-                        // its lower note as the actual bass of the sonority.
-                        let p4Fail = false;
-
-                        // For each pair with P4, check if the assigned voice role
-                        // makes the P4 dissonant (lower note = bass voice).
-                        if (pairAB.hasFourth) {
-                            // Determine bass role for this AB pair given v1, v2
-                            let abBassRole: PairwiseBassRole = 'none';
-                            if (v1 === bassIdx && v2 !== bassIdx) abBassRole = 'a';
-                            else if (v2 === bassIdx && v1 !== bassIdx) abBassRole = 'b';
-                            // If only 2 voices active in the P4 region AND no 3rd voice
-                            // provides a lower pitch, the P4 IS against the bass.
-                            // Use precomputed bass-role compatibility.
-                            if (abBassRole !== 'none' && !pairAB.bassRoleCompatible[abBassRole]) {
-                                p4Fail = true;
-                            }
-                        }
-                        if (!p4Fail && pairBC.hasFourth) {
-                            let bcBassRole: PairwiseBassRole = 'none';
-                            if (v2 === bassIdx && v3 !== bassIdx) bcBassRole = 'a';
-                            else if (v3 === bassIdx && v2 !== bassIdx) bcBassRole = 'b';
-                            if (bcBassRole !== 'none' && !pairBC.bassRoleCompatible[bcBassRole]) {
-                                p4Fail = true;
-                            }
-                        }
-                        if (!p4Fail && pairAC_rec && pairAC_rec.hasFourth) {
-                            let acBassRole: PairwiseBassRole = 'none';
-                            if (v1 === bassIdx && v3 !== bassIdx) acBassRole = 'a';
-                            else if (v3 === bassIdx && v1 !== bassIdx) acBassRole = 'b';
-                            if (acBassRole !== 'none' && !pairAC_rec.bassRoleCompatible[acBassRole]) {
-                                p4Fail = true;
-                            }
-                        }
-
-                        if (p4Fail) {
-                            continue;
-                        }
-
-                        possibleAssignment = true;
-                        break;
-                    }
-                    if (possibleAssignment) break;
-                }
-                if (possibleAssignment) break;
-            }
+            const possibleAssignment = spacingFeasible && hasFeasibleTripletAssignment(
+                applyBassRoleCompatibilityMaskRows(pairAB, bassIdx),
+                applyBassRoleCompatibilityMaskRows(pairBC, bassIdx),
+                options.ensembleTotal,
+                pairAC_rec ? applyBassRoleCompatibilityMaskRows(pairAC_rec, bassIdx) : undefined
+            );
 
             if (!possibleAssignment) {
-                // Determine if the rejection was P4-related or voice-spacing-related.
-                // Re-check without P4 to classify.
-                let spacingFail = true;
-                for (let v1 = 0; v1 < options.ensembleTotal && spacingFail; v1++) {
-                    for (let v2 = 0; v2 < options.ensembleTotal && spacingFail; v2++) {
-                        if (v1 === v2) continue;
-                        if (!pairAB.allowedVoicePairs.has(`${v1}->${v2}`)) continue;
-                        for (let v3 = 0; v3 < options.ensembleTotal && spacingFail; v3++) {
-                            if (v1 === v3 || v2 === v3) continue;
-                            if (!pairBC.allowedVoicePairs.has(`${v2}->${v3}`)) continue;
-                            if (pairAC_rec && !pairAC_rec.allowedVoicePairs.has(`${v1}->${v3}`)) continue;
-                            spacingFail = false;
-                        }
-                    }
-                }
-                if (spacingFail) {
+                if (!spacingFeasible) {
                     stageStats.tripleVoiceRejected++;
                 } else {
                     stageStats.tripleP4BassRejected++;
