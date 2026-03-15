@@ -106,6 +106,73 @@ async function runDiagnostics() {
     }
   }
 
+  {
+    const comparisonSubject: RawNote[] = [
+      { midi: 60, ticks: 0, durationTicks: 480, velocity: 0.9, name: 'C4' },
+      { midi: 64, ticks: 480, durationTicks: 480, velocity: 0.9, name: 'E4' },
+      { midi: 67, ticks: 960, durationTicks: 480, velocity: 0.9, name: 'G4' }
+    ];
+    const comparisonOptions: StrettoSearchOptions = {
+      ensembleTotal: 2,
+      targetChainLength: 2,
+      subjectVoiceIndex: 0,
+      truncationMode: 'None',
+      truncationTargetBeats: 1,
+      inversionMode: 'None',
+      useChromaticInversion: false,
+      thirdSixthMode: 'None',
+      pivotMidi: 60,
+      requireConsonantEnd: false,
+      disallowComplexExceptions: false,
+      maxPairwiseDissonance: 0.75,
+      scaleRoot: 0,
+      scaleMode: 'Major'
+    };
+
+    delete process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE;
+    const pruned = await searchStrettoChains(comparisonSubject, comparisonOptions, 480);
+    process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE = '1';
+    const full = await searchStrettoChains(comparisonSubject, comparisonOptions, 480);
+    delete process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE;
+
+    assert.ok(pruned.stats.stageStats, 'Expected stageStats for pruned pairwise run.');
+    assert.ok(full.stats.stageStats, 'Expected stageStats for full pairwise run.');
+    assert.ok(
+      pruned.stats.stageStats!.pairwiseTotal <= full.stats.stageStats!.pairwiseTotal,
+      'Admissibility-pruned pairwise total must not exceed full cartesian pairwise total.'
+    );
+    assert.equal(
+      pruned.results.length,
+      full.results.length,
+      'Admissibility pruning must preserve acceptance cardinality on diagnostic fixture.'
+    );
+    assert.equal(
+      pruned.stats.stopReason,
+      full.stats.stopReason,
+      'Admissibility pruning must preserve stop-reason behavior on diagnostic fixture.'
+    );
+
+    const toCanonicalChainSet = (report: Awaited<ReturnType<typeof searchStrettoChains>>): Set<string> => {
+      return new Set(
+        report.results.map((result) => result.entries
+          .map((entry) => `${entry.startBeat.toFixed(6)}|${entry.transposition}|${entry.type}|${entry.length}|${entry.voiceIndex}`)
+          .join('||'))
+      );
+    };
+    const prunedChainSet = toCanonicalChainSet(pruned);
+    const fullChainSet = toCanonicalChainSet(full);
+    assert.deepEqual(
+      [...prunedChainSet].sort(),
+      [...fullChainSet].sort(),
+      'Admissibility pruning must preserve accepted chain identities on diagnostic fixture.'
+    );
+
+    console.log('PASS: Admissibility pruning reduces pairwise precompute search space without changing acceptance behavior');
+    console.log(
+      `  pairwiseTotal(pruned/full)=${pruned.stats.stageStats!.pairwiseTotal}/${full.stats.stageStats!.pairwiseTotal} results(pruned/full)=${pruned.results.length}/${full.results.length} stopReason(pruned/full)=${pruned.stats.stopReason}/${full.stats.stopReason}`
+    );
+  }
+
   console.log('=== DIAGNOSTIC SUITE COMPLETE ===');
 }
 
