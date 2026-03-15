@@ -8,9 +8,10 @@ These rules explicitly prevent chains where added entries fail to increase stret
 
 Notation: $n$ is entry index, $d_n$ is delay between entries $(n-1)\rightarrow n$, $Sb$ is current entry subject length in beats, and $B$ is one beat.
 
-1. **Half-length contraction trigger:** if $d_{n-1} > Sb/2$, then $d_n < d_{n-1} - 0.5B$.
+1. **Half-length contraction trigger (OR form):** if $d_{n-1} \ge Sb/2$ **or** $d_n \ge Sb/2$, then $d_n < d_{n-1}$.
 2. **Expansion recoil trigger:** if $d_{n-1} > d_{n-2}$ and $d_{n-1} > Sb/3$, then $d_n < d_{n-2} - 0.5B$.
 3. **Post-truncation contraction:** after a truncated entry, the next delay must contract by at least $1B$, unless $d_{n-1} < Sb/3$.
+4. **Maximum contraction bound:** $d_{n-1} - d_n \le 0.25Sb$.
 
 ## 🚨 Critical P4/P5/P8 Policy Clarification
 1. **Parallel perfect 4ths are permitted unconditionally.**
@@ -24,10 +25,15 @@ Any chain candidate that violates *any* of these rules is immediately discarded 
 
 ### A. Distance & Rhythm Rules
 1.  **Global Uniqueness:** Every delay interval used in the chain must be unique if > 1/3 length.
-2.  **Half-Length Trigger:** If previous delay exceeds half subject length, current delay must contract by at least 0.5 beat.
+2.  **Half-Length Trigger (OR form):** If previous or current delay is at least half subject length, current delay must be strictly smaller than previous.
 3.  **Expansion Recoil:** If previous delay expanded and exceeded one-third subject length, current delay must contract by at least 0.5 beat relative to two entries ago.
 4.  **Post-Truncation Contraction:** After a truncated entry, next delay must contract by at least 1 beat unless previous delay is below one-third subject length.
 5.  **Universal Distance Limits:** All entries are allowed a maximum delay of **66% (2/3)** of the subject length.
+6.  **Adjacent Transposition Separation:** For every adjacent pair `(e_i, e_{i+1})`, enforce `|t_i - t_{i+1}| >= 5` semitones (perfect fourth minimum).
+7.  **Transform-Following Normality:** Any inversion or truncation must be immediately followed by a normal (non-inverted, non-truncated) entry.
+8.  **Maximum Contraction Bound:** For each adjacent pair, contraction magnitude is bounded by one-quarter subject length: $d_i - d_{i+1} \le 0.25Sb$.
+
+Implementation invariant: Rule A.6 is an immediate-neighbor predicate and is therefore enforced during successor extension against the direct predecessor `(e_{i-1}, e_i)` only; non-adjacent overlapping pairs remain governed by harmonic compatibility rules, not A.6.
 
 ### B. Voice Interval Constraints (Relative)
 The algorithm strictly enforces vertical ordering:

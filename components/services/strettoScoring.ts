@@ -254,6 +254,44 @@ export function calculateStrettoScore(
     const U_quality = Math.round(SCORING.QUALITY_UTILITY_SCALE * qualityPenaltyFraction);
 
     let score = U_quality;
+    const warnings: string[] = [];
+
+    // Hard validity rule: reject chains containing >2 consecutive dissonant simultaneities.
+    // This runs on the fully assembled sonority timeline (not only pairwise projections),
+    // so it catches cases that can evade pair-local precomputation.
+    let dissonanceRunEvents = 0;
+    let maxDissonanceRunEvents = 0;
+    for (let i = 0; i < sortedPoints.length - 1; i++) {
+        const start = sortedPoints[i];
+        const end = sortedPoints[i + 1];
+        if (end - start <= 0) continue;
+
+        const voices = placedNotes.filter(n => n.start <= start && n.end > start);
+        if (voices.length < 2) {
+            dissonanceRunEvents = 0;
+            continue;
+        }
+
+        const pitches = voices.map(v => v.pitch).sort((a, b) => a - b);
+        const bass = pitches[0];
+        let isDiss = false;
+        for (let j = 0; j < pitches.length && !isDiss; j++) {
+            for (let k = j + 1; k < pitches.length; k++) {
+                const int = (pitches[k] - pitches[j]) % 12;
+                if (INTERVALS.DISSONANT_SIMPLE.has(int) || (int === 5 && pitches[j] === bass)) {
+                    isDiss = true;
+                    break;
+                }
+            }
+        }
+
+        if (isDiss) {
+            dissonanceRunEvents++;
+            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissonanceRunEvents);
+        } else {
+            dissonanceRunEvents = 0;
+        }
+    }
 
     const bonuses: ScoreLog['bonuses'] = [];
     const penalties: ScoreLog['penalties'] = [
@@ -368,7 +406,11 @@ export function calculateStrettoScore(
     };
 
     // --- 6. Consonant End Validation (per-voice) ---
-    let isValid = true;
+    let isValid = maxDissonanceRunEvents <= 2;
+    if (!isValid) {
+        warnings.push(`Rejected: ${maxDissonanceRunEvents} consecutive dissonant simultaneities (max allowed = 2).`);
+    }
+
     if (options.requireConsonantEnd) {
         for (let ei = 0; ei < chain.length; ei++) {
             const entry = chain[ei];
@@ -407,7 +449,7 @@ export function calculateStrettoScore(
     return {
         id: Math.random().toString(36),
         entries: chain,
-        warnings: [],
+        warnings,
         score,
         scoreLog: log,
         detectedChords: harmonyAnalysis.chords,

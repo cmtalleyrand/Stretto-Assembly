@@ -6,10 +6,11 @@ import { getInvertedPitch } from './strettoCore';
 
 // --- Constants & Types ---
 const MAX_SEARCH_NODES = 2000000; // Increased to allow deeper search
-const TIME_LIMIT_MS = 30000;
+const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 2048;
+// Removed EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY — no longer needed with active-tail DAG keys.
 
 interface TripletKeyParts {
     variantA: number;
@@ -24,14 +25,87 @@ interface TripletKeyParts {
 interface PairwiseCompatibilityRecord {
     dissonanceRatio: number;
     hasFourth: boolean;
+    p4SimultaneityCount: number;
     hasVoiceCrossing: boolean;
     maxDissonanceRunEvents: number;
+    maxDissonanceRunTicks?: number;
+    maxAllowedContinuousDissonanceTicks?: number;
     hasParallelPerfect58: boolean;
+    // Span locations where dissonant simultaneities occur in pairwise scan coordinates.
+    dissonanceSpans?: SimultaneitySpan[];
+    // Span locations where P4 simultaneities occur in pairwise scan coordinates.
+    p4Spans?: SimultaneitySpan[];
+    // Tick locations where disallowed parallel-perfect motion starts are observed.
+    parallelPerfectStartTicks?: number[];
     disallowLowestPair: boolean;
     allowedVoicePairs: Set<string>;
+    // Per-bass-role compatibility: precomputed so traversal never re-scans.
+    bassRoleCompatible: { none: boolean; a: boolean; b: boolean };
+    // Per-bass-role dissonance detail for P4-as-bass resolution.
+    bassRoleDissonanceRatio: { none: number; a: number; b: number };
+    bassRoleMaxRunEvents: { none: number; a: number; b: number };
+    // Interval class of the transposition (mod 12), precomputed for quota checks.
+    intervalClass: number;
+    isRestrictedInterval: boolean;
+    isFreeInterval: boolean;
+    meetsAdjacentTranspositionSeparation: boolean;
+}
+
+interface PairTuple {
+    vA: number;
+    vB: number;
+    d: number;
+    t: number;
+}
+
+type PairwiseByTransposition = Map<number, PairwiseCompatibilityRecord>;
+type PairwiseByDelay = Map<number, PairwiseByTransposition>;
+type PairwiseByVariantB = Map<number, PairwiseByDelay>;
+type PairwiseByVariantA = Map<number, PairwiseByVariantB>;
+
+type TransitionBucketsByDelay = Map<number, NextTransition[]>;
+type TransitionByTranspositionDelta = Map<number, TransitionBucketsByDelay>;
+type TransitionByDelay = Map<number, TransitionByTranspositionDelta>;
+type TransitionByVariantRight = Map<number, TransitionByDelay>;
+type TransitionByVariantLeft = Map<number, TransitionByVariantRight>;
+
+interface NextTransition {
+    delayTicks: number;
+    nextVariantIndex: number;
+    transpositionDelta: number;
+    // Present for window-indexed transitions used during deep expansion.
+    pairRecord?: PairwiseCompatibilityRecord;
+    isRestrictedInterval?: boolean;
+    isFreeInterval?: boolean;
+    // Present for boundary/root transition caches used before full overlap collection.
+    isInv?: boolean;
+    isTrunc?: boolean;
+    isRestricted?: boolean;
+    isFree?: boolean;
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
+
+interface SimultaneitySpan {
+    startTick: number;
+    endTick: number;
+}
+
+interface PairwiseScanResult {
+    compatible: boolean;
+    dissonanceRatio: number;
+    strongBeatParallels: number;
+    weakBeatParallels: number;
+    hasFourth: boolean;
+    p4SimultaneityCount: number;
+    hasVoiceCrossing: boolean;
+    maxDissonanceRunEvents: number;
+    maxDissonanceRunTicks: number;
+    hasParallelPerfect58: boolean;
+    dissonanceSpans: SimultaneitySpan[];
+    p4Spans: SimultaneitySpan[];
+    parallelPerfectStartTicks: number[];
+}
 
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
@@ -64,7 +138,9 @@ export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: num
 }
 
 export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, maxPairwiseDissonance: number): boolean {
-    return record.maxDissonanceRunEvents > 2 || record.dissonanceRatio > maxPairwiseDissonance;
+    const maxAllowedContinuousDissonanceTicks = record.maxAllowedContinuousDissonanceTicks ?? 480;
+    const runTicks = record.maxDissonanceRunTicks ?? 0;
+    return record.maxDissonanceRunEvents > 2 || runTicks > maxAllowedContinuousDissonanceTicks || record.dissonanceRatio > maxPairwiseDissonance;
 }
 
 export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
@@ -75,6 +151,24 @@ export function shouldYieldToEventLoop(iteration: number, interval: number = EVE
     return iteration > 0 && iteration % interval === 0;
 }
 
+function appendUniqueCapped(target: number[], source: number[] | undefined, cap: number = 256): void {
+    if (!source || source.length === 0 || target.length >= cap) return;
+    for (const tick of source) {
+        if (target.length >= cap) break;
+        if (!target.includes(tick)) target.push(tick);
+    }
+}
+
+function appendUniqueSpansCapped(target: SimultaneitySpan[], source: SimultaneitySpan[] | undefined, cap: number = 256): void {
+    if (!source || source.length === 0 || target.length >= cap) return;
+    for (const span of source) {
+        if (target.length >= cap) break;
+        if (!target.some((s) => s.startTick === span.startTick && s.endTick === span.endTick)) {
+            target.push(span);
+        }
+    }
+}
+
 interface StageStats {
     validDelayCount: number;
     transpositionCount: number;
@@ -82,18 +176,64 @@ interface StageStats {
     pairwiseCompatible: number;
     pairwiseWithFourth: number;
     pairwiseWithVoiceCrossing: number;
+    pairwiseP4TwoVoiceDissonant: number;
+    pairwiseParallelRejected: number;
     tripleCandidates: number;
     triplePairwiseRejected: number;
     tripleLowerBoundRejected: number;
     tripleParallelRejected: number;
     tripleVoiceRejected: number;
+    tripleP4BassRejected: number;
     harmonicallyValidTriples: number;
     deterministicDagMergedNodes: number;
     pairStageRejected: number;
     tripletStageRejected: number;
     globalLineageStageRejected: number;
     structuralScanInvocations: number;
+    dissonanceSpans: SimultaneitySpan[];
+    p4Spans: SimultaneitySpan[];
+    parallelPerfectLocationTicks: number[];
+    transitionWindowLookups: number;
+    transitionsReturned: number;
+    candidateTransitionsEnumerated: number;
 }
+
+type AdmissiblePairIndex = Map<number, Map<number, Map<number, Set<number>>>>;
+
+interface EntryStateAdmissibilityModel {
+    admissiblePairKeys: AdmissiblePairIndex | null;
+    statesVisited: number;
+}
+
+interface StructuralState {
+    depth: number;
+    prevVariantIndex: number;
+    prevEntryLengthTicks: number;
+    prevDelayTicks: number | null;
+    prevPrevDelayTicks: number | null;
+    prevTransposition: number;
+    nInv: number;
+    nTrunc: number;
+}
+
+type TransitionRuleClass = 'local' | 'prefix-global' | 'terminal/output';
+
+interface RuleClassification {
+    name: string;
+    class: TransitionRuleClass;
+}
+
+const TRANSITION_RULE_CLASSIFICATIONS: RuleClassification[] = [
+    { name: 'pairwise structural compatibility', class: 'local' },
+    { name: 'adjacent transposition separation', class: 'local' },
+    { name: 'triplet harmonic compatibility', class: 'local' },
+    { name: 'structural transform adjacency (inv/trunc repetition)', class: 'local' },
+    { name: 'delay-shape constraints (max expansion / anti-stagnation)', class: 'local' },
+    { name: 'long-delay uniqueness', class: 'prefix-global' },
+    { name: 'voice occupancy and pair-role admissibility', class: 'prefix-global' },
+    { name: 'quota and exception policies', class: 'prefix-global' },
+    { name: 'metric compliance and final scoring', class: 'terminal/output' }
+];
 
 export function passesPairStage(stageStats: StageStats, predicate: boolean): boolean {
     if (!predicate) {
@@ -132,6 +272,121 @@ function runStructuralScanGuard<T>(
     stageStats.structuralScanInvocations++;
     return scan();
 }
+
+function buildEntryStateAdmissibilityModel(
+    variants: SubjectVariant[],
+    transpositions: number[],
+    delayStep: number,
+    targetChainLength: number,
+    options: StrettoSearchOptions
+): EntryStateAdmissibilityModel {
+    const admissiblePairKeys: AdmissiblePairIndex = new Map();
+    const addAdmissiblePair = (vA: number, vB: number, d: number, t: number): void => {
+        let byVB = admissiblePairKeys.get(vA);
+        if (!byVB) { byVB = new Map(); admissiblePairKeys.set(vA, byVB); }
+        let byD = byVB.get(vB);
+        if (!byD) { byD = new Map(); byVB.set(vB, byD); }
+        let byT = byD.get(d);
+        if (!byT) { byT = new Set(); byD.set(d, byT); }
+        byT.add(t);
+    };
+    const stack: StructuralState[] = [{
+        depth: 1,
+        prevVariantIndex: 0,
+        prevEntryLengthTicks: variants[0].lengthTicks,
+        prevDelayTicks: null,
+        prevPrevDelayTicks: null,
+        prevTransposition: 0,
+        nInv: 0,
+        nTrunc: 0
+    }];
+    const visited = new Set<string>();
+
+    while (stack.length > 0) {
+        const state = stack.pop()!;
+        if (state.depth >= targetChainLength) continue;
+
+        let minD = delayStep;
+        let maxD = Math.floor(state.prevEntryLengthTicks * (2 / 3));
+        if (state.depth === 1) {
+            minD = Math.floor(state.prevEntryLengthTicks * 0.5);
+        } else {
+            const prevDelayTicks = state.prevDelayTicks!;
+            const prevSubjectLengthTicks = state.prevEntryLengthTicks;
+
+            minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
+
+            if (state.prevPrevDelayTicks !== null) {
+                const prevPrevDelayTicks = state.prevPrevDelayTicks;
+                if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
+                    maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
+                }
+            }
+
+        }
+
+        minD = Math.ceil(minD / delayStep) * delayStep;
+        maxD = Math.floor(maxD / delayStep) * delayStep;
+        if (minD > maxD) continue;
+
+        for (let delayTicks = minD; delayTicks <= maxD; delayTicks += delayStep) {
+            if (state.depth >= 2) {
+                const prevDelayTicks = state.prevDelayTicks!;
+                const halfSubjectTicks = state.prevEntryLengthTicks / 2;
+                if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
+            }
+
+            for (const relTransposition of transpositions) {
+                if (relTransposition === 0) continue;
+                if (Math.abs(relTransposition) < 5) continue;
+
+                for (let nextVariantIndex = 0; nextVariantIndex < variants.length; nextVariantIndex++) {
+                    const nextVariant = variants[nextVariantIndex];
+                    const isInv = nextVariant.type === 'I';
+                    const isTrunc = nextVariant.truncationBeats > 0;
+
+                    const prevVariant = variants[state.prevVariantIndex];
+                    const prevIsInv = prevVariant.type === 'I';
+                    const prevIsTrunc = prevVariant.truncationBeats > 0;
+                    if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+
+                    if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
+                    if (isTrunc && !checkQuota(options.truncationMode, state.nTrunc)) continue;
+
+                    addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks, relTransposition);
+
+                    const nextInv = state.nInv + (isInv ? 1 : 0);
+                    const nextTrunc = state.nTrunc + (isTrunc ? 1 : 0);
+                    const nextDepth = state.depth + 1;
+                    const nextPrevTransposition = state.prevTransposition + relTransposition;
+                    const visitKey = [
+                        nextDepth,
+                        nextVariantIndex,
+                        delayTicks,
+                        state.prevDelayTicks ?? -1,
+                        nextPrevTransposition,
+                        nextInv,
+                        nextTrunc
+                    ].join('|');
+                    if (visited.has(visitKey)) continue;
+                    visited.add(visitKey);
+                    stack.push({
+                        depth: nextDepth,
+                        prevVariantIndex: nextVariantIndex,
+                        prevEntryLengthTicks: nextVariant.lengthTicks,
+                        prevDelayTicks: delayTicks,
+                        prevPrevDelayTicks: state.prevDelayTicks,
+                        prevTransposition: nextPrevTransposition,
+                        nInv: nextInv,
+                        nTrunc: nextTrunc
+                    });
+                }
+            }
+        }
+    }
+
+    return { admissiblePairKeys, statesVisited: visited.size };
+}
 // --- Precomputation: Scales & Inversion ---
 
 function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offsetTicks: number } {
@@ -141,8 +396,9 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
     // No quantization here - preserve original ticks relative to start
     const startTick = valid[0].ticks;
     
-    // We still need an offset for metric alignment (strong beat detection)
-    // Assuming startTick is absolute, offsetTicks = startTick
+    // Metric offset is the absolute tick of the first subject onset.
+    // It aligns local scan coordinates (relTick-based) to the global metric grid
+    // when evaluating strong-beat predicates.
     const offsetTicks = startTick;
 
     const internalNotes: InternalNote[] = valid.map(n => ({
@@ -158,6 +414,26 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
 
 // Parallel hard-fail policy applies only to P5/P8 classes, never P4.
 const PERFECT_PARALLEL_INTERVALS = new Set([0, 7]);
+
+// Sentinel empty arrays used when span collection is disabled (no allocation).
+const NO_SPANS: SimultaneitySpan[] = [];
+const NO_TICKS: number[] = [];
+
+
+function isForbiddenParallelPerfectMotion(
+    prevIntervalClass: number,
+    deltaVoice1: number,
+    deltaVoice2: number
+): boolean {
+    // Forbidden parallel-perfect motion is defined as:
+    // 1) Previous simultaneity is perfect (P1/P8 class 0 or P5 class 7), and
+    // 2) Both voices move simultaneously by the same non-zero signed amount.
+    // Equal signed deltas preserve interval class, so a perfect previous interval
+    // remains perfect at the current simultaneity.
+    return PERFECT_PARALLEL_INTERVALS.has(prevIntervalClass)
+        && deltaVoice1 !== 0
+        && deltaVoice1 === deltaVoice2;
+}
 
 export function violatesTripletParallelPolicy(
     pairAB: PairwiseCompatibilityRecord,
@@ -187,9 +463,12 @@ export function checkCounterpointStructure(
     delayTicks: number,
     transposition: number,
     maxDissonanceRatio: number,
-    ppqParam: number = 480
-): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, hasParallelPerfect58: boolean } {
-    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam);
+    ppqParam: number = 480,
+    tsNum: number = 4,
+    tsDenom: number = 4,
+    skipSpans: boolean = false
+ ): PairwiseScanResult {
+    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam, tsNum, tsDenom, skipSpans);
 }
 
 export function checkCounterpointStructureWithBassRole(
@@ -199,8 +478,11 @@ export function checkCounterpointStructureWithBassRole(
     transposition: number,
     maxDissonanceRatio: number,
     bassRole: PairwiseBassRole,
-    ppqParam: number = 480
-): { compatible: boolean, dissonanceRatio: number, strongBeatParallels: number, weakBeatParallels: number, hasFourth: boolean, hasVoiceCrossing: boolean, maxDissonanceRunEvents: number, hasParallelPerfect58: boolean } {
+    ppqParam: number = 480,
+    tsNum: number = 4,
+    tsDenom: number = 4,
+    skipSpans: boolean = false
+ ): PairwiseScanResult {
     
     // Collect all time points
     const timePoints = new Set<number>();
@@ -233,6 +515,7 @@ export function checkCounterpointStructureWithBassRole(
     let prevP2: number | null = null;
 
     let dissRunLength = 0;
+    let dissRunTicks = 0;
     let lastIsDiss = false;
 
     let overlapTicks = 0;
@@ -240,10 +523,16 @@ export function checkCounterpointStructureWithBassRole(
     let strongBeatParallels = 0;
     let weakBeatParallels = 0;
     let hasFourth = false;
+    let p4SimultaneityCount = 0;
     let hasVoiceCrossing = false;
     let hasParallelPerfect58 = false;
+    const dissonanceSpans: SimultaneitySpan[] = skipSpans ? NO_SPANS : [];
+    const p4Spans: SimultaneitySpan[] = skipSpans ? NO_SPANS : [];
+    const parallelPerfectStartTicks: number[] = skipSpans ? NO_TICKS : [];
     let previousOrderingSign = 0;
     let maxDissonanceRunEvents = 0;
+    let maxDissonanceRunTicks = 0;
+    const maxAllowedContinuousDissonanceTicks = ppqParam;
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -265,6 +554,7 @@ export function checkCounterpointStructureWithBassRole(
         if (!activeA || !activeB) {
             prevP1 = null; prevP2 = null;
             dissRunLength = 0;
+            dissRunTicks = 0;
             lastIsDiss = false;
             continue;
         }
@@ -281,26 +571,29 @@ export function checkCounterpointStructureWithBassRole(
         const lo = Math.min(p1, p2);
         const hi = Math.max(p1, p2);
         const interval = (hi - lo) % 12;
-        if (interval === 5) hasFourth = true;
+        if (interval === 5) {
+            hasFourth = true;
+            p4SimultaneityCount++;
+            if (!skipSpans) p4Spans.push({ startTick: start, endTick: end });
+        }
 
         // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
         if (prevP1 !== null && prevP2 !== null) {
             const p1Moved = p1 !== prevP1;
             const p2Moved = p2 !== prevP2;
 
-            if (p1Moved && p2Moved) {
-                if (PERFECT_PARALLEL_INTERVALS.has(interval)) {
-                    const prevLo = Math.min(prevP1, prevP2);
-                    const prevHi = Math.max(prevP1, prevP2);
-                    const prevInt = (prevHi - prevLo) % 12;
-                    if (prevInt === interval) {
-                        hasParallelPerfect58 = true;
-                        if (isStrongBeat(start, ppqParam)) {
-                            strongBeatParallels++;
-                        } else {
-                            weakBeatParallels++;
-                        }
-                    }
+            const prevLo = Math.min(prevP1, prevP2);
+            const prevHi = Math.max(prevP1, prevP2);
+            const prevInt = (prevHi - prevLo) % 12;
+            const deltaVoice1 = p1 - prevP1;
+            const deltaVoice2 = p2 - prevP2;
+            if (isForbiddenParallelPerfectMotion(prevInt, deltaVoice1, deltaVoice2)) {
+                hasParallelPerfect58 = true;
+                if (!skipSpans) parallelPerfectStartTicks.push(start);
+                if (isStrongBeat(start, ppqParam, tsNum, tsDenom)) {
+                    strongBeatParallels++;
+                } else {
+                    weakBeatParallels++;
                 }
             }
         }
@@ -315,20 +608,31 @@ export function checkCounterpointStructureWithBassRole(
         }
         
         if (isDiss) {
+            if (!skipSpans) dissonanceSpans.push({ startTick: start, endTick: end });
             dissonantTicks += dur;
             
             // For run length, we count *events* (intervals), not ticks
-            if (!lastIsDiss) dissRunLength = 1;
-            else dissRunLength++;
+            if (!lastIsDiss) {
+                dissRunLength = 1;
+                dissRunTicks = dur;
+            } else {
+                dissRunLength++;
+                dissRunTicks += dur;
+            }
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
+            maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents, hasParallelPerfect58 };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
+
+            // Rule C2b: Continuous dissonance must resolve within one beat.
+            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
 
             lastIsDiss = true;
         } else {
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             dissRunLength = 0;
+            dissRunTicks = 0;
             lastIsDiss = false;
         }
 
@@ -338,18 +642,35 @@ export function checkCounterpointStructureWithBassRole(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents, hasParallelPerfect58 };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
     }
 
     maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, hasVoiceCrossing, maxDissonanceRunEvents, hasParallelPerfect58 };
+    maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks };
 }
 
 // Helper: Determine beat strength
-function isStrongBeat(tick: number, ppq: number): boolean {
-    // Strong if on Beat 1 (0) or Beat 3 (PPQ*2) in 4/4
-    // Generalized: Strong if tick % (PPQ * 2) === 0
-    return (tick % (ppq * 2)) === 0;
+function resolveBeatAndMeasureTicks(ppq: number, tsNum: number, tsDenom: number): { beatTicks: number; measureTicks: number } {
+    const measureTicks = ppq * tsNum * (4 / tsDenom);
+    const isCompound = tsDenom === 8 && tsNum % 3 === 0 && tsNum >= 6;
+    const beatTicks = isCompound ? (3 * ppq) / 2 : ppq * (4 / tsDenom);
+    return { beatTicks, measureTicks };
+}
+
+export function isStrongBeat(tick: number, ppq: number, tsNum: number = 4, tsDenom: number = 4): boolean {
+    const { beatTicks, measureTicks } = resolveBeatAndMeasureTicks(ppq, tsNum, tsDenom);
+    const posInMeasure = ((tick % measureTicks) + measureTicks) % measureTicks;
+    const eps = 1e-6;
+
+    if (Math.abs(posInMeasure) < eps) return true;
+
+    // Rule: only 4/4 and 12/8 carry a second strong pulse at beat 3.
+    const hasSecondStrongPulse = (tsNum === 4 && tsDenom === 4) || (tsNum === 12 && tsDenom === 8);
+    if (!hasSecondStrongPulse) return false;
+
+    const secondStrongTick = 2 * beatTicks;
+    return Math.abs(posInMeasure - secondStrongTick) < eps;
 }
 
 export function isVoicePairAllowedForTransposition(
@@ -380,9 +701,10 @@ export function isVoicePairAllowedForTransposition(
 
 
 export function shouldPruneLowestVoicePair(bassStrictACompatible: boolean, bassStrictBCompatible: boolean): boolean {
-    // Conservative pruning policy requested: if either bass orientation is incompatible,
-    // remove tenor-bass pair assignments for this pair key in both ordered directions.
-    return !bassStrictACompatible || !bassStrictBCompatible;
+    // A tenor-bass assignment should be pruned only when BOTH bass orientations are
+    // incompatible. If only one orientation fails, the opposite orientation can still
+    // participate in valid triplets where another voice carries the true bass function.
+    return !bassStrictACompatible && !bassStrictBCompatible;
 }
 
 export function buildAllowedVoicePairs(
@@ -414,7 +736,9 @@ function checkMetricCompliance(
     variants: SubjectVariant[], 
     variantIndices: number[],
     ppq: number,
-    metricOffset: number = 0
+    metricOffset: number = 0,
+    tsNum: number = 4,
+    tsDenom: number = 4
 ): boolean {
 
     const newStartTick = Math.round(newEntry.startBeat * ppq);
@@ -522,7 +846,7 @@ function checkMetricCompliance(
             if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
             // Corrected Metric Check using Absolute Grid alignment
-            const isStrong = isStrongBeat(start + metricOffset, ppq);
+            const isStrong = isStrongBeat(start + metricOffset, ppq, tsNum, tsDenom);
 
             if (isDiss) {
                 if (!lastIsDiss) dissRunLength = 1; else dissRunLength++;
@@ -537,7 +861,7 @@ function checkMetricCompliance(
                     // Original logic: if current is strong, fail.
                     // Also check if previous was strong.
                     const prevStart = sortedPoints[i-1]; // Safe because dissRunLength=2 implies i>=1
-                    const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq);
+                    const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq, tsNum, tsDenom);
                     if (isStrong || prevIsStrong) return false; 
                 }
                 
@@ -561,7 +885,6 @@ export async function searchStrettoChains(
     ppq: number
 ): Promise<StrettoSearchReport> {
 
-    const toPairKey = (vA: number, vB: number, d: number, t: number): string => `${vA}_${vB}_${d}_${t}`;
     const toTripleKey = (vA: number, vB: number, vC: number, d1: number, d2: number, t1: number, t2: number): string => toCanonicalTripletKey({
         variantA: vA,
         variantB: vB,
@@ -571,17 +894,79 @@ export async function searchStrettoChains(
         transpositionAB: t1,
         transpositionBC: t2
     });
-    
+
+    const pairwiseCompatibleTriplets: PairwiseByVariantA = new Map();
+    const validPairsList: PairTuple[] = [];
+
+    const setPairRecord = (vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void => {
+        let byVariantB = pairwiseCompatibleTriplets.get(vA);
+        if (!byVariantB) {
+            byVariantB = new Map();
+            pairwiseCompatibleTriplets.set(vA, byVariantB);
+        }
+        let byDelay = byVariantB.get(vB);
+        if (!byDelay) {
+            byDelay = new Map();
+            byVariantB.set(vB, byDelay);
+        }
+        let byTransposition = byDelay.get(d);
+        if (!byTransposition) {
+            byTransposition = new Map();
+            byDelay.set(d, byTransposition);
+        }
+        if (byTransposition.has(t)) return;
+        byTransposition.set(t, record);
+        validPairsList.push({ vA, vB, d, t });
+    };
+
+    const getPairRecord = (vA: number, vB: number, d: number, t: number): PairwiseCompatibilityRecord | undefined => {
+        return pairwiseCompatibleTriplets.get(vA)?.get(vB)?.get(d)?.get(t);
+    };
+
+    const transitionsByWindow: TransitionByVariantLeft = new Map();
+    const appendWindowTransition = (variantLeft: number, variantRight: number, delayTicks: number, transpositionDelta: number, transition: NextTransition): void => {
+        let byVariantRight = transitionsByWindow.get(variantLeft);
+        if (!byVariantRight) {
+            byVariantRight = new Map();
+            transitionsByWindow.set(variantLeft, byVariantRight);
+        }
+        let byDelay = byVariantRight.get(variantRight);
+        if (!byDelay) {
+            byDelay = new Map();
+            byVariantRight.set(variantRight, byDelay);
+        }
+        let byTranspositionDelta = byDelay.get(delayTicks);
+        if (!byTranspositionDelta) {
+            byTranspositionDelta = new Map();
+            byDelay.set(delayTicks, byTranspositionDelta);
+        }
+        let transitionsAtDelay = byTranspositionDelta.get(transpositionDelta);
+        if (!transitionsAtDelay) {
+            transitionsAtDelay = new Map();
+            byTranspositionDelta.set(transpositionDelta, transitionsAtDelay);
+        }
+        const bucket = transitionsAtDelay.get(transition.delayTicks);
+        if (bucket) bucket.push(transition);
+        else transitionsAtDelay.set(transition.delayTicks, [transition]);
+    };
+
+    const getWindowTransitions = (variantLeft: number, variantRight: number, delayTicks: number, transpositionDelta: number): TransitionBucketsByDelay | undefined => {
+        return transitionsByWindow.get(variantLeft)?.get(variantRight)?.get(delayTicks)?.get(transpositionDelta);
+    };
+
     const startTime = Date.now();
     let nodesVisited = 0;
     let edgesTraversed = 0;
     let maxDepth = 0;
     let operationCounter = 0;
-    let activeTimeLimitMs = TIME_LIMIT_MS;
+    const configuredTimeLimitMs = Number.isFinite(options.maxSearchTimeMs) ? Math.max(1, Math.floor(options.maxSearchTimeMs as number)) : DEFAULT_TIME_LIMIT_MS;
+    let activeTimeLimitMs = configuredTimeLimitMs;
     let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
+    const tsNum = options.meterNumerator ?? 4;
+    const tsDenom = options.meterDenominator ?? 4;
     if (baseNotes.length === 0) {
         return {
             results: [],
@@ -590,6 +975,7 @@ export async function searchStrettoChains(
                 timeMs: 0,
                 stopReason: 'Exhausted',
                 maxDepthReached: 0,
+                metricOffsetTicks: offsetTicks,
                 stageStats: {
                     validDelayCount: 0,
                     transpositionCount: 0,
@@ -597,17 +983,26 @@ export async function searchStrettoChains(
                     pairwiseCompatible: 0,
                     pairwiseWithFourth: 0,
                     pairwiseWithVoiceCrossing: 0,
+                    pairwiseP4TwoVoiceDissonant: 0,
+                    pairwiseParallelRejected: 0,
                     tripleCandidates: 0,
                     triplePairwiseRejected: 0,
                     tripleLowerBoundRejected: 0,
                     tripleParallelRejected: 0,
                     tripleVoiceRejected: 0,
+                    tripleP4BassRejected: 0,
                     harmonicallyValidTriples: 0,
                     deterministicDagMergedNodes: 0,
                     pairStageRejected: 0,
                     tripletStageRejected: 0,
                     globalLineageStageRejected: 0,
-                    structuralScanInvocations: 0
+                    structuralScanInvocations: 0,
+                    dissonanceSpans: [],
+                    p4Spans: [],
+                    parallelPerfectLocationTicks: [],
+                    transitionWindowLookups: 0,
+                    transitionsReturned: 0,
+                    candidateTransitionsEnumerated: 0
                 }
             }
         };
@@ -654,8 +1049,6 @@ export async function searchStrettoChains(
         }
     }
 
-    const pairwiseCompatibleTriplets = new Map<string, PairwiseCompatibilityRecord>();
-    const strictPairwiseBassCache = new Map<string, boolean>();
     const validDelays: number[] = [];
     const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
     
@@ -667,7 +1060,8 @@ export async function searchStrettoChains(
     if (options.thirdSixthMode !== 'None') {
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
-    
+    const allowedTranspositions = new Set(transpositions);
+
     const stageStats: StageStats = {
         validDelayCount: validDelays.length,
         transpositionCount: transpositions.length,
@@ -675,72 +1069,155 @@ export async function searchStrettoChains(
         pairwiseCompatible: 0,
         pairwiseWithFourth: 0,
         pairwiseWithVoiceCrossing: 0,
+        pairwiseP4TwoVoiceDissonant: 0,
+        pairwiseParallelRejected: 0,
         tripleCandidates: 0,
         triplePairwiseRejected: 0,
         tripleLowerBoundRejected: 0,
         tripleParallelRejected: 0,
         tripleVoiceRejected: 0,
+        tripleP4BassRejected: 0,
         harmonicallyValidTriples: 0,
         deterministicDagMergedNodes: 0,
         pairStageRejected: 0,
         tripletStageRejected: 0,
         globalLineageStageRejected: 0,
-        structuralScanInvocations: 0
+        structuralScanInvocations: 0,
+        dissonanceSpans: [],
+        p4Spans: [],
+        parallelPerfectLocationTicks: [],
+        transitionWindowLookups: 0,
+        transitionsReturned: 0,
+        candidateTransitionsEnumerated: 0
     };
 
+    const collectSpans = options.collectDiagnosticSpans === true;
+    const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
+    const entryStateAdmissibilityModel = forceFullPairwiseDiagnostic
+        ? { admissiblePairKeys: null, statesVisited: 0 }
+        : buildEntryStateAdmissibilityModel(variants, transpositions, delayStep, options.targetChainLength, options);
+
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
+    // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
+    // Also precompute interval class metadata for quota checks.
     for (let iA = 0; iA < variants.length; iA++) {
         const vA = variants[iA];
         for (let iB = 0; iB < variants.length; iB++) {
             const vB = variants[iB];
             for (const d of validDelays) {
                 for (const t of transpositions) {
+                    const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
+                    if (admissiblePairKeys && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
+                        continue;
+                    }
                     stageStats.pairwiseTotal++;
+
                     operationCounter++;
                     if (shouldYieldToEventLoop(operationCounter)) {
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
                     }
-                    const key = toPairKey(iA, iB, d, t);
-                    const pairScan = runStructuralScanGuard(
-                        stageStats,
-                        d > 0,
-                        true,
-                        true,
-                        () => checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, ppq)
-                    );
-                    if (!pairScan || !pairScan.compatible) continue;
 
-                    const bassStrictA = runStructuralScanGuard(
-                        stageStats,
-                        true,
-                        true,
-                        true,
-                        () => checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'a', ppq)
-                    );
-                    const bassStrictB = runStructuralScanGuard(
-                        stageStats,
-                        true,
-                        true,
-                        true,
-                        () => checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance + 0.05, 'b', ppq)
-                    );
-                    if (!bassStrictA || !bassStrictB) continue;
+                    // Neutral scan (P4 treated as provisionally consonant)
+                    stageStats.structuralScanInvocations++;
+                    const pairScan = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'none', ppq, tsNum, tsDenom, !collectSpans);
+                    if (collectSpans) {
+                        appendUniqueSpansCapped(stageStats.dissonanceSpans, pairScan.dissonanceSpans);
+                        appendUniqueSpansCapped(stageStats.p4Spans, pairScan.p4Spans);
+                        appendUniqueCapped(stageStats.parallelPerfectLocationTicks, pairScan.parallelPerfectStartTicks);
+                    }
+                    if (!pairScan.compatible) {
+                        stageStats.pairStageRejected++;
+                        continue;
+                    }
+
+                    // Disallowed parallel perfects are strict pairwise failures:
+                    // perfect fifth (P5 class 7) and perfect octave/unison (P8/P1 class 0).
+                    if (pairScan.hasParallelPerfect58) {
+                        stageStats.pairwiseParallelRejected++;
+                        stageStats.pairStageRejected++;
+                        continue;
+                    }
+
+                    // Bass-role scans are only needed when at least one P4 occurs.
+                    // Without P4 simultaneities, bassRole cannot change dissonance classification,
+                    // so neutral scan data is exact for roles a/b as well.
+                    const requiresBassRoleRescan = pairScan.hasFourth;
+                    const bassStrictA = requiresBassRoleRescan
+                        ? (() => {
+                            stageStats.structuralScanInvocations++;
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom, true);
+                        })()
+                        : pairScan;
+                    const bassStrictB = requiresBassRoleRescan
+                        ? (() => {
+                            stageStats.structuralScanInvocations++;
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom, true);
+                        })()
+                        : pairScan;
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
-                    if (!passesGlobalLineageStage(stageStats, allowedVoicePairs.size > 0)) continue;
+                    if (allowedVoicePairs.size === 0) {
+                        stageStats.pairStageRejected++;
+                        continue;
+                    }
 
-                    pairwiseCompatibleTriplets.set(key, {
+                    // Precompute interval class for quota checks during traversal
+                    const intervalClass = ((t % 12) + 12) % 12;
+                    const isRestrictedInterval = [3, 4, 8, 9].includes(intervalClass);
+                    const isFreeInterval = [0, 5, 7].includes(intervalClass);
+
+                    // If P4 exists and only 2 voices are active at those points,
+                    // the P4 is immediately dissonant (no other voice can provide the bass below).
+                    // This is a cheap pruning rule: in a pairwise context, if hasFourth is true,
+                    // the lower note IS the bass by definition (only 2 voices sounding).
+                    // So check: does treating ALL P4s as dissonant violate the pair?
+                    // The bassStrictA/B scans already capture this per-role.
+                    // For the "2 voices only" case, both bass-role results tell us the full story.
+
+                    setPairRecord(iA, iB, d, t, {
                         dissonanceRatio: pairScan.dissonanceRatio,
                         hasFourth: pairScan.hasFourth,
+                        p4SimultaneityCount: pairScan.p4SimultaneityCount,
                         hasVoiceCrossing: pairScan.hasVoiceCrossing,
                         maxDissonanceRunEvents: pairScan.maxDissonanceRunEvents,
+                        maxDissonanceRunTicks: pairScan.maxDissonanceRunTicks,
+                        maxAllowedContinuousDissonanceTicks: ppq,
                         hasParallelPerfect58: pairScan.hasParallelPerfect58,
+                        dissonanceSpans: pairScan.dissonanceSpans,
+                        p4Spans: pairScan.p4Spans,
+                        parallelPerfectStartTicks: pairScan.parallelPerfectStartTicks,
                         disallowLowestPair,
-                        allowedVoicePairs
+                        allowedVoicePairs,
+                        bassRoleCompatible: {
+                            none: pairScan.compatible,
+                            a: bassStrictA.compatible,
+                            b: bassStrictB.compatible
+                        },
+                        bassRoleDissonanceRatio: {
+                            none: pairScan.dissonanceRatio,
+                            a: bassStrictA.dissonanceRatio,
+                            b: bassStrictB.dissonanceRatio
+                        },
+                        bassRoleMaxRunEvents: {
+                            none: pairScan.maxDissonanceRunEvents,
+                            a: bassStrictA.maxDissonanceRunEvents,
+                            b: bassStrictB.maxDissonanceRunEvents
+                        },
+                        intervalClass,
+                        isRestrictedInterval,
+                        isFreeInterval,
+                        meetsAdjacentTranspositionSeparation: Math.abs(t) >= 5
                     });
                     stageStats.pairwiseCompatible++;
-                    if (pairScan.hasFourth) stageStats.pairwiseWithFourth++;
+                    if (pairScan.hasFourth) {
+                        stageStats.pairwiseWithFourth++;
+                        // In pairwise context (only 2 voices), if either bass-role scan
+                        // is incompatible due to P4, the P4 acts as dissonant.
+                        if (!bassStrictA.compatible || !bassStrictB.compatible) {
+                            stageStats.pairwiseP4TwoVoiceDissonant++;
+                        }
+                    }
                     if (pairScan.hasVoiceCrossing) stageStats.pairwiseWithVoiceCrossing++;
                 }
             }
@@ -749,21 +1226,16 @@ export async function searchStrettoChains(
 
     // --- PRECOMPUTE TRIPLES ---
     const harmonicallyValidTriples = new Set<string>();
-    const validPairsList: {vA: number, vB: number, d: number, t: number}[] = [];
-    pairwiseCompatibleTriplets.forEach((_, key) => {
-        const [vA, vB, d, t] = key.split('_').map(Number);
-        validPairsList.push({vA, vB, d, t});
-    });
+    // Numeric window-transition index is precomputed once so expandNode never rebuilds it.
 
-    const pairsByFirst = new Map<number, typeof validPairsList>();
+    const pairsByFirst = new Map<number, PairTuple[]>();
     for (const p of validPairsList) {
         if (!pairsByFirst.has(p.vA)) pairsByFirst.set(p.vA, []);
         pairsByFirst.get(p.vA)!.push(p);
     }
 
     for (const p1 of validPairsList) {
-        const keyAB = toPairKey(p1.vA, p1.vB, p1.d, p1.t);
-        const pairAB = pairwiseCompatibleTriplets.get(keyAB);
+        const pairAB = getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
 
         const nextPairs = pairsByFirst.get(p1.vB) || [];
@@ -773,18 +1245,12 @@ export async function searchStrettoChains(
             if (shouldYieldToEventLoop(operationCounter)) {
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
             }
-            const keyBC = toPairKey(p2.vA, p2.vB, p2.d, p2.t);
-            const pairBC = pairwiseCompatibleTriplets.get(keyBC);
+            const pairBC = getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
             if (!pairBC) continue;
 
             const d1 = p1.d;
             const d2 = p2.d;
 
-            if (!passesTripletStage(stageStats, !violatesTripletParallelPolicy(pairAB, pairBC, d1, d2, subjectLengthTicks))) {
-                stageStats.tripleParallelRejected++;
-                continue;
-            }
-            
             // Rule: Max Expansion (using ticks, assuming step size)
             if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
             
@@ -796,8 +1262,7 @@ export async function searchStrettoChains(
             
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
-                const keyAC = toPairKey(vA, vC, dAC, tAC);
-                const pairAC = pairwiseCompatibleTriplets.get(keyAC);
+                const pairAC = getPairRecord(vA, vC, dAC, tAC);
                 if (!passesTripletStage(stageStats, !!pairAC)) {
                     stageStats.triplePairwiseRejected++;
                     continue;
@@ -814,60 +1279,113 @@ export async function searchStrettoChains(
             // Rule: Voice Spacing for the Triple
             const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
             if (!passesGlobalLineageStage(stageStats, trans[2] - trans[0] >= 7)) continue;
-            
+
+            // Use precomputed allowedVoicePairs from pairwise records to constrain
+            // the triplet voice assignment. The pairwise records already encode
+            // spacing rules (neighbor, 2-gap, bass-alto), so we intersect them.
+            const pairAC_rec = (dAC < lenA) ? getPairRecord(vA, vC, dAC, tAC) ?? null : null;
+
             let possibleAssignment = false;
-            for (let v1=0; v1<options.ensembleTotal; v1++) {
-                for (let v2=0; v2<options.ensembleTotal; v2++) {
-                    if (v1===v2) continue;
-                    for (let v3=0; v3<options.ensembleTotal; v3++) {
-                        if (v1===v3 || v2===v3) continue;
-                        
-                        const testChain = [
-                            { voiceIndex: v1, transposition: 0 },
-                            { voiceIndex: v2, transposition: p1.t },
-                            { voiceIndex: v3, transposition: p1.t + p2.t }
-                        ];
-                        
-                        let assignmentFail = false;
-                        for (let i=0; i<3; i++) {
-                            for (let j=i+1; j<3; j++) {
-                                const a = testChain[i];
-                                const b = testChain[j];
-                                
-                                const highV = Math.min(a.voiceIndex, b.voiceIndex);
-                                const lowV = Math.max(a.voiceIndex, b.voiceIndex);
-                                const highT = highV === a.voiceIndex ? a.transposition : b.transposition;
-                                const lowT = lowV === a.voiceIndex ? a.transposition : b.transposition;
-                                const dist = lowV - highV;
-                                
-                                if (highT < lowT) assignmentFail = true;
-                                if (dist === 2 && highT < lowT + 7) assignmentFail = true;
-                                if (dist >= 3 && highT < lowT + 12) assignmentFail = true;
-                                
-                                const bassIdx = options.ensembleTotal - 1;
-                                const altoIdx = bassIdx - 2;
-                                if (bassIdx >= 2 && lowV === bassIdx && highV === altoIdx) {
-                                    if (highT < lowT + 12) assignmentFail = true;
-                                }
+            const bassIdx = options.ensembleTotal - 1;
+            for (let v1 = 0; v1 < options.ensembleTotal; v1++) {
+                for (let v2 = 0; v2 < options.ensembleTotal; v2++) {
+                    if (v1 === v2) continue;
+                    // Check AB voice pair admissibility from precomputed set
+                    if (!pairAB.allowedVoicePairs.has(`${v1}->${v2}`)) continue;
+
+                    for (let v3 = 0; v3 < options.ensembleTotal; v3++) {
+                        if (v1 === v3 || v2 === v3) continue;
+                        // Check BC voice pair admissibility from precomputed set
+                        if (!pairBC.allowedVoicePairs.has(`${v2}->${v3}`)) continue;
+                        // Check AC voice pair if overlapping
+                        if (pairAC_rec && !pairAC_rec.allowedVoicePairs.has(`${v1}->${v3}`)) continue;
+
+                        // P4 bass-role check at triplet level:
+                        // With 3 known voices, determine if any P4-containing pair has
+                        // its lower note as the actual bass of the sonority.
+                        let p4Fail = false;
+
+                        // For each pair with P4, check if the assigned voice role
+                        // makes the P4 dissonant (lower note = bass voice).
+                        if (pairAB.hasFourth) {
+                            // Determine bass role for this AB pair given v1, v2
+                            let abBassRole: PairwiseBassRole = 'none';
+                            if (v1 === bassIdx && v2 !== bassIdx) abBassRole = 'a';
+                            else if (v2 === bassIdx && v1 !== bassIdx) abBassRole = 'b';
+                            // If only 2 voices active in the P4 region AND no 3rd voice
+                            // provides a lower pitch, the P4 IS against the bass.
+                            // Use precomputed bass-role compatibility.
+                            if (abBassRole !== 'none' && !pairAB.bassRoleCompatible[abBassRole]) {
+                                p4Fail = true;
                             }
                         }
-                        if (!assignmentFail) {
-                            possibleAssignment = true;
-                            break;
+                        if (!p4Fail && pairBC.hasFourth) {
+                            let bcBassRole: PairwiseBassRole = 'none';
+                            if (v2 === bassIdx && v3 !== bassIdx) bcBassRole = 'a';
+                            else if (v3 === bassIdx && v2 !== bassIdx) bcBassRole = 'b';
+                            if (bcBassRole !== 'none' && !pairBC.bassRoleCompatible[bcBassRole]) {
+                                p4Fail = true;
+                            }
                         }
+                        if (!p4Fail && pairAC_rec && pairAC_rec.hasFourth) {
+                            let acBassRole: PairwiseBassRole = 'none';
+                            if (v1 === bassIdx && v3 !== bassIdx) acBassRole = 'a';
+                            else if (v3 === bassIdx && v1 !== bassIdx) acBassRole = 'b';
+                            if (acBassRole !== 'none' && !pairAC_rec.bassRoleCompatible[acBassRole]) {
+                                p4Fail = true;
+                            }
+                        }
+
+                        if (p4Fail) {
+                            continue;
+                        }
+
+                        possibleAssignment = true;
+                        break;
                     }
                     if (possibleAssignment) break;
                 }
                 if (possibleAssignment) break;
             }
-            
-            if (!passesGlobalLineageStage(stageStats, possibleAssignment)) {
-                stageStats.tripleVoiceRejected++;
+
+            if (!possibleAssignment) {
+                // Determine if the rejection was P4-related or voice-spacing-related.
+                // Re-check without P4 to classify.
+                let spacingFail = true;
+                for (let v1 = 0; v1 < options.ensembleTotal && spacingFail; v1++) {
+                    for (let v2 = 0; v2 < options.ensembleTotal && spacingFail; v2++) {
+                        if (v1 === v2) continue;
+                        if (!pairAB.allowedVoicePairs.has(`${v1}->${v2}`)) continue;
+                        for (let v3 = 0; v3 < options.ensembleTotal && spacingFail; v3++) {
+                            if (v1 === v3 || v2 === v3) continue;
+                            if (!pairBC.allowedVoicePairs.has(`${v2}->${v3}`)) continue;
+                            if (pairAC_rec && !pairAC_rec.allowedVoicePairs.has(`${v1}->${v3}`)) continue;
+                            spacingFail = false;
+                        }
+                    }
+                }
+                if (spacingFail) {
+                    stageStats.tripleVoiceRejected++;
+                } else {
+                    stageStats.tripleP4BassRejected++;
+                }
+                passesGlobalLineageStage(stageStats, false);
                 continue;
             }
             
             const key = toTripleKey(vA, p1.vB, vC, d1, d2, p1.t, p2.t);
             harmonicallyValidTriples.add(key);
+
+            const nextTransition: NextTransition = {
+                nextVariantIndex: vC,
+                delayTicks: d2,
+                transpositionDelta: p2.t,
+                pairRecord: pairBC,
+                isRestrictedInterval: pairBC.isRestrictedInterval,
+                isFreeInterval: pairBC.isFreeInterval
+            };
+            appendWindowTransition(vA, p1.vB, d1, p1.t, nextTransition);
+
             stageStats.harmonicallyValidTriples++;
         }
     }
@@ -906,21 +1424,58 @@ export async function searchStrettoChains(
         nTrunc: number;
         nRestricted: number;
         nFree: number;
+        usedLongDelays: Set<number>; // A.1: delays > Sb/3 must be globally unique
+        longDelaySignature: string;
     }
 
-    function getBoundarySignature(chain: StrettoChainOption[]): string {
-        return toOrderedBoundarySignature(chain, ppq);
-    }
-
+    // --- Active-tail DAG key ---
+    // Two nodes are merge-equivalent if they produce the same set of future expansions.
+    // Future expansion depends ONLY on:
+    //   1. Entries still sounding ("active") — these determine overlap pair checks for new candidates
+    //   2. The transition window (last 2 entries) — for indexed transition lookups
+    //   3. The previous-previous delay — for expansion recoil (when the 3rd-to-last entry is inactive)
+    //   4. Quotas (nInv, nTrunc, nRestricted, nFree)
+    //   5. Used long delays (A.1 uniqueness)
+    // Items 1-2 subsume voice end times: active entries fully determine which voices are occupied;
+    // non-active voices are always available since their end time <= lastEntry.startTick < any candidate.
     function getDagNodeKey(node: DagNode): string {
-        const chainSig = getChainSignature(node.chain);
-        const boundarySig = getBoundarySignature(node.chain);
-        return `${chainSig}|${boundarySig}|v:${node.voiceEndTimesTicks.join(',')}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}`;
+        const depth = node.chain.length;
+        if (depth <= 1) return 'root';
+
+        const lastEntry = node.chain[depth - 1];
+        const lastStartTicks = Math.round(lastEntry.startBeat * ppq);
+
+        // Active entries: entries whose sound extends past the last entry's start time.
+        // Only these can overlap with future candidates (which start after lastEntry).
+        // The last entry itself is always active; encode it and all earlier still-sounding entries.
+        let activeSig = '';
+        for (let k = depth - 1; k >= 0; k--) {
+            const e = node.chain[k];
+            const eStart = Math.round(e.startBeat * ppq);
+            // Upper-bound early termination: if even the longest variant can't reach lastStartTicks
+            // from this entry's start, no earlier entry can either.
+            if (eStart + subjectLengthTicks <= lastStartTicks) break;
+            const eEnd = eStart + variants[node.variantIndices[k]].lengthTicks;
+            if (eEnd > lastStartTicks) {
+                activeSig += `${node.variantIndices[k]},${eStart},${e.transposition},${e.voiceIndex};`;
+            }
+        }
+
+        // Previous-previous delay: needed for expansion recoil (A.3) when depth >= 3.
+        // If the 3rd-to-last entry is active, this is derivable from activeSig; including
+        // it explicitly is cheap and handles the case where it has gone inactive.
+        let prevPrevDelay = -1;
+        if (depth >= 3) {
+            prevPrevDelay = Math.round(node.chain[depth - 2].startBeat * ppq)
+                         - Math.round(node.chain[depth - 3].startBeat * ppq);
+        }
+
+        return `${depth}|${activeSig}|pp:${prevPrevDelay}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${node.longDelaySignature}`;
     }
 
     function expandNode(node: DagNode): DagNode[] {
         const successors: DagNode[] = [];
-        const { chain, variantIndices, voiceEndTimesTicks, nInv, nTrunc, nRestricted, nFree } = node;
+        const { chain, variantIndices, voiceEndTimesTicks, nInv, nTrunc, nRestricted, nFree, usedLongDelays, longDelaySignature } = node;
         const depth = chain.length;
         const prevEntry = chain[depth - 1];
 
@@ -937,8 +1492,15 @@ export async function searchStrettoChains(
             const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const prevSubjectLengthTicks = chain[depth - 1].length;
 
-            if (prevDelayTicks > (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
+            // Long-delay contraction (OR form):
+            // if d_i >= 0.5*Sl OR d_{i+1} >= 0.5*Sl, then d_{i+1} < d_i.
+            // Candidate-side (d_{i+1}) portion is applied below during per-candidate filtering.
+            if (prevDelayTicks >= (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
             else maxD = Math.min(maxD, prevDelayTicks + delayStep);
+
+            // Maximum contraction bound:
+            // d_i - d_{i+1} <= 0.25*Sl  =>  d_{i+1} >= d_i - 0.25*Sl.
+            minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
 
             if (depth >= 3) {
                 const prevPrevDelayTicks = Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq);
@@ -958,7 +1520,37 @@ export async function searchStrettoChains(
         for (let d = minD; d <= maxD; d += delayStep) possibleDelaysTicks.push(d);
         possibleDelaysTicks.sort((a, b) => a - b);
 
+        let indexedTransitionsByDelay: TransitionBucketsByDelay | null = null;
+        if (depth >= 2) {
+            const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
+            const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
+            stageStats.transitionWindowLookups++;
+            const windowMap = getWindowTransitions(
+                variantIndices[depth - 2],
+                variantIndices[depth - 1],
+                windowDelayTicks,
+                windowTranspositionDelta
+            );
+            if (windowMap) {
+                stageStats.transitionsReturned += windowMap.size;
+                indexedTransitionsByDelay = windowMap;
+            }
+
+            // No indexed transition window means the chain prefix cannot be extended
+            // under the second-order transition model; prune immediately.
+            if (!indexedTransitionsByDelay || indexedTransitionsByDelay.size === 0) {
+                return successors;
+            }
+        }
+
         for (const delayTicks of possibleDelaysTicks) {
+            // A.1 Global Uniqueness: delays > Sb/3 must be unique across the chain.
+            // O(1) set membership check per candidate delay.
+            if (delayTicks > oneThirdSubjectTicks && usedLongDelays.has(delayTicks)) {
+                stageStats.globalLineageStageRejected++;
+                continue;
+            }
+
             if (depth >= 2) {
                 const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
                 if (Math.abs(delayTicks - prevDelayTicks) < 1) {
@@ -970,170 +1562,182 @@ export async function searchStrettoChains(
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
-            const seenClasses = new Set<number>();
-            const fresh: number[] = [];
-            const deferred: number[] = [];
             const prevTransposition = chain[chain.length - 1].transposition;
-            for (const t of transpositions) {
-                const tClass = ((t - prevTransposition) % 12 + 12) % 12;
-                if (seenClasses.has(tClass)) {
-                    deferred.push(t);
+            const candidateTransitions: { varIdx: number; t: number; immPair: PairwiseCompatibilityRecord; isRestricted: boolean; isFree: boolean }[] = [];
+
+            if (depth >= 2) {
+                const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks);
+                if (!indexedTransitions || indexedTransitions.length === 0) {
                     continue;
                 }
-                if (t === prevTransposition) {
-                    fresh.push(t);
-                    continue;
+                for (const transition of indexedTransitions) {
+                    const t = prevTransposition + transition.transpositionDelta;
+                    if (t === prevTransposition) continue;
+                    if (!allowedTranspositions.has(t)) continue;
+                    if (!transition.pairRecord!.meetsAdjacentTranspositionSeparation) continue;
+                    stageStats.candidateTransitionsEnumerated++;
+                    candidateTransitions.push({
+                        varIdx: transition.nextVariantIndex,
+                        t,
+                        immPair: transition.pairRecord!,
+                        isRestricted: transition.isRestrictedInterval!,
+                        isFree: transition.isFreeInterval!
+                    });
                 }
-                fresh.push(t);
-                seenClasses.add(tClass);
-            }
-            const orderedTranspositions = [...fresh, ...deferred];
-
-            for (const t of orderedTranspositions) {
-                if (t === prevTransposition) continue;
-
-                for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-                    if (depth >= 2) {
-                        const vA = variantIndices[depth - 2];
-                        const vB = variantIndices[depth - 1];
-                        const vC = varIdx;
-                        const d1 = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-                        const d2 = delayTicks;
-                        const t1 = chain[depth - 1].transposition - chain[depth - 2].transposition;
-                        const t2 = t - chain[depth - 1].transposition;
-                        const tripleKey = toTripleKey(vA, vB, vC, d1, d2, t1, t2);
-                        if (!harmonicallyValidTriples.has(tripleKey)) continue;
+            } else {
+                const seenClasses = new Set<number>();
+                const fresh: number[] = [];
+                const deferred: number[] = [];
+                for (const t of transpositions) {
+                    const tClass = ((t - prevTransposition) % 12 + 12) % 12;
+                    if (seenClasses.has(tClass)) {
+                        deferred.push(t);
+                        continue;
                     }
+                    if (t === prevTransposition) {
+                        fresh.push(t);
+                        continue;
+                    }
+                    fresh.push(t);
+                    seenClasses.add(tClass);
+                }
+                const orderedTranspositions = [...fresh, ...deferred];
+                for (const t of orderedTranspositions) {
+                    if (t === prevTransposition) continue;
+                    if (!allowedTranspositions.has(t)) continue;
+                    for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                        const immPrevVarIdx = variantIndices[depth - 1];
+                        const immRelTrans = t - chain[depth - 1].transposition;
+                        const immPair = getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
+                        if (!immPair) continue;
+                        if (!immPair.meetsAdjacentTranspositionSeparation) continue;
+                        stageStats.candidateTransitionsEnumerated++;
+                        candidateTransitions.push({
+                            varIdx,
+                            t,
+                            immPair,
+                            isRestricted: immPair.isRestrictedInterval,
+                            isFree: immPair.isFreeInterval
+                        });
+                    }
+                }
+            }
 
-                    const variant = variants[varIdx];
-                    const isInv = variant.type === 'I';
-                    const isTrunc = variant.truncationBeats > 0;
-                    if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
-                    if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
+            for (const { varIdx, t, immPair, isRestricted, isFree } of candidateTransitions) {
+                const variant = variants[varIdx];
+                const isInv = variant.type === 'I';
+                const isTrunc = variant.truncationBeats > 0;
 
-                    const intervalClass = Math.abs(t % 12);
-                    const isRestricted = [3, 4, 8, 9].includes(intervalClass);
-                    const isFree = [0, 7].includes(intervalClass) || intervalClass === 5;
-                    const nextRestricted = nRestricted + (isRestricted ? 1 : 0);
+                // Structural transform-following rule:
+                // any transformed predecessor (inversion OR truncation) must be followed by a normal entry.
+                // This is an O(1) local-state check using the predecessor variant index.
+                const prevVariant = variants[variantIndices[depth - 1]];
+                const prevIsInv = prevVariant.type === 'I';
+                const prevIsTrunc = prevVariant.truncationBeats > 0;
+                if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+
+                if (depth >= 2) {
+                    const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
+                    const prevSubjectLengthTicks = chain[depth - 1].length;
+                    const halfSubjectTicks = prevSubjectLengthTicks / 2;
+
+                    // Long-delay contraction (OR form):
+                    // if either previous or current delay is at least half subject length, enforce contraction.
+                    if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
+                }
+
+                if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
+                if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
+
+                const nextRestricted = nRestricted + (isRestricted ? 1 : 0);
                     const nextFree = nFree + (isFree ? 1 : 0);
 
                     if (nextRestricted > 1 && nextRestricted >= nextFree) continue;
                     if (isRestricted && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
                     if (options.disallowComplexExceptions && (isInv || isTrunc) && isRestricted) continue;
 
-                    const overlappingPairs = new Map<StrettoChainOption, { prevVarIdx: number; relDelay: number; relTrans: number; key: string; pairRecord: PairwiseCompatibilityRecord }>();
+                    // Collect overlapping pairwise records for this candidate.
+                    // Iterate backward: entries are chronologically ordered, so once an
+                    // entry's start + maxVariantLength can't reach the candidate, no
+                    // earlier entry can overlap either.
+                    const overlappingPairs: { entry: StrettoChainOption; pairRecord: PairwiseCompatibilityRecord }[] = [];
                     let harmonicFail = false;
-                    for (let k = 0; k < chain.length; k++) {
+                    for (let k = chain.length - 2; k >= 0; k--) {
                         const prevE = chain[k];
-                        const prevVarIdx = variantIndices[k];
                         const prevStartTicks = Math.round(prevE.startBeat * ppq);
+                        if (prevStartTicks + subjectLengthTicks <= absStartTicks) break;
+                        const prevVarIdx = variantIndices[k];
                         const prevEndTicks = prevStartTicks + variants[prevVarIdx].lengthTicks;
+                        if (absStartTicks >= prevEndTicks) continue;
 
-                        if (absStartTicks < prevEndTicks) {
-                            const relDelay = absStartTicks - prevStartTicks;
-                            const relTrans = t - prevE.transposition;
-                            const key = toPairKey(prevVarIdx, varIdx, relDelay, relTrans);
-                            const pairRecord = pairwiseCompatibleTriplets.get(key);
-                            if (!pairRecord) {
-                                harmonicFail = true;
-                                break;
-                            }
-                            overlappingPairs.set(prevE, { prevVarIdx, relDelay, relTrans, key, pairRecord });
+                        const relDelay = absStartTicks - prevStartTicks;
+                        const relTrans = t - prevE.transposition;
+                        const pairRecord = getPairRecord(prevVarIdx, varIdx, relDelay, relTrans);
+                        if (!pairRecord) {
+                            harmonicFail = true;
+                            break;
                         }
+                        overlappingPairs.push({ entry: prevE, pairRecord });
                     }
                     if (harmonicFail) continue;
+
+                    const metricProbeEntry: StrettoChainOption = {
+                        startBeat: absStartBeat,
+                        transposition: t,
+                        type: variant.type,
+                        length: variant.lengthTicks,
+                        voiceIndex: 0
+                    };
+                    // Metric compliance is independent of output-voice assignment because it only
+                    // inspects temporal/pitch overlap against existing entries. Evaluate once per
+                    // (variant, delay, transposition) candidate and reuse across voice placements.
+                    if (!checkMetricCompliance(variant, metricProbeEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                     for (let v = 0; v < options.ensembleTotal; v++) {
                         if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
 
                         let stratFail = false;
-                        for (let existingIdx = 0; existingIdx < chain.length; existingIdx++) {
-                            const e = chain[existingIdx];
-                            const pairInfo = overlappingPairs.get(e);
-                            if (pairInfo) {
-                                if (!pairInfo.pairRecord.allowedVoicePairs.has(`${e.voiceIndex}->${v}`)) {
-                                    stratFail = true;
-                                    break;
-                                }
+                        for (const { entry: e, pairRecord } of overlappingPairs) {
+                            // Voice-pair admissibility (precomputed, includes spacing rules)
+                            if (!pairRecord.allowedVoicePairs.has(`${e.voiceIndex}->${v}`)) {
+                                stratFail = true;
+                                break;
+                            }
 
-                                const pairBassIdx = options.ensembleTotal - 1;
+                            // P4 bass-role check: use precomputed per-bass-role compatibility.
+                            // No re-scanning needed — results are cached in the pairwise record.
+                            const pairBassIdx = options.ensembleTotal - 1;
+                            if (pairRecord.hasFourth) {
                                 let bassRole: PairwiseBassRole = 'none';
                                 if (e.voiceIndex === pairBassIdx && v !== pairBassIdx) bassRole = 'a';
                                 else if (v === pairBassIdx && e.voiceIndex !== pairBassIdx) bassRole = 'b';
 
-                                if (bassRole !== 'none') {
-                                    const strictKey = `${pairInfo.key}|bass:${bassRole}`;
-                                    let strictCompatible = strictPairwiseBassCache.get(strictKey);
-                                    if (strictCompatible === undefined) {
-                                        const strictScan = runStructuralScanGuard(
-                                            stageStats,
-                                            true,
-                                            true,
-                                            true,
-                                            () => checkCounterpointStructureWithBassRole(
-                                                variants[pairInfo.prevVarIdx],
-                                                variant,
-                                                pairInfo.relDelay,
-                                                pairInfo.relTrans,
-                                                options.maxPairwiseDissonance + 0.05,
-                                                bassRole,
-                                                ppq
-                                            )
-                                        );
-                                        strictCompatible = strictScan?.compatible ?? false;
-                                        strictPairwiseBassCache.set(strictKey, strictCompatible);
-                                    }
-                                    if (!strictCompatible) {
-                                        stratFail = true;
-                                        break;
-                                    }
+                                if (bassRole !== 'none' && !pairRecord.bassRoleCompatible[bassRole]) {
+                                    stratFail = true;
+                                    break;
                                 }
-                            }
-
-                            if (Math.abs(e.voiceIndex - v) === 1) {
-                                const highVoiceIdx = Math.min(e.voiceIndex, v);
-                                const lowVoiceIdx = Math.max(e.voiceIndex, v);
-                                const highVoiceTrans = (e.voiceIndex === highVoiceIdx) ? e.transposition : t;
-                                const lowVoiceTrans = (e.voiceIndex === lowVoiceIdx) ? e.transposition : t;
-                                if (highVoiceTrans < lowVoiceTrans) stratFail = true;
-                            }
-                            const bassIdx = options.ensembleTotal - 1;
-                            const altoIdx = bassIdx - 2;
-                            if (bassIdx >= 2) {
-                                const isNewBass = (v === bassIdx);
-                                const isNewAlto = (v === altoIdx);
-                                const isExistingBass = (e.voiceIndex === bassIdx);
-                                const isExistingAlto = (e.voiceIndex === altoIdx);
-                                if ((isNewBass && isExistingAlto) || (isNewAlto && isExistingBass)) {
-                                    const bassTrans = isNewBass ? t : e.transposition;
-                                    const altoTrans = isNewAlto ? t : e.transposition;
-                                    if (altoTrans < bassTrans + 12) stratFail = true;
-                                }
-                            }
-                            if (Math.abs(e.voiceIndex - v) === 2) {
-                                const highVoiceIdx = Math.min(e.voiceIndex, v);
-                                const lowVoiceIdx = Math.max(e.voiceIndex, v);
-                                const highVoiceTrans = (e.voiceIndex === highVoiceIdx) ? e.transposition : t;
-                                const lowVoiceTrans = (e.voiceIndex === lowVoiceIdx) ? e.transposition : t;
-                                if (highVoiceTrans < lowVoiceTrans + 7) stratFail = true;
                             }
                         }
                         if (stratFail) continue;
 
                         const tempNextEntry: StrettoChainOption = {
-                            startBeat: absStartBeat,
-                            transposition: t,
-                            type: variant.type,
-                            length: variant.lengthTicks,
+                            ...metricProbeEntry,
                             voiceIndex: v
                         };
-
-                        if (!checkMetricCompliance(variant, tempNextEntry, chain, variants, variantIndices, ppq, offsetTicks)) continue;
 
                         const newVoiceState = [...voiceEndTimesTicks];
                         newVoiceState[v] = absStartTicks + variant.lengthTicks;
 
                         edgesTraversed++;
+                        // Propagate A.1 delay-set: add this delay if it's > Sb/3
+                        const needsNewLongDelaySet = delayTicks > oneThirdSubjectTicks && !usedLongDelays.has(delayTicks);
+                        const newUsedLongDelays = needsNewLongDelaySet
+                            ? new Set(usedLongDelays).add(delayTicks)
+                            : usedLongDelays;
+                        const newLongDelaySignature = needsNewLongDelaySet
+                            ? Array.from(newUsedLongDelays).sort((a, b) => a - b).join(',')
+                            : longDelaySignature;
+
                         successors.push({
                             chain: [...chain, tempNextEntry],
                             variantIndices: [...variantIndices, varIdx],
@@ -1141,18 +1745,21 @@ export async function searchStrettoChains(
                             nInv: nInv + (isInv ? 1 : 0),
                             nTrunc: nTrunc + (isTrunc ? 1 : 0),
                             nRestricted: nextRestricted,
-                            nFree: nextFree
+                            nFree: nextFree,
+                            usedLongDelays: newUsedLongDelays,
+                            longDelaySignature: newLongDelaySignature
                         });
                     }
                 }
             }
-        }
 
         return successors;
     }
 
     const initialVoiceState = new Array(options.ensembleTotal).fill(0);
     initialVoiceState[options.subjectVoiceIndex] = variants[0].lengthTicks;
+
+    const oneThirdSubjectTicks = subjectLengthTicks / 3;
 
     let frontier: DagNode[] = [{
         chain: [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].lengthTicks, voiceIndex: options.subjectVoiceIndex }],
@@ -1161,27 +1768,21 @@ export async function searchStrettoChains(
         nInv: 0,
         nTrunc: 0,
         nRestricted: 0,
-        nFree: 1
+        nFree: 1,
+        usedLongDelays: new Set<number>(),
+        longDelaySignature: ''
     }];
 
     let maxFrontierSize = frontier.length;
-    let maxFrontierClassCount = 1;
-
-    const frontierClassKey = (chain: StrettoChainOption[]): string => {
-        if (chain.length < 2) return 'root';
-        const delays: number[] = [];
-        for (let i = 1; i < chain.length; i++) {
-            delays.push(Math.round((chain[i].startBeat - chain[i - 1].startBeat) * ppq));
-        }
-        return delays.join(',');
-    };
+    let maxFrontierClassCount = 0;
+    let frontierSizeAtTermination = 0;
+    let frontierClassesAtTermination = 0;
 
     while (frontier.length > 0) {
         maxFrontierSize = Math.max(maxFrontierSize, frontier.length);
-        const frontierClasses = new Set(frontier.map((n) => frontierClassKey(n.chain)));
-        maxFrontierClassCount = Math.max(maxFrontierClassCount, frontierClasses.size);
-
-        frontier.sort((a, b) => getChainSignature(a.chain).localeCompare(getChainSignature(b.chain)));
+        // Frontier class counting and deterministic sorting removed from hot loop —
+        // they were O(n log n) / O(n) per layer on potentially huge frontiers,
+        // contributing nothing to correctness. Stats are filled at termination.
         const nextLayer = new Map<string, DagNode>();
         let stopTraversal = false;
 
@@ -1240,6 +1841,15 @@ export async function searchStrettoChains(
         }
 
         frontier = resolveNextFrontierLayer(nextLayer, stopTraversal);
+
+        // Record frontier state at termination (last iteration before loop exits).
+        // Class counting deferred to here instead of per-iteration.
+        if (frontier.length === 0 || stopTraversal) {
+            const termFrontier = stopTraversal ? Array.from(nextLayer.values()) : [];
+            frontierSizeAtTermination = termFrontier.length;
+            maxFrontierClassCount = maxFrontierSize; // upper-bound estimate (exact counting removed from hot path)
+            frontierClassesAtTermination = termFrontier.length; // conservative estimate
+        }
     }
 
     // --- POST-SEARCH: Score all found chains ---
@@ -1296,11 +1906,20 @@ export async function searchStrettoChains(
             timeMs: Date.now() - startTime,
             stopReason: stopReason,
             maxDepthReached: maxDepth,
+            metricOffsetTicks: offsetTicks,
             timeoutExtensionAppliedMs,
             coverage: {
                 nodeBudgetUsedPercent: roundToWholePercent(Math.min(1, nodesVisited / MAX_SEARCH_NODES)),
                 maxFrontierSize,
-                maxFrontierClassCount
+                maxFrontierClassCount,
+                edgesTraversed,
+                frontierSizeAtTermination,
+                frontierClassesAtTermination,
+                // Lower-bound completion ratio: if frontier is empty, we exhausted the space.
+                // Otherwise estimate from node budget usage.
+                completionRatioLowerBound: frontierSizeAtTermination === 0
+                    ? 100
+                    : roundToWholePercent(Math.min(1, nodesVisited / (nodesVisited + frontierSizeAtTermination)))
             },
             stageStats
         }

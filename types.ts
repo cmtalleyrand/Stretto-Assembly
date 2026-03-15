@@ -549,11 +549,16 @@ export interface StrettoSearchReport {
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
         coverage?: {
             nodeBudgetUsedPercent: number;
             maxFrontierSize: number;
             maxFrontierClassCount: number;
+            edgesTraversed: number;
+            frontierSizeAtTermination: number;
+            frontierClassesAtTermination: number;
+            completionRatioLowerBound?: number;
         };
         stageStats?: {
             validDelayCount: number;
@@ -562,17 +567,26 @@ export interface StrettoSearchReport {
             pairwiseCompatible: number;
             pairwiseWithFourth: number;
             pairwiseWithVoiceCrossing: number;
+            pairwiseP4TwoVoiceDissonant: number;
+            pairwiseParallelRejected?: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
             tripleLowerBoundRejected: number;
             tripleParallelRejected: number;
             tripleVoiceRejected: number;
+            tripleP4BassRejected: number;
             harmonicallyValidTriples: number;
             deterministicDagMergedNodes: number;
             pairStageRejected: number;
             tripletStageRejected: number;
             globalLineageStageRejected: number;
             structuralScanInvocations: number;
+            dissonanceSpans?: { startTick: number; endTick: number }[];
+            p4Spans?: { startTick: number; endTick: number }[];
+            parallelPerfectLocationTicks?: number[];
+            transitionWindowLookups?: number;
+            transitionsReturned?: number;
+            candidateTransitionsEnumerated?: number;
         };
     };
 }
@@ -593,6 +607,10 @@ export interface StrettoSearchOptions {
     disallowComplexExceptions: boolean;
     maxPairwiseDissonance: number;
     voiceNames?: Record<number, string>;
+    meterNumerator?: number;
+    meterDenominator?: number;
     scaleRoot: number; // 0-11
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.
+    maxSearchTimeMs?: number;
+    collectDiagnosticSpans?: boolean;
 }

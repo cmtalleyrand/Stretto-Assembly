@@ -374,6 +374,9 @@ export default function StrettoSearchPanel({
                                 onChange={(e) => handleChange('maxPairwiseDissonance', parseFloat(e.target.value))}
                                 className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-red-500"
                             />
+                            <p className="mt-1 text-[9px] text-gray-400 leading-tight">
+                                Hard pairwise policy: dissonance ratio ≤ cap, maximum consecutive dissonance run length ≤ 2 events, and continuous dissonance duration ≤ 1 beat.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -387,16 +390,6 @@ export default function StrettoSearchPanel({
                 {isSearching ? 'Processing Combinations...' : 'Run Search Algorithm v4.3'}
             </button>
             
-            <button 
-                onClick={async () => {
-                    const { runStrettoTests } = await import('../services/strettoTests');
-                    runStrettoTests();
-                }}
-                disabled={isSearching}
-                className="w-full mt-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 font-bold rounded border border-gray-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-[10px] uppercase tracking-wide"
-            >
-                Run Test Suite (Check Console)
-            </button>
         </div>
     );
 }

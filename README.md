@@ -49,6 +49,21 @@ The pipeline produces a set of **valid triplets** (consecutive groups of 3 entri
 
 ---
 
+## Intent-Alignment Notices (Authoritative: `PROJECT_INTENT.md`)
+
+The entries below explicitly flag places where this document should be treated as **outdated relative to project intent**. The intent document is authoritative for end-state architecture and workflow assumptions.
+
+| Topic | README current state | Status vs intent | Intended end state (from `PROJECT_INTENT.md`) |
+|---|---|---|---|
+| Chain-search architecture status language | This README describes bottom-up triplet assembly in normative terms and may read as fully realized. | **Outdated wording risk:** implementation remains in migration/compatibility mode, so “normative” language can be misread as “already complete.” | Search/generation converges to staged bottom-up precomputation with deterministic state propagation as the operational default, with no regression to DFS-first semantics. |
+| Canonical input contract | README architecture text is centered on internal tuple/state machinery. | **Outdated omission:** it does not foreground the canonical source-format contract. | ABC is the canonical source representation; MIDI remains an interoperability format and must not define default workflow assumptions. |
+| Product scope framing | README focuses on chain-generation architecture details. | **Outdated omission:** it does not enumerate the full in-scope problem set. | End-state scope explicitly includes pairwise discovery, chain generation, implied-harmony detection as first-class evaluation, and explicit per-voice export synthesis to MIDI/ABC. |
+| System invariants (cross-module) | README mostly states search-pipeline claims. | **Outdated omission:** cross-module invariants are under-specified here. | Pivot/inversion semantics are shared between discovery and search; delay/overlap predicates are deterministic; voice assignment is explicit/stable; UI defaults route directly to stretto operations. |
+
+Interpretation rule: when any statement here conflicts with `PROJECT_INTENT.md`, treat this README statement as historical/migration context and apply intent-defined end-state semantics.
+
+---
+
 ## Pipeline Stages
 
 ### Stage 1 — Valid Delay Triplets (cheapest filter)
@@ -58,10 +73,11 @@ Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that
 | Rule | Condition |
 |------|-----------|
 | **A.1 Global Uniqueness (deferred enforcement target)** | All delays `> Sb/3` must be distinct across the **entire chain**. Stage 1 does not prove this globally; it only emits triplets that remain admissible for incremental uniqueness enforcement in Stage 5. |
-| **A.2 Half-length trigger** | If `d_{n-1} > Sb/2`, then `d_n < d_{n-1} − 0.5` |
+| **A.2 Half-length trigger (OR form)** | If `d_{n-1} >= Sb/2` **or** `d_n >= Sb/2`, then `d_n < d_{n-1}` |
 | **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
 | **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
-| **A.5 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
+| **A.5 Maximum contraction bound** | `d_{n-1} - d_n <= 0.25 * Sb` |
+| **A.6 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
 
 **Start entries** (index 0) are valid if their delay is within the universal max.
 **End entries** have relaxed rules: any delay `< Sb/3` is acceptable regardless of contraction direction.
