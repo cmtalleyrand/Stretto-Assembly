@@ -390,16 +390,6 @@ export default function StrettoSearchPanel({
                 {isSearching ? 'Processing Combinations...' : 'Run Search Algorithm v4.3'}
             </button>
             
-            <button 
-                onClick={async () => {
-                    const { runStrettoTests } = await import('../services/strettoTests');
-                    runStrettoTests();
-                }}
-                disabled={isSearching}
-                className="w-full mt-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 font-bold rounded border border-gray-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-[10px] uppercase tracking-wide"
-            >
-                Run Test Suite (Check Console)
-            </button>
         </div>
     );
 }

@@ -273,6 +273,10 @@ function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[
 // Parallel hard-fail policy applies only to P5/P8 classes, never P4.
 const PERFECT_PARALLEL_INTERVALS = new Set([0, 7]);
 
+// Sentinel empty arrays used when span collection is disabled (no allocation).
+const NO_SPANS: SimultaneitySpan[] = [];
+const NO_TICKS: number[] = [];
+
 
 function isForbiddenParallelPerfectMotion(
     prevIntervalClass: number,
@@ -319,9 +323,10 @@ export function checkCounterpointStructure(
     maxDissonanceRatio: number,
     ppqParam: number = 480,
     tsNum: number = 4,
-    tsDenom: number = 4
+    tsDenom: number = 4,
+    skipSpans: boolean = false
  ): PairwiseScanResult {
-    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam, tsNum, tsDenom);
+    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam, tsNum, tsDenom, skipSpans);
 }
 
 export function checkCounterpointStructureWithBassRole(
@@ -333,7 +338,8 @@ export function checkCounterpointStructureWithBassRole(
     bassRole: PairwiseBassRole,
     ppqParam: number = 480,
     tsNum: number = 4,
-    tsDenom: number = 4
+    tsDenom: number = 4,
+    skipSpans: boolean = false
  ): PairwiseScanResult {
     
     // Collect all time points
@@ -378,9 +384,9 @@ export function checkCounterpointStructureWithBassRole(
     let p4SimultaneityCount = 0;
     let hasVoiceCrossing = false;
     let hasParallelPerfect58 = false;
-    const dissonanceSpans: SimultaneitySpan[] = [];
-    const p4Spans: SimultaneitySpan[] = [];
-    const parallelPerfectStartTicks: number[] = [];
+    const dissonanceSpans: SimultaneitySpan[] = skipSpans ? NO_SPANS : [];
+    const p4Spans: SimultaneitySpan[] = skipSpans ? NO_SPANS : [];
+    const parallelPerfectStartTicks: number[] = skipSpans ? NO_TICKS : [];
     let previousOrderingSign = 0;
     let maxDissonanceRunEvents = 0;
     let maxDissonanceRunTicks = 0;
@@ -426,7 +432,7 @@ export function checkCounterpointStructureWithBassRole(
         if (interval === 5) {
             hasFourth = true;
             p4SimultaneityCount++;
-            p4Spans.push({ startTick: start, endTick: end });
+            if (!skipSpans) p4Spans.push({ startTick: start, endTick: end });
         }
 
         // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
@@ -441,7 +447,7 @@ export function checkCounterpointStructureWithBassRole(
             const deltaVoice2 = p2 - prevP2;
             if (isForbiddenParallelPerfectMotion(prevInt, deltaVoice1, deltaVoice2)) {
                 hasParallelPerfect58 = true;
-                parallelPerfectStartTicks.push(start);
+                if (!skipSpans) parallelPerfectStartTicks.push(start);
                 if (isStrongBeat(start, ppqParam, tsNum, tsDenom)) {
                     strongBeatParallels++;
                 } else {
@@ -460,7 +466,7 @@ export function checkCounterpointStructureWithBassRole(
         }
         
         if (isDiss) {
-            dissonanceSpans.push({ startTick: start, endTick: end });
+            if (!skipSpans) dissonanceSpans.push({ startTick: start, endTick: end });
             dissonantTicks += dur;
             
             // For run length, we count *events* (intervals), not ticks
@@ -749,8 +755,7 @@ export async function searchStrettoChains(
     });
 
     const toWindowKey = (parts: WindowKeyParts): WindowKey => `${parts.variantLeft}|${parts.variantRight}|${parts.delayTicks}|${parts.transpositionDelta}`;
-    const traversalMode = options.traversalMode ?? 'triplet-native';
-    
+
     const startTime = Date.now();
     let nodesVisited = 0;
     let edgesTraversed = 0;
@@ -888,6 +893,8 @@ export async function searchStrettoChains(
         candidateTransitionsEnumerated: 0
     };
 
+    const collectSpans = options.collectDiagnosticSpans === true;
+
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
     // Also precompute interval class metadata for quota checks.
@@ -907,10 +914,12 @@ export async function searchStrettoChains(
 
                     // Neutral scan (P4 treated as provisionally consonant)
                     stageStats.structuralScanInvocations++;
-                    const pairScan = checkCounterpointStructure(vA, vB, d, t, options.maxPairwiseDissonance, ppq, tsNum, tsDenom);
-                    appendUniqueSpansCapped(stageStats.dissonanceSpans, pairScan.dissonanceSpans);
-                    appendUniqueSpansCapped(stageStats.p4Spans, pairScan.p4Spans);
-                    appendUniqueCapped(stageStats.parallelPerfectLocationTicks, pairScan.parallelPerfectStartTicks);
+                    const pairScan = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'none', ppq, tsNum, tsDenom, !collectSpans);
+                    if (collectSpans) {
+                        appendUniqueSpansCapped(stageStats.dissonanceSpans, pairScan.dissonanceSpans);
+                        appendUniqueSpansCapped(stageStats.p4Spans, pairScan.p4Spans);
+                        appendUniqueCapped(stageStats.parallelPerfectLocationTicks, pairScan.parallelPerfectStartTicks);
+                    }
                     if (!pairScan.compatible) {
                         stageStats.pairStageRejected++;
                         continue;
@@ -931,13 +940,13 @@ export async function searchStrettoChains(
                     const bassStrictA = requiresBassRoleRescan
                         ? (() => {
                             stageStats.structuralScanInvocations++;
-                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom);
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom, true);
                         })()
                         : pairScan;
                     const bassStrictB = requiresBassRoleRescan
                         ? (() => {
                             stageStats.structuralScanInvocations++;
-                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom);
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom, true);
                         })()
                         : pairScan;
 
@@ -1012,7 +1021,8 @@ export async function searchStrettoChains(
 
     // --- PRECOMPUTE TRIPLES ---
     const harmonicallyValidTriples = new Set<string>();
-    const transitionsByWindow = new Map<WindowKey, NextTransition[]>();
+    // Two-level index: window key → delay → transitions, precomputed once so expandNode never rebuilds it.
+    const transitionsByWindow = new Map<WindowKey, Map<number, NextTransition[]>>();
     const validPairsList: {vA: number, vB: number, d: number, t: number}[] = [];
     pairwiseCompatibleTriplets.forEach((_, key) => {
         const [vA, vB, d, t] = key.split('_').map(Number);
@@ -1184,75 +1194,16 @@ export async function searchStrettoChains(
                 isRestrictedInterval: pairBC.isRestrictedInterval,
                 isFreeInterval: pairBC.isFreeInterval
             };
-            const existingTransitions = transitionsByWindow.get(windowKey);
-            if (existingTransitions) existingTransitions.push(nextTransition);
-            else transitionsByWindow.set(windowKey, [nextTransition]);
+            let delayMap = transitionsByWindow.get(windowKey);
+            if (!delayMap) {
+                delayMap = new Map<number, NextTransition[]>();
+                transitionsByWindow.set(windowKey, delayMap);
+            }
+            const bucket = delayMap.get(nextTransition.delayTicks);
+            if (bucket) bucket.push(nextTransition);
+            else delayMap.set(nextTransition.delayTicks, [nextTransition]);
 
             stageStats.harmonicallyValidTriples++;
-        }
-    }
-
-    const nextTransitionsFromRoot = new Map<string, NextTransition[]>();
-    const nextTransitionsByBoundary = new Map<string, NextTransition[]>();
-
-    const pushNextTransition = <T>(store: Map<string, T[]>, key: string, transition: T): void => {
-        const curr = store.get(key);
-        if (!curr) {
-            store.set(key, [transition]);
-            return;
-        }
-        curr.push(transition);
-    };
-
-    for (const d of validDelays) {
-        for (const t of transpositions) {
-            for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-                const immKey = toPairKey(0, varIdx, d, t);
-                const immPair = pairwiseCompatibleTriplets.get(immKey);
-                if (!immPair || !immPair.meetsAdjacentTranspositionSeparation) continue;
-                const variant = variants[varIdx];
-                const isInv = variant.type === 'I';
-                const isTrunc = variant.truncationBeats > 0;
-                if (isInv && variants[0].type === 'I') continue;
-                if (isTrunc && variants[0].truncationBeats > 0) continue;
-                pushNextTransition(nextTransitionsFromRoot, `${0}|${d}`, {
-                    delayTicks: d,
-                    nextVariantIndex: varIdx,
-                    transpositionDelta: t,
-                    pairRecord: immPair,
-                    isRestrictedInterval: immPair.isRestrictedInterval,
-                    isFreeInterval: immPair.isFreeInterval
-                });
-            }
-        }
-    }
-
-    for (const p1 of validPairsList) {
-        for (const p2 of (pairsByFirst.get(p1.vB) || [])) {
-            const tripleKey = toTripleKey(p1.vA, p1.vB, p2.vB, p1.d, p2.d, p1.t, p2.t);
-            if (!harmonicallyValidTriples.has(tripleKey)) continue;
-            const immKey = toPairKey(p1.vB, p2.vB, p2.d, p2.t);
-            const immPair = pairwiseCompatibleTriplets.get(immKey);
-            if (!immPair || !immPair.meetsAdjacentTranspositionSeparation) continue;
-
-            const variant = variants[p2.vB];
-            const prevVariant = variants[p1.vB];
-            const isInv = variant.type === 'I';
-            const isTrunc = variant.truncationBeats > 0;
-            const prevIsInv = prevVariant.type === 'I';
-            const prevIsTrunc = prevVariant.truncationBeats > 0;
-            // Transform-following constraint:
-            // if the predecessor is transformed (inverted OR truncated), the successor must be normal.
-            if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
-
-            pushNextTransition(nextTransitionsByBoundary, `${p1.vA}|${p1.vB}|${p1.d}|${p1.t}|${p2.d}`, {
-                delayTicks: p2.d,
-                nextVariantIndex: p2.vB,
-                transpositionDelta: p2.t,
-                pairRecord: immPair,
-                isRestrictedInterval: immPair.isRestrictedInterval,
-                isFreeInterval: immPair.isFreeInterval
-            });
         }
     }
 
@@ -1379,27 +1330,20 @@ export async function searchStrettoChains(
         possibleDelaysTicks.sort((a, b) => a - b);
 
         let indexedTransitionsByDelay: Map<number, NextTransition[]> | null = null;
-        let windowDelayTicks = 0;
-        let windowTranspositionDelta = 0;
         if (depth >= 2) {
-            windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-            windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
-            if (traversalMode === 'triplet-native') {
-                const windowKey = toWindowKey({
-                    variantLeft: variantIndices[depth - 2],
-                    variantRight: variantIndices[depth - 1],
-                    delayTicks: windowDelayTicks,
-                    transpositionDelta: windowTranspositionDelta
-                });
-                stageStats.transitionWindowLookups++;
-                const indexedTransitions = transitionsByWindow.get(windowKey) ?? [];
-                stageStats.transitionsReturned += indexedTransitions.length;
-                indexedTransitionsByDelay = new Map<number, NextTransition[]>();
-                for (const transition of indexedTransitions) {
-                    const bucket = indexedTransitionsByDelay.get(transition.delayTicks);
-                    if (bucket) bucket.push(transition);
-                    else indexedTransitionsByDelay.set(transition.delayTicks, [transition]);
-                }
+            const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
+            const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
+            const windowKey = toWindowKey({
+                variantLeft: variantIndices[depth - 2],
+                variantRight: variantIndices[depth - 1],
+                delayTicks: windowDelayTicks,
+                transpositionDelta: windowTranspositionDelta
+            });
+            stageStats.transitionWindowLookups++;
+            const windowMap = transitionsByWindow.get(windowKey);
+            if (windowMap) {
+                stageStats.transitionsReturned += windowMap.size;
+                indexedTransitionsByDelay = windowMap;
             }
         }
 
@@ -1426,89 +1370,19 @@ export async function searchStrettoChains(
             const candidateTransitions: { varIdx: number; t: number; immPair: PairwiseCompatibilityRecord; isRestricted: boolean; isFree: boolean }[] = [];
 
             if (depth >= 2) {
-                if (traversalMode === 'triplet-native') {
-                    const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks) ?? [];
-                    for (const transition of indexedTransitions) {
-                        const t = prevTransposition + transition.transpositionDelta;
-                        if (t === prevTransposition) continue;
-                        if (!transition.pairRecord.meetsAdjacentTranspositionSeparation) continue;
-                        stageStats.candidateTransitionsEnumerated++;
-                        candidateTransitions.push({
-                            varIdx: transition.nextVariantIndex,
-                            t,
-                            immPair: transition.pairRecord,
-                            isRestricted: transition.isRestrictedInterval,
-                            isFree: transition.isFreeInterval
-                        });
-                    }
-                } else {
-                    const boundaryKey = `${variantIndices[depth - 2]}|${variantIndices[depth - 1]}|${windowDelayTicks}|${windowTranspositionDelta}|${delayTicks}`;
-                    const boundaryTransitions = nextTransitionsByBoundary.get(boundaryKey) ?? [];
-                    if (boundaryTransitions.length > 0) {
-                        stageStats.transitionWindowLookups++;
-                        stageStats.transitionsReturned += boundaryTransitions.length;
-                        for (const transition of boundaryTransitions) {
-                            const t = prevTransposition + transition.transpositionDelta;
-                            if (t === prevTransposition) continue;
-                            const immKey = toPairKey(variantIndices[depth - 1], transition.nextVariantIndex, delayTicks, transition.transpositionDelta);
-                            const immPair = pairwiseCompatibleTriplets.get(immKey);
-                            if (!immPair || !immPair.meetsAdjacentTranspositionSeparation) continue;
-                            stageStats.candidateTransitionsEnumerated++;
-                            candidateTransitions.push({
-                                varIdx: transition.nextVariantIndex,
-                                t,
-                                immPair,
-                                isRestricted: transition.isRestricted,
-                                isFree: transition.isFree
-                            });
-                        }
-                    } else {
-                        // `legacy-boundary` parity mode must draw successors exclusively
-                        // from prevalidated boundary transitions. A synthetic fallback
-                        // over global transposition candidates changes the accepted state
-                        // space relative to window-indexed/native traversal and can
-                        // introduce non-parity chains on deep fixtures.
-                        if (traversalMode === 'legacy-boundary') {
-                            continue;
-                        }
-
-                        const seenClasses = new Set<number>();
-                        const fresh: number[] = [];
-                        const deferred: number[] = [];
-                        for (const t of transpositions) {
-                            const tClass = ((t - prevTransposition) % 12 + 12) % 12;
-                            if (seenClasses.has(tClass)) {
-                                deferred.push(t);
-                                continue;
-                            }
-                            if (t === prevTransposition) {
-                                fresh.push(t);
-                                continue;
-                            }
-                            fresh.push(t);
-                            seenClasses.add(tClass);
-                        }
-                        const orderedTranspositions = [...fresh, ...deferred];
-                        for (const t of orderedTranspositions) {
-                            if (t === prevTransposition) continue;
-                            for (let varIdx = 0; varIdx < variants.length; varIdx++) {
-                                const immPrevVarIdx = variantIndices[depth - 1];
-                                const immRelTrans = t - chain[depth - 1].transposition;
-                                const immKey = toPairKey(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
-                                const immPair = pairwiseCompatibleTriplets.get(immKey);
-                                if (!immPair) continue;
-                                if (!immPair.meetsAdjacentTranspositionSeparation) continue;
-                                stageStats.candidateTransitionsEnumerated++;
-                                candidateTransitions.push({
-                                    varIdx,
-                                    t,
-                                    immPair,
-                                    isRestricted: immPair.isRestrictedInterval,
-                                    isFree: immPair.isFreeInterval
-                                });
-                            }
-                        }
-                    }
+                const indexedTransitions = indexedTransitionsByDelay?.get(delayTicks) ?? [];
+                for (const transition of indexedTransitions) {
+                    const t = prevTransposition + transition.transpositionDelta;
+                    if (t === prevTransposition) continue;
+                    if (!transition.pairRecord!.meetsAdjacentTranspositionSeparation) continue;
+                    stageStats.candidateTransitionsEnumerated++;
+                    candidateTransitions.push({
+                        varIdx: transition.nextVariantIndex,
+                        t,
+                        immPair: transition.pairRecord!,
+                        isRestricted: transition.isRestrictedInterval!,
+                        isFree: transition.isFreeInterval!
+                    });
                 }
             } else {
                 const seenClasses = new Set<number>();

@@ -611,6 +611,6 @@ export interface StrettoSearchOptions {
     meterDenominator?: number;
     scaleRoot: number; // 0-11
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.
-    traversalMode?: 'triplet-native' | 'legacy-boundary';
     maxSearchTimeMs?: number;
+    collectDiagnosticSpans?: boolean;
 }

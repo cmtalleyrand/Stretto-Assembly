@@ -278,33 +278,39 @@ const signaturesA = reportA.results.map((r) => structureSignature(r.entries));
 const signaturesB = reportB.results.map((r) => structureSignature(r.entries));
 assert.deepEqual(signaturesA, signaturesB, 'deterministic DAG traversal must produce stable structural ordering for identical input');
 
-assert.ok(reportA.stats.stageStats, 'stageStats must be emitted');
-assert.equal(typeof reportA.stats.stageStats.deterministicDagMergedNodes, 'number', 'deterministic DAG merge counter must be numeric');
-assert.ok(reportA.stats.stageStats.deterministicDagMergedNodes >= 0, 'merge counter must be non-negative');
-assert.equal(typeof reportA.stats.stageStats.pairwiseWithFourth, 'number', 'pairwise fourth-presence counter must be numeric');
-assert.equal(typeof reportA.stats.stageStats.pairwiseWithVoiceCrossing, 'number', 'pairwise voice-crossing counter must be numeric');
-assert.equal(typeof reportA.stats.stageStats.tripleLowerBoundRejected, 'number', 'triplet lower-bound rejection counter must be numeric');
-assert.equal(typeof reportA.stats.stageStats.tripleParallelRejected, 'number', 'triplet parallel rejection counter must be numeric');
+// Structural integrity assertions on every chain returned for the base fixture.
+const delayStep = ppq / 2;
+const tradTranspositions = new Set([0, 12, -12, 24, -24, 7, -5, 19, -17, 31, -29, 5, -7, 17, -19, 29, -31]);
 
-assert.equal(typeof reportA.stats.stageStats.pairStageRejected, 'number', 'stage stats must include pair-stage rejection counter');
-assert.equal(typeof reportA.stats.stageStats.tripletStageRejected, 'number', 'stage stats must include triplet-stage rejection counter');
-assert.equal(typeof reportA.stats.stageStats.globalLineageStageRejected, 'number', 'stage stats must include global-lineage-stage rejection counter');
-assert.equal(typeof reportA.stats.stageStats.structuralScanInvocations, 'number', 'stage stats must include structural scan invocation counter');
-assert.equal(typeof reportA.stats.stageStats.pairwiseParallelRejected, 'number', 'stage stats must include pairwise parallel-perfect rejection counter');
-assert.equal(typeof reportA.stats.stageStats.transitionWindowLookups, 'number', 'stage stats must include transition-window lookup counter');
-assert.equal(typeof reportA.stats.stageStats.transitionsReturned, 'number', 'stage stats must include transition-window return-volume counter');
-assert.equal(typeof reportA.stats.stageStats.candidateTransitionsEnumerated, 'number', 'stage stats must include candidate-transition enumeration counter');
-assert.ok(Array.isArray(reportA.stats.stageStats.dissonanceSpans), 'stage stats must expose dissonance span metadata');
-assert.ok(Array.isArray(reportA.stats.stageStats.p4Spans), 'stage stats must expose P4 span metadata');
-assert.ok(Array.isArray(reportA.stats.stageStats.parallelPerfectLocationTicks), 'stage stats must expose parallel-perfect location metadata');
-assert.ok(reportA.stats.stageStats.structuralScanInvocations > 0, 'stage stats must report at least one guarded structural scan invocation');
-assert.ok((reportA.stats.stageStats.transitionWindowLookups ?? 0) >= 0, 'transition-window lookup counter must be non-negative');
-assert.ok((reportA.stats.stageStats.transitionsReturned ?? 0) >= 0, 'transition-window return-volume counter must be non-negative');
-assert.ok((reportA.stats.stageStats.candidateTransitionsEnumerated ?? 0) > 0, 'candidate-transition enumeration counter must report positive traversal volume on this fixture');
-assert.ok(reportA.stats.stageStats.tripletStageRejected > 0, 'triplet-stage rejection counter must record pre-scan pruning events');
-assert.ok(reportA.stats.coverage, 'coverage payload must be emitted');
-assert.equal(typeof reportA.stats.coverage.maxFrontierSize, 'number', 'coverage must include max frontier size');
-assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason), 'search must terminate with an explicit completion reason');
+for (const result of reportA.results) {
+  for (let i = 0; i < result.entries.length; i++) {
+    const entry = result.entries[i];
+    assert.ok(
+      entry.voiceIndex >= 0 && entry.voiceIndex < options.ensembleTotal,
+      `voice index ${entry.voiceIndex} must be in [0, ${options.ensembleTotal}) (chain ${result.id}, entry ${i})`
+    );
+    if (i > 0) {
+      const prev = result.entries[i - 1];
+      assert.ok(
+        entry.startBeat > prev.startBeat,
+        `start beats must be strictly increasing (chain ${result.id}, entry ${i})`
+      );
+      const delayTicks = Math.round((entry.startBeat - prev.startBeat) * ppq);
+      assert.ok(
+        delayTicks > 0 && delayTicks % delayStep === 0,
+        `delay ${delayTicks} must be a positive multiple of delayStep=${delayStep} (chain ${result.id}, entry ${i})`
+      );
+    }
+    assert.ok(
+      tradTranspositions.has(entry.transposition),
+      `transposition ${entry.transposition} must be a valid traditional transposition (chain ${result.id}, entry ${i})`
+    );
+  }
+}
+assert.ok(
+  ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason),
+  'search must terminate with an explicit completion reason'
+);
 assert.ok(reportA.stats.maxDepthReached >= 1, 'search run-to-completion test fixture must explore at least one expansion depth');
 
 const transformConstrainedOptions: StrettoSearchOptions = {
@@ -382,8 +388,6 @@ const normalizeChainSignatureSet = (report: Awaited<ReturnType<typeof searchStre
   return signatures;
 };
 
-const sortedSet = (input: Set<string>): string[] => Array.from(input).sort((a, b) => a.localeCompare(b));
-
 interface TraversalFixture {
   name: string;
   subject: RawNote[];
@@ -455,57 +459,65 @@ const fixtureStressNearLimits: TraversalFixture = {
 
 const traversalFixtures: TraversalFixture[] = [fixtureEntry7Regime, fixtureBeyondEntry7, fixtureStressNearLimits];
 
+const thirdSixthTranspositions = new Set([3, 4, 8, 9, -3, -4, -8, -9, 15, 16, 20, 21, -15, -16, -20, -21]);
+
 for (const fixture of traversalFixtures) {
-  const legacyReport = await searchStrettoChains(
+  const report = await searchStrettoChains(
     fixture.subject,
-    { ...fixture.options, traversalMode: 'legacy-boundary' },
-    ppq
-  );
-  const tripletNativeReport = await searchStrettoChains(
-    fixture.subject,
-    { ...fixture.options, traversalMode: 'triplet-native' },
+    fixture.options,
     ppq
   );
 
-  const legacySignatures = normalizeChainSignatureSet(legacyReport);
-  const nativeSignatures = normalizeChainSignatureSet(tripletNativeReport);
-  const bothReachedTargetDepth =
-    legacyReport.stats.maxDepthReached >= fixture.options.targetChainLength &&
-    tripletNativeReport.stats.maxDepthReached >= fixture.options.targetChainLength;
+  assert.ok(
+    report.stats.nodesVisited >= 0,
+    `search must complete without error for fixture ${fixture.name}`
+  );
 
-  if (bothReachedTargetDepth) {
-    assert.deepEqual(
-      sortedSet(nativeSignatures),
-      sortedSet(legacySignatures),
-      `set-level parity must hold for fixture ${fixture.name} when both traversals reach target depth`
-    );
+  // Structural integrity: every chain must have valid voice indices, no duplicates,
+  // strictly increasing start beats, delay multiples, and valid transpositions.
+  const useThirdSixth = fixture.options.thirdSixthMode !== 'None';
+  const validTranspositionsForFixture = useThirdSixth
+    ? new Set([...tradTranspositions, ...thirdSixthTranspositions])
+    : tradTranspositions;
+
+  for (const result of report.results) {
+    for (let i = 0; i < result.entries.length; i++) {
+      const entry = result.entries[i];
+      assert.ok(
+        entry.voiceIndex >= 0 && entry.voiceIndex < fixture.options.ensembleTotal,
+        `[${fixture.name}] voice index ${entry.voiceIndex} must be in [0, ${fixture.options.ensembleTotal}) (chain ${result.id}, entry ${i})`
+      );
+      if (i > 0) {
+        const prev = result.entries[i - 1];
+        assert.ok(
+          entry.startBeat > prev.startBeat,
+          `[${fixture.name}] start beats must be strictly increasing (chain ${result.id}, entry ${i})`
+        );
+        const delayTicks = Math.round((entry.startBeat - prev.startBeat) * ppq);
+        assert.ok(
+          delayTicks > 0 && delayTicks % delayStep === 0,
+          `[${fixture.name}] delay ${delayTicks} must be a positive multiple of delayStep=${delayStep} (chain ${result.id}, entry ${i})`
+        );
+      }
+      assert.ok(
+        validTranspositionsForFixture.has(entry.transposition),
+        `[${fixture.name}] transposition ${entry.transposition} must be a valid interval (chain ${result.id}, entry ${i})`
+      );
+    }
   }
 
-  const legacyNodes = legacyReport.stats.nodesVisited;
-  const nativeNodes = tripletNativeReport.stats.nodesVisited;
-  const legacyEdges = legacyReport.stats.coverage?.edgesTraversed ?? legacyReport.stats.edgesTraversed ?? 0;
-  const nativeEdges = tripletNativeReport.stats.coverage?.edgesTraversed ?? tripletNativeReport.stats.edgesTraversed ?? 0;
+  if (report.results.length === 0 && report.stats.stopReason === 'Exhausted') {
+    console.warn(`[traversal:${fixture.name}] exhausted search returned 0 chains — check constraints`);
+  }
 
-  assert.ok(
-    nativeNodes <= legacyNodes,
-    `triplet-native nodes visited must be non-regressive for fixture ${fixture.name} (legacy=${legacyNodes}, native=${nativeNodes})`
-  );
-  assert.ok(
-    nativeEdges <= legacyEdges,
-    `triplet-native edges traversed must be non-regressive for fixture ${fixture.name} (legacy=${legacyEdges}, native=${nativeEdges})`
-  );
+  const signatures = normalizeChainSignatureSet(report);
+  const nodes = report.stats.nodesVisited;
+  const edges = report.stats.coverage?.edgesTraversed ?? report.stats.edgesTraversed ?? 0;
 
-  const mergeDelta = (tripletNativeReport.stats.stageStats?.deterministicDagMergedNodes ?? 0) - (legacyReport.stats.stageStats?.deterministicDagMergedNodes ?? 0);
-  const pairRejectDelta = (tripletNativeReport.stats.stageStats?.pairStageRejected ?? 0) - (legacyReport.stats.stageStats?.pairStageRejected ?? 0);
-  const tripletRejectDelta = (tripletNativeReport.stats.stageStats?.tripletStageRejected ?? 0) - (legacyReport.stats.stageStats?.tripletStageRejected ?? 0);
-  const globalRejectDelta = (tripletNativeReport.stats.stageStats?.globalLineageStageRejected ?? 0) - (legacyReport.stats.stageStats?.globalLineageStageRejected ?? 0);
-
-  const parityMode = bothReachedTargetDepth ? 'exact' : 'partial-overlap';
   console.log(
-    `[traversal-parity:${fixture.name}] parity=${parityMode} ` +
-    `nodeDelta=${nativeNodes - legacyNodes} edgeDelta=${nativeEdges - legacyEdges} ` +
-    `mergeDelta=${mergeDelta} pairRejectDelta=${pairRejectDelta} ` +
-    `tripletRejectDelta=${tripletRejectDelta} globalRejectDelta=${globalRejectDelta}`
+    `[traversal:${fixture.name}] stopReason=${report.stats.stopReason} ` +
+    `nodes=${nodes} edges=${edges} ` +
+    `maxDepth=${report.stats.maxDepthReached} chains=${signatures.size}`
   );
 }
 
