@@ -35,6 +35,51 @@ function assertChainStructure(
   }
 }
 
+async function assertAdmissibilityPruningParity(
+  subject: RawNote[],
+  options: StrettoSearchOptions,
+  label: string
+): Promise<void> {
+  delete process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE;
+  const pruned = await searchStrettoChains(subject, options, ppq);
+  process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE = '1';
+  const full = await searchStrettoChains(subject, options, ppq);
+  delete process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE;
+
+  assert.ok(pruned.stats.stageStats, `${label}: pruned run must expose stageStats.`);
+  assert.ok(full.stats.stageStats, `${label}: full run must expose stageStats.`);
+  assert.ok(
+    pruned.stats.stageStats!.pairwiseTotal <= full.stats.stageStats!.pairwiseTotal,
+    `${label}: admissibility-pruned pairwiseTotal must not exceed full cartesian pairwiseTotal`
+  );
+  assert.equal(
+    pruned.results.length,
+    full.results.length,
+    `${label}: admissibility pruning must preserve acceptance cardinality on fixture`
+  );
+
+  const toCanonicalChainSet = (report: Awaited<ReturnType<typeof searchStrettoChains>>): Set<string> => {
+    return new Set(
+      report.results.map((result) => result.entries
+        .map((entry) => `${entry.startBeat.toFixed(6)}|${entry.transposition}|${entry.type}|${entry.length}|${entry.voiceIndex}`)
+        .join('||'))
+    );
+  };
+  const prunedChainSet = toCanonicalChainSet(pruned);
+  const fullChainSet = toCanonicalChainSet(full);
+  assert.deepEqual(
+    [...prunedChainSet].sort(),
+    [...fullChainSet].sort(),
+    `${label}: admissibility pruning must preserve accepted chain identities on fixture`
+  );
+
+  assert.equal(
+    pruned.stats.stopReason,
+    full.stats.stopReason,
+    `${label}: admissibility pruning must preserve stop-reason behavior on fixture`
+  );
+}
+
 
 // ── Fixture A: consonant arpeggio, two voices ──────────────────────────────
 // A simple C-major arpeggio subject should yield at least one valid 2-voice
@@ -62,6 +107,7 @@ function assertChainStructure(
     scaleMode: 'Major'
   };
   const report = await searchStrettoChains(subject, options, ppq);
+  await assertAdmissibilityPruningParity(subject, options, 'fixture-A');
   assert.ok(
     ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(report.stats.stopReason),
     'fixture-A: search must terminate with a valid stop reason'
@@ -104,6 +150,7 @@ function assertChainStructure(
     scaleMode: 'Major'
   };
   const report = await searchStrettoChains(subject, options, ppq);
+  await assertAdmissibilityPruningParity(subject, options, 'fixture-B');
   assert.ok(
     report.results.length <= 1,
     'fixture-B: chromatic semitone subject with near-zero dissonance tolerance should not produce broad branching'
@@ -147,6 +194,7 @@ function assertChainStructure(
     scaleMode: 'Major'
   };
   const report = await searchStrettoChains(subject, options, ppq);
+  await assertAdmissibilityPruningParity(subject, options, 'fixture-C');
   assert.equal(
     report.stats.stopReason,
     'Timeout',
@@ -186,6 +234,7 @@ function assertChainStructure(
     scaleMode: 'Major'
   };
   const report = await searchStrettoChains(subject, options, ppq);
+  await assertAdmissibilityPruningParity(subject, options, 'fixture-D');
   assert.ok(
     ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(report.stats.stopReason),
     'fixture-D: search must terminate with a valid stop reason'

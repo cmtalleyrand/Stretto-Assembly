@@ -160,6 +160,10 @@ function appendUniqueSpansCapped(target: SimultaneitySpan[], source: Simultaneit
     }
 }
 
+function toGlobalPairKey(vA: number, vB: number, d: number, t: number): string {
+    return `${vA}_${vB}_${d}_${t}`;
+}
+
 interface StageStats {
     validDelayCount: number;
     transpositionCount: number;
@@ -187,6 +191,22 @@ interface StageStats {
     transitionWindowLookups: number;
     transitionsReturned: number;
     candidateTransitionsEnumerated: number;
+}
+
+interface EntryStateAdmissibilityModel {
+    admissiblePairKeys: Set<string>;
+    statesVisited: number;
+}
+
+interface StructuralState {
+    depth: number;
+    prevVariantIndex: number;
+    prevEntryLengthTicks: number;
+    prevDelayTicks: number | null;
+    prevPrevDelayTicks: number | null;
+    prevTransposition: number;
+    nInv: number;
+    nTrunc: number;
 }
 
 type TransitionRuleClass = 'local' | 'prefix-global' | 'terminal/output';
@@ -244,6 +264,112 @@ function runStructuralScanGuard<T>(
     if (!passesGlobalLineageStage(stageStats, globalLineagePredicate)) return null;
     stageStats.structuralScanInvocations++;
     return scan();
+}
+
+function buildEntryStateAdmissibilityModel(
+    variants: SubjectVariant[],
+    transpositions: number[],
+    delayStep: number,
+    targetChainLength: number,
+    options: StrettoSearchOptions
+): EntryStateAdmissibilityModel {
+    const admissiblePairKeys = new Set<string>();
+    const stack: StructuralState[] = [{
+        depth: 1,
+        prevVariantIndex: 0,
+        prevEntryLengthTicks: variants[0].lengthTicks,
+        prevDelayTicks: null,
+        prevPrevDelayTicks: null,
+        prevTransposition: 0,
+        nInv: 0,
+        nTrunc: 0
+    }];
+    const visited = new Set<string>();
+
+    while (stack.length > 0) {
+        const state = stack.pop()!;
+        if (state.depth >= targetChainLength) continue;
+
+        let minD = delayStep;
+        let maxD = Math.floor(state.prevEntryLengthTicks * (2 / 3));
+        if (state.depth === 1) {
+            minD = Math.floor(state.prevEntryLengthTicks * 0.5);
+        } else {
+            const prevDelayTicks = state.prevDelayTicks!;
+            const prevSubjectLengthTicks = state.prevEntryLengthTicks;
+
+            minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
+
+            if (state.prevPrevDelayTicks !== null) {
+                const prevPrevDelayTicks = state.prevPrevDelayTicks;
+                if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
+                    maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
+                }
+            }
+
+        }
+
+        minD = Math.ceil(minD / delayStep) * delayStep;
+        maxD = Math.floor(maxD / delayStep) * delayStep;
+        if (minD > maxD) continue;
+
+        for (let delayTicks = minD; delayTicks <= maxD; delayTicks += delayStep) {
+            if (state.depth >= 2) {
+                const prevDelayTicks = state.prevDelayTicks!;
+                const halfSubjectTicks = state.prevEntryLengthTicks / 2;
+                if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
+            }
+
+            for (const relTransposition of transpositions) {
+                if (relTransposition === 0) continue;
+                if (Math.abs(relTransposition) < 5) continue;
+
+                for (let nextVariantIndex = 0; nextVariantIndex < variants.length; nextVariantIndex++) {
+                    const nextVariant = variants[nextVariantIndex];
+                    const isInv = nextVariant.type === 'I';
+                    const isTrunc = nextVariant.truncationBeats > 0;
+
+                    const prevVariant = variants[state.prevVariantIndex];
+                    const prevIsInv = prevVariant.type === 'I';
+                    const prevIsTrunc = prevVariant.truncationBeats > 0;
+                    if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+
+                    if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
+                    if (isTrunc && !checkQuota(options.truncationMode, state.nTrunc)) continue;
+
+                    admissiblePairKeys.add(toGlobalPairKey(state.prevVariantIndex, nextVariantIndex, delayTicks, relTransposition));
+
+                    const nextInv = state.nInv + (isInv ? 1 : 0);
+                    const nextTrunc = state.nTrunc + (isTrunc ? 1 : 0);
+                    const nextDepth = state.depth + 1;
+                    const nextPrevTransposition = state.prevTransposition + relTransposition;
+                    const visitKey = [
+                        nextDepth,
+                        nextVariantIndex,
+                        delayTicks,
+                        state.prevDelayTicks ?? -1,
+                        nextPrevTransposition,
+                        nextInv,
+                        nextTrunc
+                    ].join('|');
+                    if (visited.has(visitKey)) continue;
+                    visited.add(visitKey);
+                    stack.push({
+                        depth: nextDepth,
+                        prevVariantIndex: nextVariantIndex,
+                        prevEntryLengthTicks: nextVariant.lengthTicks,
+                        prevDelayTicks: delayTicks,
+                        prevPrevDelayTicks: state.prevDelayTicks,
+                        prevTransposition: nextPrevTransposition,
+                        nInv: nextInv,
+                        nTrunc: nextTrunc
+                    });
+                }
+            }
+        }
+    }
+
+    return { admissiblePairKeys, statesVisited: visited.size };
 }
 // --- Precomputation: Scales & Inversion ---
 
@@ -743,7 +869,7 @@ export async function searchStrettoChains(
     ppq: number
 ): Promise<StrettoSearchReport> {
 
-    const toPairKey = (vA: number, vB: number, d: number, t: number): string => `${vA}_${vB}_${d}_${t}`;
+    const toPairKey = toGlobalPairKey;
     const toTripleKey = (vA: number, vB: number, vC: number, d1: number, d2: number, t1: number, t2: number): string => toCanonicalTripletKey({
         variantA: vA,
         variantB: vB,
@@ -894,6 +1020,10 @@ export async function searchStrettoChains(
     };
 
     const collectSpans = options.collectDiagnosticSpans === true;
+    const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
+    const entryStateAdmissibilityModel = forceFullPairwiseDiagnostic
+        ? { admissiblePairKeys: null, statesVisited: 0 }
+        : buildEntryStateAdmissibilityModel(variants, transpositions, delayStep, options.targetChainLength, options);
 
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
@@ -904,6 +1034,10 @@ export async function searchStrettoChains(
             const vB = variants[iB];
             for (const d of validDelays) {
                 for (const t of transpositions) {
+                    const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
+                    if (admissiblePairKeys && !admissiblePairKeys.has(toPairKey(iA, iB, d, t))) {
+                        continue;
+                    }
                     stageStats.pairwiseTotal++;
 
                     operationCounter++;
