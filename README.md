@@ -87,10 +87,16 @@ The output of this stage is `validDelayTriplets: Set<(d₁, d₂, d₃)>`.
 
 ### Stage 2 — Valid Transposition Triplets
 
-For each delay triplet from Stage 1, enumerate all combinations of three transposition intervals `(t₁, t₂, t₃)` that satisfy voice separation rules:
+For each delay triplet from Stage 1, enumerate all combinations of three transposition intervals `(t₁, t₂, t₃)` that satisfy voice separation rules (applied to all temporal pairs, not only simultaneous ones):
 
-- **Neighbour ordering:** higher voice index must have lower or equal transposition (no voice crossing)
-- **Bass–alto separation:** alto transposition must be ≥ bass transposition + 12 semitones
+| Rule | Voice pair | Minimum separation |
+|------|-----------|-------------------|
+| 2A | Adjacent non-bass (e.g. soprano–alto, alto–tenor) | T(higher) ≥ T(lower) |
+| 2B | Tenor–bass (lowest adjacent pair) | T(tenor) ≥ T(bass) + 7 semitones |
+| 3A | Dist-2 non-bass (e.g. soprano–tenor) | T(higher) ≥ T(lower) + 7 semitones |
+| 3B | Alto–bass (lowest dist-2 pair) | T(alto) ≥ T(bass) + 12 semitones |
+| — | Any pair 3+ voice-steps apart | T(higher) ≥ T(lower) + 12 semitones |
+
 - **No consecutive same transposition** (Gatekeeper B: `t_n ≠ t_{n-1}`)
 
 The output is `validTranspositionTriplets: Set<(d₁,d₂,d₃, t₁,t₂,t₃)>` with provisional voice assignments.
@@ -126,6 +132,8 @@ A and B are compatible if their shared pair (i+1, i+2) matches exactly.
 This is graph traversal on a DAG of triplets — it is exhaustive and guaranteed correct because every constraint was enforced in the precomputation stages.
 
 Global constraints (especially A.1 delay uniqueness) are enforced here as an **incremental invariant**, not an ex-post validation pass.
+
+**Voice assignment** (`v_i`) is deferred to a post-search CSP step: after a chain reaches target length, a backtracking CSP assigns voice indices to all entries, enforcing Rules 2A/2B/3A/3B across all temporal pairs, §C re-entry, and P4 bass-role constraints. Chains for which no valid voice assignment exists are discarded. The DAG key does not include voice state, enabling node merging across different voice configurations of the same harmonic content.
 
 ### Stage 5A — Incremental global uniqueness state
 

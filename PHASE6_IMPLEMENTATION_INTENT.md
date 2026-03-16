@@ -12,8 +12,8 @@ This document specifies the implementation architecture for **Phase 6: Mandatory
    - Fourth detection participates directly in admissibility logic according to bass-context-sensitive dissonance rules.
 3. **Voice crossing is always admissible and always annotated.**
    - Crossing metadata exists to optimize bass inference and therefore enable constant-time/low-cost pruning shortcuts in specific non-crossing contexts.
-4. **Voice availability boundary question rationale (resolved).**
-   - The prior question existed only to avoid implementing an incorrect temporal inequality in the absence of an explicit formal expression in code comments. Current intent is to implement the exact stated rule: a voice may accept a new entry from the final half-beat of its previous entry onward.
+4. **Voice availability and assignment (resolved).**
+   - A voice may accept a new entry from 1 beat (`ppq`) before its current occupant's final note ends (§C re-entry rule). Voice index assignment (`v_i`) is **post-hoc**: `v_i` is not part of BFS search state. After a chain reaches target length, a CSP backtracker assigns voice indices by enforcing §B ordering rules across all temporal pairs (not only simultaneous entries) and §C re-entry. Chains with no valid assignment are discarded. The active-tail DAG key encodes sounding entries by `(variantIndex, startTick, transposition)` only — voice index is excluded, enabling node merging across different voice configurations of the same harmonic content.
 5. **Transformation maxima source must come from the current codebase/rules, not speculative prompts.**
    - Existing constraints are read from runtime option schema and current generator predicates before introducing new constants.
 6. **Budget semantics confirmed.**
@@ -137,7 +137,7 @@ Run full harmonic analysis only on non-rejected survivors from Stage 3.5.
 
 1. Replace recursive DFS `solve()` as primary construction path with deterministic DAG traversal.
 2. Enforce A.1 global uniqueness using set membership for delays `> Sb/3` during path extension (**O(1)** expected).
-3. Enforce voice-availability windows during edge validation (including final-half-beat re-entry rule).
+3. Enforce §B voice ordering and §C re-entry post-hoc via CSP backtracker after chain completion; voice state is not carried in BFS frontier nodes.
 
 ---
 
