@@ -58,15 +58,16 @@ export function getIntervalLabel(semitones: number): string {
     const octaves = Math.floor(abs / 12);
     const simple = abs % 12;
     
-    // Standard names for common compounds
-    // P8 + P5 = 12 + 7 = 19 (P12)
-    if (simple === 7 && octaves === 1) return `${signStr}P12`;
-    // P8 + P8 = 24 (P15)
-    if (simple === 0 && octaves === 2) return `${signStr}P15`;
-    // P8 + P4 = 12 + 5 = 17 (P11)
-    if (simple === 5 && octaves === 1) return `${signStr}P11`;
-    // P8 + M3 = 12 + 4 = 16 (M10)
-    if (simple === 4 && octaves === 1) return `${signStr}M10`;
+    // Standard names for compound intervals
+    if (simple === 3 && octaves === 1) return `${signStr}m10`;  // m3 + P8 = 15
+    if (simple === 4 && octaves === 1) return `${signStr}M10`;  // M3 + P8 = 16
+    if (simple === 5 && octaves === 1) return `${signStr}P11`;  // P4 + P8 = 17
+    if (simple === 7 && octaves === 1) return `${signStr}P12`;  // P5 + P8 = 19
+    if (simple === 8 && octaves === 1) return `${signStr}m13`;  // m6 + P8 = 20
+    if (simple === 9 && octaves === 1) return `${signStr}M13`;  // M6 + P8 = 21
+    if (simple === 0 && octaves === 2) return `${signStr}P15`;  // P8 + P8 = 24
+    if (simple === 5 && octaves === 2) return `${signStr}P18`;  // P4 + 2P8 = 29
+    if (simple === 7 && octaves === 2) return `${signStr}P19`;  // P5 + 2P8 = 31
 
     // Fallback: Base + Octave
     // Format: "+P5(+8va)"
