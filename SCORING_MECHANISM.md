@@ -3,21 +3,9 @@
 ## Objective
 To algorithmically rank Stretto Chain candidates so that the most musically significant, valid, and interesting results appear at the top of the list.
 
-## 1. Validity Constraints (The "Gatekeepers")
-Before a candidate is scored, it must pass these hard checks. If it fails, it is discarded immediately.
+Hard validity constraints (gatekeepers) are defined in `STRETTO_RULES.md §1`. A candidate must pass all of them before scoring is applied.
 
-### A. Consonant Termination (Optional)
-*   **Rule:** The last note of every voice entry must form a consonance (P1, m3, M3, P5, m6, M6, P8) with at least one other active voice when `Require Consonant End` is enabled.
-*   **Purpose:** Excludes "pure unresolved dissonances" where a voice trails off on a clashing note.
-*   **Config:** Toggle: `Require Consonant End`.
-
-### B. No Unison Chains
-*   **Rule:** A voice cannot enter at the exact same transposition interval as the immediately preceding voice.
-*   **Purpose:** Prevents "Unison stacking" (e.g., Voice 1 at P1, Voice 2 at P1) which creates clumps rather than counterpoint.
-
----
-
-## 2. The Scoring Formula
+## The Scoring Formula
 
 Candidates that pass validity are ranked using a **Base Score** of 0.
 
@@ -32,9 +20,7 @@ and `ScoreLog.base = 0`.
 ### Penalties ($P$)
 
 #### A. Quality Utility Penalty ($U_{quality}$)
-*   `S1`: Unweighted dissonance ratio (`TotalDissonantTime / TotalPolyphonicTime`).
-*   `S2`: Strong-beat-weighted dissonance ratio (1.5x weight on strong beats).
-*   `S3`: Non-chord-tone ratio over slices with at least 3 active voices (weighted at 2x prior emphasis).
+S1, S2, S3 metrics are defined in `STRETTO_RULES.md §2`.
 
 #### B. Distance Structure ($P_{distance}$)
 *   **Repeated Delay:** $-20$ points per repeated delay occurrence beyond first use.

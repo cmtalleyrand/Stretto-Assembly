@@ -35,10 +35,10 @@ Every rule in this codebase traces back to one of these files. When there is any
 
 | Document | Scope |
 |----------|-------|
-| `STRETTO_RULES.md` | Hard constraints (gatekeepers) and scoring metrics S1–S3 — primary authority |
-| `SCORING_MECHANISM.md` | Full scoring formula: all penalties, bonuses, and removed legacy terms |
-| `README.md` | Mandatory search architecture (bottom-up pipeline); also contains the critical P4/P5/P8 counterpoint policy |
+| `STRETTO_RULES.md` | **Primary authority.** All hard constraints (A–D) and scoring metrics S1–S3 |
+| `README.md` | Mandatory search architecture (bottom-up pipeline stages) |
 | `docs/stretto-entry-model.md` | Canonical entry tuple `(d_i, t_i, v_i, inv_i, trunc_i)` and legacy-field mapping |
+| `SCORING_MECHANISM.md` | Scoring formula detail: penalty/bonus point values and removed legacy terms |
 | `TS_GUIDELINES.md` | TypeScript workflow requirements |
 
 ## Full rule set
@@ -97,27 +97,13 @@ Source: `STRETTO_RULES.md §4`, `README.md` critical policy block.
 
 ### F. Scoring (ranking musically compelling chains)
 
-Source: `SCORING_MECHANISM.md`, `STRETTO_RULES.md §2–3`.
+Source: `STRETTO_RULES.md §2–3` (metrics), `SCORING_MECHANISM.md` (point values).
 
-The score rewards harmonic stability, progressive compactness, and voice density; it penalizes dissonance, monotony, unnecessary truncation, and weak tightening structure.
+`Q = 0.2·S1 + 0.3·S2 + 0.4·S3`, `U_quality = −1000Q`
 
-**Quality composite:** `Q = 0.2·S1 + 0.3·S2 + 0.4·S3`, then `U_quality = −1000Q`
-- S1: Unweighted dissonance ratio (`TotalDissonantTime / TotalPolyphonicTime`)
-- S2: Strong-beat-weighted dissonance ratio (1.5× on strong beats)
-- S3: Non-chord-tone ratio over slices with ≥ 3 active voices
+`S = U_quality + B_compactness + B_polyphony + R_harmony − P_distance − P_truncation − P_monotony − P_harmonyNCT`
 
-**Full formula:** `S = U_quality + B_compactness + B_polyphony + R_harmony − P_distance − P_truncation − P_monotony − P_harmonyNCT`
-
-**Penalties:**
-- `P_distance`: −20 per repeated delay; −10 per adjacent delay within 0.5 beat; −40 per early expansion (before final third); −40 per post-truncation contraction miss
-- `P_truncation`: −20 per beat of subject removed
-- `P_monotony`: −100 if any single interval type exceeds 50% of entry relationships
-- `P_harmonyNCT`: non-chord-tone burden from harmonic analysis
-
-**Bonuses:**
-- `B_compactness`: +50 if delay < 25% Sb; +25 if delay < 50% Sb (per entry)
-- `B_polyphony`: duration-weighted average active voice density reward
-- `R_harmony`: stable full-chord occupancy reward
+See `SCORING_MECHANISM.md` for all penalty/bonus point values.
 
 **Removed — do not re-add:** per-unique-distance reward, inversion bonus, chain-length bonus, imperfect-consonance bonus, score clamping, S4 (unprepared dissonance metric).
 
