@@ -339,8 +339,10 @@ export interface StrettoChainOption {
  * `delayBeatsFromPreviousEntry` is a first-class stored value in canonical form.
  *
  * Invariants:
- * - For `e0`: `delayBeatsFromPreviousEntry = 0`, `transpositionSemisFromE0 = 0`,
- *   `isInverted = false`, and `isTruncated = false`.
+ * - For `e0`: `delayBeatsFromPreviousEntry = 0` (sentinel, not a real delay —
+ *   rule evaluators must skip index 0 when applying delay-based constraints
+ *   such as A.2–A.6), `transpositionSemitones = 0`, `isInverted = false`,
+ *   and `isTruncated = false`.
  * - For every entry index `i > 0`: `delayBeatsFromPreviousEntry >= 0`.
  * - Monotone nondecreasing chain timing: defining
  *   `t_i = Σ_{k=0..i} chain[k].delayBeatsFromPreviousEntry`, then
@@ -348,7 +350,7 @@ export interface StrettoChainOption {
  */
 export interface CanonicalStrettoChainEntry {
     delayBeatsFromPreviousEntry: number;
-    transpositionSemisFromE0: number;
+    transpositionSemitones: number;
     voiceIndex: number;
     isInverted: boolean;
     isTruncated: boolean;
@@ -416,7 +418,7 @@ export function fromLegacyChainOption(
 
     return {
         delayBeatsFromPreviousEntry: legacy.startBeat - previousStartBeatFromE0,
-        transpositionSemisFromE0: legacy.transposition,
+        transpositionSemitones: legacy.transposition,
         voiceIndex: legacy.voiceIndex,
         isInverted: legacy.type === 'I',
         isTruncated: hasFullLength ? legacy.length < context.fullLengthTicks! : false,
@@ -432,7 +434,7 @@ export function toLegacyChainOption(
 
     return {
         startBeat: previousStartBeatFromE0 + canonical.delayBeatsFromPreviousEntry,
-        transposition: canonical.transpositionSemisFromE0,
+        transposition: canonical.transpositionSemitones,
         type: canonical.isInverted ? 'I' : 'N',
         length,
         voiceIndex: canonical.voiceIndex,
@@ -481,7 +483,17 @@ export function fromLegacyChainOptions(
 ): CanonicalStrettoChainEntry[] {
     let previousStartBeatFromE0 = 0;
 
-    return legacyEntries.map((legacy) => {
+    return legacyEntries.map((legacy, index) => {
+        // Invariant: legacy startBeat values must be monotone non-decreasing.
+        // A negative computed delay (i > 0) means the input chain is not ordered
+        // correctly and would silently corrupt rule evaluations that depend on d_i.
+        if (index > 0 && legacy.startBeat < previousStartBeatFromE0) {
+            throw new Error(
+                `fromLegacyChainOptions: entry ${index} startBeat (${legacy.startBeat}) ` +
+                `is less than previous startBeat (${previousStartBeatFromE0}). ` +
+                `Chain entries must be in non-decreasing temporal order.`
+            );
+        }
         const canonical = fromLegacyChainOption(legacy, {
             previousStartBeatFromE0,
             fullLengthTicks: context.fullLengthTicks,

@@ -10,6 +10,11 @@ e_i = (d_i,\ t_i,\ v_i,\ inv_i,\ trunc_i),\quad i \in \{0,1,\dots,N-1\}
 
 with the domain convention `d_0 = ⊥` (not applicable) and `d_i \in \mathbb{R}_{\ge 0}` for `i>=1`.
 
+> **Implementation note:** The runtime type `CanonicalStrettoChainEntry` encodes `d_0` as
+> sentinel-zero (`delayBeatsFromPreviousEntry = 0`), not as `null`. This is the authoritative
+> convention. Rule evaluators **must** skip index 0 when applying delay-based constraints
+> (Rules A.2–A.6); the sentinel value carries no musical meaning.
+
 Interpretation note: `d_i` is an **incremental delay parameter** attached to entry `e_i` (for `i>=1`), whereas `s_i` is the derived **distance-from-origin** (absolute start offset).
 
 A chain is therefore:
