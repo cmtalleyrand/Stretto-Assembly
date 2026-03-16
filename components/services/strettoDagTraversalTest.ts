@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isStrongBeat, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
+import { INTERVALS } from './strettoConstants';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -324,6 +325,10 @@ const transformConstrainedOptions: StrettoSearchOptions = {
   maxPairwiseDissonance: 1,
   targetChainLength: 4
 };
+const transformAdmissibleTranspositions = new Set<number>([
+  ...Array.from(INTERVALS.TRAD_TRANSPOSITIONS),
+  ...Array.from(INTERVALS.THIRD_SIXTH_TRANSPOSITIONS)
+]);
 
 const transformConstrainedReport = await searchStrettoChains(subject, transformConstrainedOptions, ppq);
 if (transformConstrainedReport.results.length === 0) {
@@ -347,6 +352,11 @@ for (const result of transformConstrainedReport.results) {
       (prev.type === 'I' || prevIsTruncated) && (curr.type === 'I' || currIsTruncated),
       true,
       `transformed entries must be followed by normal entries (chain id: ${result.id}, index: ${i})`
+    );
+
+    assert.ok(
+      transformAdmissibleTranspositions.has(curr.transposition),
+      `absolute transposition must remain in admissible vocabulary regardless of adjacent delta (chain id: ${result.id}, index: ${i})`
     );
 
     assert.ok(
