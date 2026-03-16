@@ -236,9 +236,12 @@ assert.equal(
   false,
   'lowest-voice pair pruning must not trigger for asymmetric bass-role incompatibility'
 );
-const conservativePairs = buildAllowedVoicePairs(0, 4, shouldPruneLowestVoicePair(asymmetricBassStrictA.compatible, asymmetricBassStrictB.compatible));
-assert.equal(conservativePairs.has('2->3'), true, 'asymmetric bass-role incompatibility must preserve tenor->bass assignment for later triplet resolution');
-assert.equal(conservativePairs.has('3->2'), true, 'asymmetric bass-role incompatibility must preserve bass->tenor assignment for later triplet resolution');
+// Rule 2B: tenor-bass requires >= 7 semitones separation. Use transpositionAB=-7 (bass 7 below tenor)
+// to test that asymmetric P4 bass-role incompatibility does NOT prune the lowest pair (disallowLowestPair=false).
+const conservativePairs = buildAllowedVoicePairs(-7, 4, shouldPruneLowestVoicePair(asymmetricBassStrictA.compatible, asymmetricBassStrictB.compatible));
+assert.equal(conservativePairs.has('2->3'), true, 'asymmetric bass-role incompatibility must preserve tenor->bass assignment when Rule 2B spacing is satisfied');
+// (3->2) with transpositionAB=-7 means tenor is 7 semitones BELOW bass — Rule 2B violation, correctly absent.
+assert.equal(conservativePairs.has('3->2'), false, 'bass->tenor assignment must be absent when tenor transposition falls below bass by 7 (Rule 2B)');
 
 const allowedPairs = buildAllowedVoicePairs(0, 4, true);
 assert.equal(allowedPairs.has('2->3'), false, 'precomputed voice-pair metadata must exclude lowest-pair assignment when disallowed');
@@ -308,6 +311,26 @@ for (const result of reportA.results) {
     );
   }
 }
+// §B voice ordering regression: every temporal pair in every result chain must satisfy
+// ordering + spacing rules, regardless of whether the entries sound simultaneously.
+for (const result of reportA.results) {
+  for (let i = 0; i < result.entries.length; i++) {
+    for (let j = i + 1; j < result.entries.length; j++) {
+      const eA = result.entries[i];
+      const eB = result.entries[j];
+      assert.ok(
+        isVoicePairAllowedForTransposition(
+          eA.voiceIndex, eB.voiceIndex,
+          eB.transposition - eA.transposition,
+          options.ensembleTotal,
+          false
+        ),
+        `§B voice ordering violation: entries ${i},${j} v${eA.voiceIndex}@${eA.transposition} vs v${eB.voiceIndex}@${eB.transposition} in chain ${result.id}`
+      );
+    }
+  }
+}
+
 assert.ok(
   ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason),
   'search must terminate with an explicit completion reason'
@@ -513,6 +536,25 @@ for (const fixture of traversalFixtures) {
         validTranspositionsForFixture.has(entry.transposition),
         `[${fixture.name}] transposition ${entry.transposition} must be a valid interval (chain ${result.id}, entry ${i})`
       );
+    }
+  }
+
+  // §B voice ordering regression for fixture chains.
+  for (const result of report.results) {
+    for (let i = 0; i < result.entries.length; i++) {
+      for (let j = i + 1; j < result.entries.length; j++) {
+        const eA = result.entries[i];
+        const eB = result.entries[j];
+        assert.ok(
+          isVoicePairAllowedForTransposition(
+            eA.voiceIndex, eB.voiceIndex,
+            eB.transposition - eA.transposition,
+            fixture.options.ensembleTotal,
+            false
+          ),
+          `[${fixture.name}] §B voice ordering violation: entries ${i},${j} v${eA.voiceIndex}@${eA.transposition} vs v${eB.voiceIndex}@${eB.transposition} in chain ${result.id}`
+        );
+      }
     }
   }
 
