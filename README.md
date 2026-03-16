@@ -1,12 +1,6 @@
 # Stretto Assembly — Algorithm Architecture
 
-## 🚨 CRITICAL COUNTERPOINT POLICY (NON-NEGOTIABLE)
-
-1. **Parallel perfect 4ths are always allowed.**
-2. **Perfect 4ths are only contextually dissonant when the lower note is the global bass at that instant; otherwise they are treated as consonant.**
-3. **Perfect 5th / octave parallels are invalid when either:**
-   - They occur across two consecutive pair boundaries, or
-   - Any such parallel occurs while both adjacent delays are `>= Sb/3` (i.e., neither delay is under one-third subject length).
+Counterpoint rules (including the P4/P5/P8 policy) are defined in `STRETTO_RULES.md`. This file covers the mandatory search architecture only.
 
 ## ⚠️ CRITICAL: DO NOT REVERT THE SEARCH ARCHITECTURE
 
@@ -45,21 +39,6 @@ Important normalization identity:
 See `docs/stretto-entry-model.md` for formal domains, constraints, and legacy-field mappings.
 
 The pipeline produces a set of **valid triplets** (consecutive groups of 3 entries), then assembles longer chains by chaining triplets that share their overlapping pair.
-
----
-
-## Intent-Alignment Notices (Authoritative: `PROJECT_INTENT.md`)
-
-The entries below explicitly flag places where this document should be treated as **outdated relative to project intent**. The intent document is authoritative for end-state architecture and workflow assumptions.
-
-| Topic | README current state | Status vs intent | Intended end state (from `PROJECT_INTENT.md`) |
-|---|---|---|---|
-| Chain-search architecture status language | This README describes bottom-up triplet assembly in normative terms and may read as fully realized. | **Outdated wording risk:** implementation remains in migration/compatibility mode, so “normative” language can be misread as “already complete.” | Search/generation converges to staged bottom-up precomputation with deterministic state propagation as the operational default, with no regression to DFS-first semantics. |
-| Canonical input contract | README architecture text is centered on internal tuple/state machinery. | **Outdated omission:** it does not foreground the canonical source-format contract. | ABC is the canonical source representation; MIDI remains an interoperability format and must not define default workflow assumptions. |
-| Product scope framing | README focuses on chain-generation architecture details. | **Outdated omission:** it does not enumerate the full in-scope problem set. | End-state scope explicitly includes pairwise discovery, chain generation, implied-harmony detection as first-class evaluation, and explicit per-voice export synthesis to MIDI/ABC. |
-| System invariants (cross-module) | README mostly states search-pipeline claims. | **Outdated omission:** cross-module invariants are under-specified here. | Pivot/inversion semantics are shared between discovery and search; delay/overlap predicates are deterministic; voice assignment is explicit/stable; UI defaults route directly to stretto operations. |
-
-Interpretation rule: when any statement here conflicts with `PROJECT_INTENT.md`, treat this README statement as historical/migration context and apply intent-defined end-state semantics.
 
 ---
 
@@ -178,7 +157,7 @@ This converts global uniqueness from a late filter into a low-cost, monotone fea
 | File | Role |
 |------|------|
 | `STRETTO_RULES.md` | Authoritative rule definitions — source of truth |
-| `PROJECT_INTENT.md` | Architectural invariants |
+| `SCORING_MECHANISM.md` | Scoring formula details (penalties, bonuses) |
 | `docs/stretto-entry-model.md` | Canonical entry tuple definition + migration mapping |
 | `strettoGenerator.ts` | Implementation — must follow the pipeline above |
 
