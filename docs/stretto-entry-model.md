@@ -10,6 +10,11 @@ e_i = (d_i,\ t_i,\ v_i,\ inv_i,\ trunc_i),\quad i \in \{0,1,\dots,N-1\}
 
 with the domain convention `d_0 = ⊥` (not applicable) and `d_i \in \mathbb{R}_{\ge 0}` for `i>=1`.
 
+> **Implementation note:** The runtime type `CanonicalStrettoChainEntry` encodes `d_0` as
+> sentinel-zero (`delayBeatsFromPreviousEntry = 0`), not as `null`. This is the authoritative
+> convention. Rule evaluators **must** skip index 0 when applying delay-based constraints
+> (Rules A.2–A.6); the sentinel value carries no musical meaning.
+
 Interpretation note: `d_i` is an **incremental delay parameter** attached to entry `e_i` (for `i>=1`), whereas `s_i` is the derived **distance-from-origin** (absolute start offset).
 
 A chain is therefore:
@@ -47,7 +52,7 @@ All fields are per-entry fields of `e_i = (d_i,t_i,v_i,inv_i,trunc_i)`.
 |---|---|---|---|
 | `d_i` | `{⊥}` for `i=0`; `ℝ>=0` beats for `i>=1` (implementation may quantize to beat-grid step) | Incremental temporal spacing parameter | `d_0` is not applicable; for `i>=1`, `d_i` is the incremental delay value attached to entry `e_i`; absolute start offsets are derived by prefix sums `s_i = Σ_{k=1..i} d_k` with `s_0=0`. |
 | `t_i` | `ℤ` semitones | Pitch transform | Subject-to-voice-order constraints and transposition admissibility checks. |
-| `v_i` | `ℤ`, `0 <= v_i < ensembleTotal` | Voice assignment | Must satisfy unique or policy-defined voice assignment constraints for the chain search mode. |
+| `v_i` | `ℤ`, `0 <= v_i < ensembleTotal` | Voice assignment | **Assigned post-hoc** by a CSP backtracker after chain search completes, enforcing §B ordering rules (Rules 2A/2B/3A/3B) for all temporal pairs and §C re-entry. During BFS, `voiceIndex` carries placeholder values; the CSP fills in final values before results are returned. Chains with no valid assignment are discarded. |
 | `inv_i` | `{0,1}` (or `{false,true}`) | Binary transform flag | `1` means inversion form, `0` means non-inverted form. |
 | `trunc_i` | `ℝ>=0` beats removed from full subject (or equivalent non-negative truncation extent scalar) | Duration transform | `0` means full-length; `>0` means truncated. |
 

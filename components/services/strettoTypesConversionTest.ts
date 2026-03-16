@@ -24,7 +24,7 @@ assert.deepEqual(
   canonicalE0,
   {
     delayBeatsFromPreviousEntry: 0,
-    transpositionSemisFromE0: 0,
+    transpositionSemitones: 0,
     voiceIndex: 0,
     isInverted: false,
     isTruncated: false,
@@ -50,7 +50,7 @@ assert.equal(canonicalSecond.isTruncated, true, 'Shorter legacy length must map 
 
 const canonicalSource: CanonicalStrettoChainEntry = {
   delayBeatsFromPreviousEntry: 1.25,
-  transpositionSemisFromE0: -5,
+  transpositionSemitones: -5,
   voiceIndex: 1,
   isInverted: true,
   isTruncated: false,
@@ -111,6 +111,17 @@ assert.deepEqual(
   roundTripLegacyChain,
   legacyChain,
   'Chain-level conversion should round-trip absolute starts without caller-managed predecessor state.'
+);
+
+assert.throws(
+  () =>
+    fromLegacyChainOptions([
+      { startBeat: 0, transposition: 0, type: 'N', length: 480, voiceIndex: 0 },
+      { startBeat: 2.0, transposition: 7, type: 'N', length: 480, voiceIndex: 1 },
+      { startBeat: 1.5, transposition: 12, type: 'N', length: 480, voiceIndex: 2 },
+    ]),
+  /entry 2 startBeat \(1\.5\) is less than previous startBeat \(2\)/,
+  'Descending startBeat sequence must be rejected to prevent negative incremental delays.'
 );
 
 console.log('strettoTypesConversion tests passed');
