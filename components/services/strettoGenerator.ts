@@ -922,6 +922,7 @@ export async function searchStrettoChains(
     if (options.thirdSixthMode !== 'None') {
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
+    const transpositionVocabulary = new Set(transpositions);
     
     const stageStats: StageStats = {
         validDelayCount: validDelays.length,
@@ -1384,7 +1385,7 @@ export async function searchStrettoChains(
                     // Keep absolute entry transpositions in the configured admissible set.
                     // Without this guard, summing adjacent legal deltas can drift to values
                     // (e.g. 14) outside the historical transposition vocabulary.
-                    if (!transpositions.includes(t)) continue;
+                    if (!transpositionVocabulary.has(t)) continue;
                     if (!transition.pairRecord!.meetsAdjacentTranspositionSeparation) continue;
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
