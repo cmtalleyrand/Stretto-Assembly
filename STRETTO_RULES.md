@@ -35,13 +35,25 @@ Any chain candidate that violates *any* of these rules is immediately discarded 
 
 Implementation invariant: Rule A.6 is an immediate-neighbor predicate and is therefore enforced during successor extension against the direct predecessor `(e_{i-1}, e_i)` only; non-adjacent overlapping pairs remain governed by harmonic compatibility rules, not A.6.
 
-### B. Voice Interval Constraints (Relative)
-The algorithm strictly enforces vertical ordering:
-1.  **Neighbor Below ($v+1$):** $T(v) \ge T(v+1)$.
-2.  **Neighbor Above ($v-1$):** $T(v) \le T(v-1)$.
+### B. Voice Interval Constraints
+
+**Scope:** Rules apply to **all temporal pairs** in a chain — not only to entries that sound simultaneously. When a new entry is assigned to a voice, the ordering constraints are checked relative to the most recent prior chain entry in every other voice, whether or not that prior entry is still sounding. These are register-identity constraints (a voice maintains its register relationship throughout the chain), not acoustic simultaneity constraints.
+
+Voice indices are ordered from highest register to lowest (0 = soprano … `ensembleTotal−1` = bass). Voices that are `dist` steps apart must satisfy a minimum transposition gap:
+
+| Rule | Distance between voice indices | Pair type | Minimum gap: T(higher register) − T(lower register) |
+|---|---|---|---|
+| 2A | dist = 1 | Non-bass adjacent pair (e.g. soprano–alto, alto–tenor) | ≥ 0 semitones |
+| 2B | dist = 1 | Tenor–bass pair (lowest adjacent pair) | ≥ 7 semitones |
+| 3A | dist = 2 | Non-bass pair (e.g. soprano–tenor, alto–bass... non-lowest) | ≥ 7 semitones |
+| 3B | dist = 2 | Alto–bass pair (lowest dist-2 pair) | ≥ 12 semitones |
+| — | dist ≥ 3 | Any pair 3 or more voice-steps apart | ≥ 12 semitones |
+
+**Implementation note:** These rules are enforced post-hoc by a CSP backtracker (`assignVoices`) that runs after chain search completes and checks every pair of entries in the chain, ordered by voice register.
 
 ### C. Voice Allocation
-1.  **Re-entry:** Any voice becomes available for re-entry 1 beat before its final note ends.
+1.  **Re-entry:** Any voice becomes available for re-entry 1 beat (`ppq`) before its current occupant's final note ends.
+2.  **Post-hoc assignment:** Voice indices (`v_i`) are not tracked during BFS. After search, a CSP backtracker assigns voices to all entries in a completed chain, enforcing §B across all temporal pairs and §C re-entry. Chains for which no valid assignment exists are discarded.
 
 ### D. Optional Consonant Termination
 If `requireConsonantEnd` is enabled, dissonant endpoints invalidate the chain.
