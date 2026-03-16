@@ -685,13 +685,14 @@ export function isVoicePairAllowedForTransposition(
     const highTrans = voiceA === highVoiceIdx ? 0 : transpositionAB;
     const lowTrans = voiceA === lowVoiceIdx ? 0 : transpositionAB;
     const dist = lowVoiceIdx - highVoiceIdx;
+    const bassIdx = ensembleTotal - 1;
+    const altoIdx = bassIdx - 2;
 
     if (highTrans < lowTrans) return false;
+    if (dist === 1 && lowVoiceIdx === bassIdx && highTrans < lowTrans + 7) return false;
     if (dist === 2 && highTrans < lowTrans + 7) return false;
     if (dist >= 3 && highTrans < lowTrans + 12) return false;
 
-    const bassIdx = ensembleTotal - 1;
-    const altoIdx = bassIdx - 2;
     if (bassIdx >= 2 && lowVoiceIdx === bassIdx && highVoiceIdx === altoIdx && highTrans < lowTrans + 12) return false;
 
     if (disallowLowestPair && lowVoiceIdx === bassIdx && highVoiceIdx === bassIdx - 1) return false;
@@ -1062,6 +1063,22 @@ export async function searchStrettoChains(
     }
     const allowedTranspositions = new Set(transpositions);
 
+    // D.0: Pre-search voice domain filter derived from e0's fixed voice + T(e0)=0.
+    // For each transposition value in the pool, compute which voices can host an entry at that
+    // transposition while satisfying ordering/spacing rules relative to e0.
+    // Transpositions with an empty valid-voice set can be eliminated before BFS begins.
+    const sv = options.subjectVoiceIndex;
+    const allowedVoicesForTrans = new Map<number, number[]>();
+    for (const t of transpositions) {
+        const validVoices: number[] = [];
+        for (let v = 0; v < options.ensembleTotal; v++) {
+            if (v === sv || isVoicePairAllowedForTransposition(sv, v, t, options.ensembleTotal, false)) {
+                validVoices.push(v);
+            }
+        }
+        allowedVoicesForTrans.set(t, validVoices);
+    }
+
     const stageStats: StageStats = {
         validDelayCount: validDelays.length,
         transpositionCount: transpositions.length,
@@ -1419,7 +1436,6 @@ export async function searchStrettoChains(
     interface DagNode {
         chain: StrettoChainOption[];
         variantIndices: number[];
-        voiceEndTimesTicks: number[];
         nInv: number;
         nTrunc: number;
         nRestricted: number;
@@ -1457,7 +1473,7 @@ export async function searchStrettoChains(
             if (eStart + subjectLengthTicks <= lastStartTicks) break;
             const eEnd = eStart + variants[node.variantIndices[k]].lengthTicks;
             if (eEnd > lastStartTicks) {
-                activeSig += `${node.variantIndices[k]},${eStart},${e.transposition},${e.voiceIndex};`;
+                activeSig += `${node.variantIndices[k]},${eStart},${e.transposition};`;
             }
         }
 
@@ -1473,9 +1489,76 @@ export async function searchStrettoChains(
         return `${depth}|${activeSig}|pp:${prevPrevDelay}|q:${node.nInv},${node.nTrunc},${node.nRestricted},${node.nFree}|ld:${node.longDelaySignature}`;
     }
 
+    // D.4: Post-hoc CSP voice assignment.
+    // Assigns voice indices to a completed chain via backtracking, enforcing:
+    //   - Voice ordering constraints for ALL temporal pairs (§B), not just simultaneous ones
+    //   - §C re-entry (voice may not accept a new entry until 1 beat before its occupant ends)
+    //   - P4 bass-role dissonance constraint for overlapping pairs
+    // Returns the chain with voiceIndex filled in, or null if no valid assignment exists.
+    function assignVoices(chain: StrettoChainOption[], vIndices: number[]): StrettoChainOption[] | null {
+        const n = chain.length;
+        const voices = new Array<number>(n).fill(-1);
+        const bassIdx = options.ensembleTotal - 1;
+
+        // Two entries conflict in time if they sound simultaneously (with 1-beat re-entry window).
+        function conflicts(i: number, j: number): boolean {
+            const iStart = Math.round(chain[i].startBeat * ppq);
+            const jStart = Math.round(chain[j].startBeat * ppq);
+            if (iStart > jStart) return conflicts(j, i);
+            const iEnd = iStart + variants[vIndices[i]].lengthTicks;
+            return jStart < iEnd - ppq;
+        }
+
+        function valid(pos: number, v: number): boolean {
+            for (let k = 0; k < pos; k++) {
+                // Voice ordering applies to ALL temporal pairs — even after prior entry has ended.
+                if (!isVoicePairAllowedForTransposition(
+                    voices[k], v,
+                    chain[pos].transposition - chain[k].transposition,
+                    options.ensembleTotal,
+                    false
+                )) return false;
+                // §C: entries that conflict in time cannot share a voice.
+                if (conflicts(k, pos) && voices[k] === v) return false;
+                // P4 bass-role dissonance: only applicable to overlapping pairs.
+                if (conflicts(k, pos)) {
+                    const kStart = Math.round(chain[k].startBeat * ppq);
+                    const posStart = Math.round(chain[pos].startBeat * ppq);
+                    const [eIdx, lIdx] = kStart <= posStart ? [k, pos] : [pos, k];
+                    const relDelay = Math.round(chain[lIdx].startBeat * ppq) - Math.round(chain[eIdx].startBeat * ppq);
+                    const relTrans = chain[lIdx].transposition - chain[eIdx].transposition;
+                    const rec = getPairRecord(vIndices[eIdx], vIndices[lIdx], relDelay, relTrans);
+                    if (rec?.hasFourth) {
+                        const eV = kStart <= posStart ? voices[k] : v;
+                        const lV = kStart <= posStart ? v : voices[k];
+                        let bassRole: PairwiseBassRole = 'none';
+                        if (eV === bassIdx && lV !== bassIdx) bassRole = 'a';
+                        else if (lV === bassIdx && eV !== bassIdx) bassRole = 'b';
+                        if (bassRole !== 'none' && !rec.bassRoleCompatible[bassRole]) return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function backtrack(pos: number): boolean {
+            if (pos === n) return true;
+            for (let v = 0; v < options.ensembleTotal; v++) {
+                if (valid(pos, v)) {
+                    voices[pos] = v;
+                    if (backtrack(pos + 1)) return true;
+                }
+            }
+            return false;
+        }
+
+        if (!backtrack(0)) return null;
+        return chain.map((e, i) => ({ ...e, voiceIndex: voices[i] }));
+    }
+
     function expandNode(node: DagNode): DagNode[] {
         const successors: DagNode[] = [];
-        const { chain, variantIndices, voiceEndTimesTicks, nInv, nTrunc, nRestricted, nFree, usedLongDelays, longDelaySignature } = node;
+        const { chain, variantIndices, nInv, nTrunc, nRestricted, nFree, usedLongDelays, longDelaySignature } = node;
         const depth = chain.length;
         const prevEntry = chain[depth - 1];
 
@@ -1693,78 +1776,41 @@ export async function searchStrettoChains(
                     // (variant, delay, transposition) candidate and reuse across voice placements.
                     if (!checkMetricCompliance(variant, metricProbeEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
-                    for (let v = 0; v < options.ensembleTotal; v++) {
-                        if (absStartTicks < voiceEndTimesTicks[v] - ppq) continue;
+                    // D.0: Pre-search voice domain filter — skip candidates with no valid voice
+                    // given e0's register constraints. Voice assignment is post-hoc (Option D).
+                    if ((allowedVoicesForTrans.get(t)?.length ?? 0) === 0) continue;
 
-                        let stratFail = false;
-                        for (const { entry: e, pairRecord } of overlappingPairs) {
-                            // Voice-pair admissibility (precomputed, includes spacing rules)
-                            if (!pairRecord.allowedVoicePairs.has(`${e.voiceIndex}->${v}`)) {
-                                stratFail = true;
-                                break;
-                            }
+                    edgesTraversed++;
+                    // Propagate A.1 delay-set: add this delay if it's > Sb/3
+                    const needsNewLongDelaySet = delayTicks > oneThirdSubjectTicks && !usedLongDelays.has(delayTicks);
+                    const newUsedLongDelays = needsNewLongDelaySet
+                        ? new Set(usedLongDelays).add(delayTicks)
+                        : usedLongDelays;
+                    const newLongDelaySignature = needsNewLongDelaySet
+                        ? Array.from(newUsedLongDelays).sort((a, b) => a - b).join(',')
+                        : longDelaySignature;
 
-                            // P4 bass-role check: use precomputed per-bass-role compatibility.
-                            // No re-scanning needed — results are cached in the pairwise record.
-                            const pairBassIdx = options.ensembleTotal - 1;
-                            if (pairRecord.hasFourth) {
-                                let bassRole: PairwiseBassRole = 'none';
-                                if (e.voiceIndex === pairBassIdx && v !== pairBassIdx) bassRole = 'a';
-                                else if (v === pairBassIdx && e.voiceIndex !== pairBassIdx) bassRole = 'b';
-
-                                if (bassRole !== 'none' && !pairRecord.bassRoleCompatible[bassRole]) {
-                                    stratFail = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (stratFail) continue;
-
-                        const tempNextEntry: StrettoChainOption = {
-                            ...metricProbeEntry,
-                            voiceIndex: v
-                        };
-
-                        const newVoiceState = [...voiceEndTimesTicks];
-                        newVoiceState[v] = absStartTicks + variant.lengthTicks;
-
-                        edgesTraversed++;
-                        // Propagate A.1 delay-set: add this delay if it's > Sb/3
-                        const needsNewLongDelaySet = delayTicks > oneThirdSubjectTicks && !usedLongDelays.has(delayTicks);
-                        const newUsedLongDelays = needsNewLongDelaySet
-                            ? new Set(usedLongDelays).add(delayTicks)
-                            : usedLongDelays;
-                        const newLongDelaySignature = needsNewLongDelaySet
-                            ? Array.from(newUsedLongDelays).sort((a, b) => a - b).join(',')
-                            : longDelaySignature;
-
-                        successors.push({
-                            chain: [...chain, tempNextEntry],
-                            variantIndices: [...variantIndices, varIdx],
-                            voiceEndTimesTicks: newVoiceState,
-                            nInv: nInv + (isInv ? 1 : 0),
-                            nTrunc: nTrunc + (isTrunc ? 1 : 0),
-                            nRestricted: nextRestricted,
-                            nFree: nextFree,
-                            usedLongDelays: newUsedLongDelays,
-                            longDelaySignature: newLongDelaySignature
-                        });
-                    }
+                    successors.push({
+                        chain: [...chain, metricProbeEntry],
+                        variantIndices: [...variantIndices, varIdx],
+                        nInv: nInv + (isInv ? 1 : 0),
+                        nTrunc: nTrunc + (isTrunc ? 1 : 0),
+                        nRestricted: nextRestricted,
+                        nFree: nextFree,
+                        usedLongDelays: newUsedLongDelays,
+                        longDelaySignature: newLongDelaySignature
+                    });
                 }
             }
 
         return successors;
     }
 
-    const initialVoiceState = new Array(options.ensembleTotal).fill(0);
-    initialVoiceState[options.subjectVoiceIndex] = variants[0].lengthTicks;
-
     const oneThirdSubjectTicks = subjectLengthTicks / 3;
 
     let frontier: DagNode[] = [{
         chain: [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].lengthTicks, voiceIndex: options.subjectVoiceIndex }],
         variantIndices: [0],
-        voiceEndTimesTicks: initialVoiceState,
         nInv: 0,
         nTrunc: 0,
         nRestricted: 0,
@@ -1816,7 +1862,10 @@ export async function searchStrettoChains(
                 const sig = getChainSignature(node.chain);
                 if (!seenSignatures.has(sig)) {
                     seenSignatures.add(sig);
-                    unscoredResults.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
+                    const assigned = assignVoices([...node.chain], [...node.variantIndices]);
+                    if (assigned !== null) {
+                        unscoredResults.push({ entries: assigned, variantIndices: [...node.variantIndices] });
+                    }
                 }
                 continue;
             }
@@ -1825,7 +1874,10 @@ export async function searchStrettoChains(
                 const sig = getChainSignature(node.chain);
                 if (!seenPartialSigs.has(sig)) {
                     seenPartialSigs.add(sig);
-                    unscoredPartials.push({ entries: [...node.chain], variantIndices: [...node.variantIndices] });
+                    const assignedPartial = assignVoices([...node.chain], [...node.variantIndices]);
+                    if (assignedPartial !== null) {
+                        unscoredPartials.push({ entries: assignedPartial, variantIndices: [...node.variantIndices] });
+                    }
                 }
             }
 
