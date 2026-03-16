@@ -21,29 +21,19 @@ This ordering minimizes risk of latent false positives/negatives in candidate ac
 
 ## Consolidated First-Order Tasks
 
-### Task A — Canonical Semantics and Invariant Enforcement (Highest priority)
+### Task A — Canonical Semantics and Invariant Enforcement (RESOLVED)
 
-**Problem cluster addressed:**
-- Canonical-doc vs runtime semantic drift for `d_0` / first-entry delay representation.
-- Missing runtime enforcement of monotonic start offsets in legacy↔canonical conversion utilities.
+**Resolution:** Sentinel-zero is the authoritative convention for `d_0`.
 
-**Evidence:**
-- Canonical docs define `d_0` as non-applicable (`⊥`).
-- Runtime canonical type currently encodes entry-0 delay as numeric zero.
-- Conversion helpers compute delay by subtraction but do not enforce non-negative monotonic sequences.
-
-**Execution plan:**
-1. Choose one `e0` encoding convention and make it authoritative (nullability or sentinel-zero).
-2. Update type-level contracts and conversion comments accordingly.
-3. Add conversion-path invariant checks (reject negative delays / descending starts).
-4. Ensure tests explicitly cover malformed sequence rejection and valid round-trip behavior.
-
-**Complexity impact:**
-- Conversion remains linear `O(n)` in chain length.
-- Additional invariant checks add only constant-time per entry, preserving asymptotic complexity.
-
-**Why first-order:**
-A semantic contract mismatch in core data representation can invalidate pruning and scoring assumptions across modules.
+**Changes made:**
+- `CanonicalStrettoChainEntry` JSDoc updated to explicitly document `delayBeatsFromPreviousEntry = 0`
+  as a sentinel value for `e0`, with a note that rule evaluators must skip index 0 when applying
+  delay-based constraints (A.2–A.6).
+- `fromLegacyChainOptions` now throws on descending `startBeat` sequences (negative implied delays),
+  enforcing the monotone non-decreasing invariant at the conversion boundary.
+- Test coverage added in `strettoTypesConversionTest.ts` for malformed sequence rejection.
+- `transpositionSemisFromE0` renamed to `transpositionSemitones` throughout to remove the misleading
+  `FromE0` suffix (each entry's transposition is an absolute pitch shift, not relative to e0's value).
 
 ---
 
@@ -73,31 +63,27 @@ Without a regression shield, architecture correctness is non-stationary and can 
 
 ## Consolidated Second-Order Tasks
 
-### Task C — Product-Contract Documentation/UX Reconciliation (Second priority)
+### Task C — Product-Contract Documentation/UX Reconciliation (CLOSED — not a discrepancy)
 
-**Problem cluster addressed:**
-- Project intent positions ABC as canonical source format, while current UI and ingestion flow are MIDI-first.
+**Finding:** The UI makes ABC the primary source format. The ingestion path in `abcBridge.ts`
+(`parseSimpleAbc`) handles ABC input, while `midiAbc.ts` handles MIDI→ABC export. This is
+consistent with `PROJECT_INTENT.md`. The earlier assessment over-read surface-level signals
+(dedicated MIDI hooks, `input.mid` default filename) as implying MIDI primacy; the actual
+user-facing upload flow is ABC-first.
 
-**Execution plan:**
-1. Decision gate: either implement ABC-first source workflow or explicitly mark ABC-canonical as future state.
-2. Align README, PROJECT_INTENT, and upload affordances to the chosen policy.
-
-**Why second-order:**
-This is governance and workflow framing; it does not directly alter chain-validity acceptance predicates.
+**No action required.** `PROJECT_INTENT.md` and the implementation are aligned on this point.
 
 ---
 
 ### Task D — Extended diagnostics/UI observability improvements (Second priority)
 
-**Problem cluster addressed:**
-- Potential enhancements around stage-level observability and richer explainability are useful but not blocking for correctness.
+**P6-T09 status:** Coverage metrics are already implemented in `strettoGenerator.ts`.
+`StrettoSearchReport.stats.coverage` is populated with `nodeBudgetUsedPercent`,
+`completionRatioLowerBound`, `frontierSizeAtTermination`, and related fields. P6-T09 is complete.
 
-**Execution plan:**
-1. Expand reporting where needed after Task A/B completion.
-2. Add UI diagnostics only after invariant guarantees are stable.
-
-**Why second-order:**
-Observability quality is valuable, but correctness invariants and regression enforcement dominate system risk.
+**Remaining scope:**
+- UI diagnostics panel (P6-T11) is deferred and can be added after Task B invariant suite is stable.
+- Stage-level observability beyond current `stageStats` may be expanded as needed.
 
 ---
 
