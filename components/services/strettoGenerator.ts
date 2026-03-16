@@ -1381,6 +1381,10 @@ export async function searchStrettoChains(
                 for (const transition of indexedTransitions) {
                     const t = prevTransposition + transition.transpositionDelta;
                     if (t === prevTransposition) continue;
+                    // Keep absolute entry transpositions in the configured admissible set.
+                    // Without this guard, summing adjacent legal deltas can drift to values
+                    // (e.g. 14) outside the historical transposition vocabulary.
+                    if (!transpositions.includes(t)) continue;
                     if (!transition.pairRecord!.meetsAdjacentTranspositionSeparation) continue;
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
