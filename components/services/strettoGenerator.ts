@@ -276,11 +276,13 @@ function runStructuralScanGuard<T>(
 
 function buildEntryStateAdmissibilityModel(
     variants: SubjectVariant[],
-    transpositions: number[],
+    allowedAbsoluteTranspositions: number[],
+    relativeTranspositionDeltas: number[],
     delayStep: number,
     targetChainLength: number,
     options: StrettoSearchOptions
 ): EntryStateAdmissibilityModel {
+    const allowedAbsoluteTranspositionSet = new Set(allowedAbsoluteTranspositions);
     const admissiblePairKeys: AdmissiblePairIndex = new Map();
     const addAdmissiblePair = (vA: number, vB: number, d: number, t: number): void => {
         let byVB = admissiblePairKeys.get(vA);
@@ -337,9 +339,11 @@ function buildEntryStateAdmissibilityModel(
                 if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
             }
 
-            for (const relTransposition of transpositions) {
+            for (const relTransposition of relativeTranspositionDeltas) {
                 if (relTransposition === 0) continue;
                 if (Math.abs(relTransposition) < 5) continue;
+                const nextPrevTransposition = state.prevTransposition + relTransposition;
+                if (!allowedAbsoluteTranspositionSet.has(nextPrevTransposition)) continue;
 
                 for (let nextVariantIndex = 0; nextVariantIndex < variants.length; nextVariantIndex++) {
                     const nextVariant = variants[nextVariantIndex];
@@ -359,7 +363,6 @@ function buildEntryStateAdmissibilityModel(
                     const nextInv = state.nInv + (isInv ? 1 : 0);
                     const nextTrunc = state.nTrunc + (isTrunc ? 1 : 0);
                     const nextDepth = state.depth + 1;
-                    const nextPrevTransposition = state.prevTransposition + relTransposition;
                     const visitKey = [
                         nextDepth,
                         nextVariantIndex,
@@ -1120,6 +1123,9 @@ export async function searchStrettoChains(
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
     const allowedTranspositions = new Set(transpositions);
+    const relativeTranspositionDeltas = Array.from(new Set(
+        transpositions.flatMap((left) => transpositions.map((right) => right - left))
+    ));
 
 
     const stageStats: StageStats = {
@@ -1155,7 +1161,14 @@ export async function searchStrettoChains(
     const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
     const entryStateAdmissibilityModel = forceFullPairwiseDiagnostic
         ? { admissiblePairKeys: null, statesVisited: 0 }
-        : buildEntryStateAdmissibilityModel(variants, transpositions, delayStep, options.targetChainLength, options);
+        : buildEntryStateAdmissibilityModel(
+            variants,
+            transpositions,
+            relativeTranspositionDeltas,
+            delayStep,
+            options.targetChainLength,
+            options
+        );
 
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
@@ -1165,7 +1178,7 @@ export async function searchStrettoChains(
         for (let iB = 0; iB < variants.length; iB++) {
             const vB = variants[iB];
             for (const d of validDelays) {
-                for (const t of transpositions) {
+                for (const t of relativeTranspositionDeltas) {
                     const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
                     if (admissiblePairKeys && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
                         continue;
