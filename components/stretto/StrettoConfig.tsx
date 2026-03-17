@@ -157,20 +157,30 @@ export default function StrettoConfig({
                     </label>
                 </div>
 
-                {includeInversions && (
-                    <div className="mt-3 border-t border-gray-700 pt-3 space-y-3">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <div className="text-[10px] text-gray-400 font-bold uppercase">Optimal Pivot Search</div>
-                                <div className="text-[10px] text-gray-500">Subject-note constrained candidates: <span className="font-mono text-gray-300">{pivotOptions.length}</span></div>
-                            </div>
-                            <button type="button"
-                                onClick={onFindOptimalPivot}
-                                className="px-3 py-1.5 text-[11px] rounded bg-brand-primary hover:bg-brand-secondary text-white font-bold shadow"
-                            >
-                                Find Best Pivot
-                            </button>
+                <div className="mt-3 border-t border-gray-700 pt-3 space-y-3">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <div className="text-[10px] text-gray-400 font-bold uppercase">Optimal Pivot Search</div>
+                            <div className="text-[10px] text-gray-500">Subject-note constrained candidates: <span className="font-mono text-gray-300">{pivotOptions.length}</span></div>
                         </div>
+                        <button
+                            type="button"
+                            onClick={onFindOptimalPivot}
+                            disabled={!includeInversions}
+                            className="px-3 py-1.5 text-[11px] rounded bg-brand-primary text-white font-bold shadow transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-brand-secondary"
+                            title={includeInversions ? 'Evaluate every candidate pivot and rank by objective score.' : 'Enable + Inversions to activate optimal pivot search.'}
+                        >
+                            Find Best Pivot
+                        </button>
+                    </div>
+                    {!includeInversions && (
+                        <p className="text-[10px] text-amber-300 bg-amber-900/20 border border-amber-700/40 rounded px-2 py-1">
+                            Enable <span className="font-semibold">+ Inversions</span> to activate pivot optimization.
+                        </p>
+                    )}
+
+                    {includeInversions && (
+                        <>
 
                         <details className="bg-gray-900/50 border border-gray-700 rounded p-2 group">
                             <summary className="text-[10px] text-gray-300 font-semibold cursor-pointer list-none flex items-center justify-between">
@@ -255,8 +265,9 @@ export default function StrettoConfig({
                                 </div>
                             </div>
                         )}
-                    </div>
-                )}
+                        </>
+                    )}
+                </div>
             </div>
 
             <div className="p-4 bg-gray-800 rounded border border-gray-700 shadow-sm">
