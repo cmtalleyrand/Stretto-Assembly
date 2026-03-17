@@ -5,6 +5,19 @@ import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../ty
 
 const ppq = 480;
 
+/**
+ * Unique assertion matrix for pairwise invariants.
+ *
+ * This file is the single authoritative location for the invariants below.
+ * Add new tests elsewhere only when preconditions/postconditions are provably non-equivalent.
+ *
+ * - dissonance-ratio rejection → `violatesPairwiseLowerBound(...)` (record with dissonanceRatio > cap)
+ * - max dissonance-run rejection → `violatesPairwiseLowerBound(...)` (record with maxDissonanceRunEvents > 2)
+ * - sustained dissonance-duration rejection → `violatesPairwiseLowerBound(...)` (record with maxDissonanceRunTicks > maxAllowedContinuousDissonanceTicks)
+ * - bass-role-dependent P4 rejection → `checkCounterpointStructureWithBassRole(...)` (P4 accepted in neutral scan, rejected in bass-qualified scans)
+ * - parallel perfect-motion policy → `checkCounterpointStructure(...)` (P5/P8 parallel flagged via hasParallelPerfect58, contrary/P4 not flagged)
+ */
+
 assert.equal(
   toCanonicalTripletKey({
     variantA: 0,
