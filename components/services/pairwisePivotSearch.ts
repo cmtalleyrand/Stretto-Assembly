@@ -1,5 +1,12 @@
 import { RawNote } from '../../types';
 
+export const PIVOT_OBJECTIVE_WEIGHTS = {
+  viablePairRate: 0.4,
+  delayCoverageRate: 0.3,
+  inverseVarietyWeightedDelayDissonance: 0.3,
+} as const;
+
+
 export interface PivotCandidateObservation {
   delayTicks: number;
   dissonanceRatio: number;
@@ -80,7 +87,7 @@ function summarizePivotObservations(observations: PivotCandidateObservation[]): 
 
   const varietyWeightedDelayDissonance = totalDelays > 0 ? clamp01(weightedDelaySum / totalDelays) : 1;
 
-  const objectiveScore = (0.4 * viablePairRate) + (0.3 * delayCoverageRate) + (0.3 * (1 - varietyWeightedDelayDissonance));
+  const objectiveScore = (PIVOT_OBJECTIVE_WEIGHTS.viablePairRate * viablePairRate) + (PIVOT_OBJECTIVE_WEIGHTS.delayCoverageRate * delayCoverageRate) + (PIVOT_OBJECTIVE_WEIGHTS.inverseVarietyWeightedDelayDissonance * (1 - varietyWeightedDelayDissonance));
 
   return {
     viablePairRate,
