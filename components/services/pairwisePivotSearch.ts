@@ -116,6 +116,7 @@ export function rankPivotCandidates({
   }
 
   return metrics.sort((a, b) => {
+    if (b.objectiveScore !== a.objectiveScore) return b.objectiveScore - a.objectiveScore;
     if (b.viablePairRate !== a.viablePairRate) return b.viablePairRate - a.viablePairRate;
     if (b.delayCoverageRate !== a.delayCoverageRate) return b.delayCoverageRate - a.delayCoverageRate;
     if (a.varietyWeightedDelayDissonance !== b.varietyWeightedDelayDissonance) return a.varietyWeightedDelayDissonance - b.varietyWeightedDelayDissonance;

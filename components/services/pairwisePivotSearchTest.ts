@@ -55,4 +55,23 @@ const tieBreakRanked = rankPivotCandidates({
 });
 assert.equal(tieBreakRanked[0].pivotMidi, 67, 'Tie-break must prefer pivot nearest to the reference pivot.');
 
+
+const objectiveScoreRanked = rankPivotCandidates({
+  pivots: [60, 67],
+  referencePivot: 64,
+  evaluatePivot: (pivotMidi) => {
+    if (pivotMidi === 60) {
+      return [
+        { delayTicks: 240, dissonanceRatio: 0.2, isViable: true },
+        { delayTicks: 480, dissonanceRatio: 0.8, isViable: false },
+      ];
+    }
+    return [
+      { delayTicks: 240, dissonanceRatio: 0.35, isViable: true },
+      { delayTicks: 480, dissonanceRatio: 0.35, isViable: true },
+    ];
+  }
+});
+assert.equal(objectiveScoreRanked[0].pivotMidi, 67, 'Primary ranking key must be objectiveScore to preserve aggregate metric ordering.');
+
 console.log('PASS pairwisePivotSearchTest');
