@@ -8,6 +8,7 @@ import { DownloadIcon } from '../Icons';
 import { generatePolyphonicHarmonicRegions, getInvertedPitch } from '../services/strettoCore'; // Use centralized inversion
 import { getStrictPitchName } from '../services/midiSpelling';
 import { deriveSearchStatusPresentation } from './searchStatus';
+import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRegions } from './harmonicRegionDiagnostics';
 
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
@@ -124,6 +125,19 @@ export default function StrettoChainView({
         };
     }, [searchReport]);
 
+    const maxConsecutiveDissonanceRegions = React.useMemo(() => {
+        if (!chainCandidate) return 0;
+        return computeMaxConsecutiveDissonanceRegions(chainCandidate.regions);
+    }, [chainCandidate]);
+
+    const dissonanceAudit = React.useMemo(() => {
+        if (!chainCandidate) {
+            return { nctRegions: 0, dissonantRegions: 0, consonantRegionsWithNct: 0 };
+        }
+        return computeHarmonicRegionDissonanceAudit(chainCandidate.regions);
+    }, [chainCandidate]);
+
+
     return (
         <>
             <StrettoSearchPanel 
@@ -162,7 +176,7 @@ export default function StrettoChainView({
                             <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()} · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()} · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}</div>
                             <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
                             <div>
-                                Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()} · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()} · invariant: 
+                                Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()} · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()} · invariant:
                                 <span className={diagnostics.transitionAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
                                     {diagnostics.transitionAccountingHolds ? 'holds' : 'violated'}
                                 </span>
@@ -194,6 +208,17 @@ export default function StrettoChainView({
                         onClearAssembly={() => {}}
                         onDownloadChain={onDownloadChain}
                     />
+                    {selectedChain && (
+                        <div className="mt-3 rounded border border-gray-700 bg-gray-900/60 p-2 text-[10px] text-gray-300">
+                            <span className="font-semibold text-gray-200">Rendered Harmonic-Region Diagnostic:</span>{' '}
+                            Maximum consecutive dissonant regions = <span className="font-mono text-amber-300">{maxConsecutiveDissonanceRegions}</span>
+                            <div className="mt-1 text-[9px] text-gray-400">
+                                NCT regions: <span className="font-mono text-amber-300">{dissonanceAudit.nctRegions}</span> ·
+                                Dissonant regions: <span className="font-mono text-amber-300">{dissonanceAudit.dissonantRegions}</span> ·
+                                Consonant-with-NCT anomalies: <span className={`font-mono ${dissonanceAudit.consonantRegionsWithNct > 0 ? 'text-red-300' : 'text-green-300'}`}>{dissonanceAudit.consonantRegionsWithNct}</span>
+                            </div>
+                        </div>
+                    )}
                     
                     <div className="mt-4 flex flex-col md:flex-row justify-between items-center gap-4 bg-gray-800 p-3 rounded border border-gray-700">
                         <div className="flex items-center gap-4">

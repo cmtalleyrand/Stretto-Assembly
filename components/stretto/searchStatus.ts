@@ -7,8 +7,51 @@ export interface SearchStatusPresentation {
   progressPercent: number;
 }
 
+export interface SearchDiagnosticsPresentation {
+  summary: string;
+  constraintSignals: string[];
+}
+
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function asPercent(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return clampPercent((numerator / denominator) * 100);
+}
+
+export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport): SearchDiagnosticsPresentation {
+  const stageStats = report.stats.stageStats;
+  const coverage = report.stats.coverage;
+
+  if (!stageStats) {
+    return {
+      summary: 'Detailed search diagnostics unavailable for this run.',
+      constraintSignals: []
+    };
+  }
+
+  const pairRejectPercent = asPercent(stageStats.pairStageRejected, stageStats.pairwiseTotal);
+  const pairCompatiblePercent = asPercent(stageStats.pairwiseCompatible, stageStats.pairwiseTotal);
+  const tripleRejected = stageStats.triplePairwiseRejected + stageStats.tripleLowerBoundRejected + stageStats.tripleParallelRejected + stageStats.tripleVoiceRejected + stageStats.tripleP4BassRejected;
+  const tripleRejectPercent = asPercent(tripleRejected, stageStats.tripleCandidates);
+  const tripleValidPercent = asPercent(stageStats.harmonicallyValidTriples, stageStats.tripleCandidates);
+
+  const signals: string[] = [];
+  signals.push(`Pairwise combinations: ${stageStats.pairwiseTotal.toLocaleString()} total; ${stageStats.pairwiseCompatible.toLocaleString()} compatible (${pairCompatiblePercent}%), ${stageStats.pairStageRejected.toLocaleString()} rejected (${pairRejectPercent}%).`);
+  signals.push(`Triplet combinations: ${stageStats.tripleCandidates.toLocaleString()} total; ${stageStats.harmonicallyValidTriples.toLocaleString()} valid (${tripleValidPercent}%), ${tripleRejected.toLocaleString()} rejected (${tripleRejectPercent}%).`);
+  signals.push(`Triplet reject breakdown: pairwise=${stageStats.triplePairwiseRejected}, lowerBound=${stageStats.tripleLowerBoundRejected}, parallel=${stageStats.tripleParallelRejected}, voice=${stageStats.tripleVoiceRejected}, p4Bass=${stageStats.tripleP4BassRejected}.`);
+  signals.push(`Global-lineage rejects: ${stageStats.globalLineageStageRejected}. Structural scans: ${stageStats.structuralScanInvocations.toLocaleString()}. DAG merges: ${stageStats.deterministicDagMergedNodes.toLocaleString()}.`);
+
+  if (coverage) {
+    signals.push(`Coverage: nodeBudget=${coverage.nodeBudgetUsedPercent}% maxFrontier=${coverage.maxFrontierSize.toLocaleString()} classes=${coverage.maxFrontierClassCount.toLocaleString()} terminationFrontier=${coverage.frontierSizeAtTermination.toLocaleString()} (${coverage.frontierClassesAtTermination.toLocaleString()} classes).`);
+  }
+
+  return {
+    summary: 'Stage-level counts only (no inferred root-cause classification).',
+    constraintSignals: signals
+  };
 }
 
 export function deriveSearchStatusPresentation(
