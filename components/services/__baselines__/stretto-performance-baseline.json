@@ -1,0 +1,50 @@
+{
+  "version": 2,
+  "updateGuidance": [
+    "Update this baseline only when a deliberate algorithmic change alters asymptotic or practical search complexity on targetChainLength=8 scenarios.",
+    "Before updating values, re-run correctness-oriented stretto tests and document the complexity rationale in the associated commit/PR.",
+    "Do not raise bounds for transient runtime noise; only adjust multipliers for machine variance and keep structural counters tied to algorithmic behavior."
+  ],
+  "fixtures": {
+    "target8_scale8": {
+      "multiplier": 1.35,
+      "depthLowerBound": 5,
+      "stats": {
+        "timeMs": 830,
+        "nodesVisited": 2771,
+        "stageStats": {
+          "pairwiseTotal": 466,
+          "pairwiseCompatible": 305,
+          "tripleCandidates": 93025,
+          "harmonicallyValidTriples": 17435,
+          "pairStageRejected": 161,
+          "tripletStageRejected": 75584,
+          "globalLineageStageRejected": 493,
+          "structuralScanInvocations": 666,
+          "candidateTransitionsEnumerated": 35523,
+          "transitionsReturned": 9410
+        }
+      }
+    },
+    "target8_scale10": {
+      "multiplier": 1.35,
+      "depthLowerBound": 6,
+      "stats": {
+        "timeMs": 2248,
+        "nodesVisited": 12221,
+        "stageStats": {
+          "pairwiseTotal": 616,
+          "pairwiseCompatible": 402,
+          "tripleCandidates": 161604,
+          "harmonicallyValidTriples": 29974,
+          "pairStageRejected": 214,
+          "tripletStageRejected": 131603,
+          "globalLineageStageRejected": 1870,
+          "structuralScanInvocations": 880,
+          "candidateTransitionsEnumerated": 314004,
+          "transitionsReturned": 58904
+        }
+      }
+    }
+  }
+}
