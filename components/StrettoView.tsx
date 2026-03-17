@@ -90,7 +90,8 @@ export default function StrettoView({
         disallowComplexExceptions: false,
         maxPairwiseDissonance: 1.0, // Default to Allow All
         scaleRoot: 0,
-        scaleMode: 'Major'
+        scaleMode: 'Major',
+        maxSearchTimeMs: 30000
     });
     
     const [chainResults, setChainResults] = useState<StrettoChainResult[]>([]);
