@@ -45,7 +45,7 @@ interface PairwiseCompatibilityRecord {
     // Per-bass-role dissonance detail for P4-as-bass resolution.
     bassRoleDissonanceRatio: { none: number; a: number; b: number };
     bassRoleMaxRunEvents: { none: number; a: number; b: number };
-    bassRoleDissonantEventStarts: { none: number[]; a: number[]; b: number[] };
+    bassRoleDissonanceRunSpans: { none: SimultaneitySpan[]; a: SimultaneitySpan[]; b: SimultaneitySpan[] };
     // Interval class of the transposition (mod 12), precomputed for quota checks.
     intervalClass: number;
     isRestrictedInterval: boolean;
@@ -107,7 +107,7 @@ interface PairwiseScanResult {
     dissonanceSpans: SimultaneitySpan[];
     p4Spans: SimultaneitySpan[];
     parallelPerfectStartTicks: number[];
-    dissonantEventStarts: number[];
+    dissonanceRunSpans: SimultaneitySpan[];
 }
 
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
@@ -539,7 +539,9 @@ export function checkCounterpointStructureWithBassRole(
     let maxDissonanceRunEvents = 0;
     let maxDissonanceRunTicks = 0;
     const maxAllowedContinuousDissonanceTicks = ppqParam;
-    const dissonantEventStarts: number[] = [];
+    const dissonanceRunSpans: SimultaneitySpan[] = [];
+    let runStartTick = 0;
+    let runEndTick = 0;
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -559,6 +561,7 @@ export function checkCounterpointStructureWithBassRole(
         const activeB = (ptrB < notesB.length && notesB[ptrB].start <= start && notesB[ptrB].end > start) ? notesB[ptrB] : null;
 
         if (!activeA || !activeB) {
+            if (lastIsDiss) dissonanceRunSpans.push({ startTick: runStartTick, endTick: runEndTick });
             prevP1 = null; prevP2 = null;
             dissRunLength = 0;
             dissRunTicks = 0;
@@ -617,27 +620,29 @@ export function checkCounterpointStructureWithBassRole(
         if (isDiss) {
             if (!skipSpans) dissonanceSpans.push({ startTick: start, endTick: end });
             dissonantTicks += dur;
-            dissonantEventStarts.push(start);
-            
+
             // For run length, we count *events* (intervals), not ticks
             if (!lastIsDiss) {
+                runStartTick = start;
                 dissRunLength = 1;
                 dissRunTicks = dur;
             } else {
                 dissRunLength++;
                 dissRunTicks += dur;
             }
+            runEndTick = end;
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
+            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 
             // Rule C2b: Continuous dissonance must resolve within one beat.
-            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
+            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 
             lastIsDiss = true;
         } else {
+            if (lastIsDiss) dissonanceRunSpans.push({ startTick: runStartTick, endTick: runEndTick });
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             dissRunLength = 0;
             dissRunTicks = 0;
@@ -647,15 +652,17 @@ export function checkCounterpointStructureWithBassRole(
         prevP1 = p1; prevP2 = p2;
     }
 
+    if (lastIsDiss) dissonanceRunSpans.push({ startTick: runStartTick, endTick: runEndTick });
+
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
     }
 
     maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
     maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonantEventStarts };
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 }
 
 // Helper: Determine beat strength
@@ -926,23 +933,37 @@ function checkMetricCompliance(
 }
 
 export function violatesCombinedDissonanceStarts(
-    dissonantStarts: number[],
+    runSpans: SimultaneitySpan[],
     ppq: number,
     metricOffset: number = 0
 ): boolean {
-    if (dissonantStarts.length === 0) return false;
-    const orderedUnique = Array.from(new Set(dissonantStarts)).sort((a, b) => a - b);
-    let run = 0;
-    for (let i = 0; i < orderedUnique.length; i++) {
-        const t = orderedUnique[i];
-        run += 1;
-        const isStrong = isStrongBeat(t + metricOffset, ppq);
-        if (isStrong && run > 1) return true;
-        if (run === 2) {
-            const prevIsStrong = isStrongBeat(orderedUnique[i - 1] + metricOffset, ppq);
+    if (runSpans.length === 0) return false;
+    // Sort runs by start tick, then merge adjacent/overlapping into macro-runs.
+    // A-B's run [15,16], A-C's [16,17], A-B's [17,18] → one macro-run of count 3.
+    // Two runs are part of the same macro-run when the earlier ends at or after the later starts.
+    const sorted = [...runSpans].sort((a, b) => a.startTick - b.startTick);
+    let macroRunCount = 0;
+    let macroRunEnd = -Infinity;
+    let prevStart = -Infinity;
+    for (const span of sorted) {
+        if (span.startTick <= macroRunEnd) {
+            // Adjacent or overlapping: extend current macro-run.
+            macroRunCount++;
+            macroRunEnd = Math.max(macroRunEnd, span.endTick);
+        } else {
+            // Gap: start a new macro-run.
+            macroRunCount = 1;
+            macroRunEnd = span.endTick;
+            prevStart = span.startTick;
+        }
+        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq);
+        if (macroRunCount > 2) return true;
+        if (isStrong && macroRunCount > 1) return true;
+        if (macroRunCount === 2) {
+            const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq);
             if (isStrong || prevIsStrong) return true;
         }
-        if (run > 2) return true;
+        if (macroRunCount === 1) prevStart = span.startTick;
     }
     return false;
 }
@@ -1303,10 +1324,10 @@ export async function searchStrettoChains(
                             a: bassStrictA.maxDissonanceRunEvents,
                             b: bassStrictB.maxDissonanceRunEvents
                         },
-                        bassRoleDissonantEventStarts: {
-                            none: pairScan.dissonantEventStarts,
-                            a: bassStrictA.dissonantEventStarts,
-                            b: bassStrictB.dissonantEventStarts
+                        bassRoleDissonanceRunSpans: {
+                            none: pairScan.dissonanceRunSpans,
+                            a: bassStrictA.dissonanceRunSpans,
+                            b: bassStrictB.dissonanceRunSpans
                         },
                         intervalClass,
                         isRestrictedInterval,
@@ -1790,6 +1811,17 @@ export async function searchStrettoChains(
                         overlappingPairs.push({ entry: prevE, pairRecord });
                     }
                     if (harmonicFail) continue;
+
+                    // Combined dissonance-run gate: collect precomputed run spans from
+                    // all overlapping pairs and check whether they form a texture-level
+                    // streak longer than 2. Uses 'none' bass-role (fewest dissonance runs;
+                    // 'a'/'b' can only add more via P4-as-bass) so pruning is conservative.
+                    // Cheaper than checkMetricCompliance, so runs first.
+                    const allRunSpans: SimultaneitySpan[] = [...immPair.bassRoleDissonanceRunSpans.none];
+                    for (const { pairRecord } of overlappingPairs) {
+                        for (const s of pairRecord.bassRoleDissonanceRunSpans.none) allRunSpans.push(s);
+                    }
+                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks)) continue;
 
                     const metricProbeEntry: StrettoChainOption = {
                         startBeat: absStartBeat,
