@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "updateGuidance": [
+    "Update this baseline only when a deliberate algorithmic change alters search complexity.",
+    "Before updating values, verify that correctness tests still pass and document the complexity rationale in the associated commit/PR.",
+    "Do not raise bounds for transient runtime noise; tune tolerances in the test if machine variance is the only factor."
+  ],
+  "fixtures": {
+    "small": {
+      "multiplier": 1.25,
+      "stats": {
+        "timeMs": 22,
+        "nodesVisited": 19,
+        "stageStats": {
+          "pairwiseTotal": 32,
+          "pairwiseCompatible": 18,
+          "tripleCandidates": 324,
+          "harmonicallyValidTriples": 0,
+          "pairStageRejected": 14,
+          "tripletStageRejected": 0,
+          "globalLineageStageRejected": 324,
+          "structuralScanInvocations": 40,
+          "candidateTransitionsEnumerated": 18,
+          "transitionsReturned": 0
+        }
+      }
+    },
+    "medium": {
+      "multiplier": 1.1,
+      "stats": {
+        "timeMs": 347,
+        "nodesVisited": 2014,
+        "stageStats": {
+          "pairwiseTotal": 216,
+          "pairwiseCompatible": 161,
+          "tripleCandidates": 25921,
+          "harmonicallyValidTriples": 6060,
+          "pairStageRejected": 55,
+          "tripletStageRejected": 19855,
+          "globalLineageStageRejected": 218,
+          "structuralScanInvocations": 290,
+          "candidateTransitionsEnumerated": 2721,
+          "transitionsReturned": 962
+        }
+      }
+    }
+  }
+}
