@@ -1,6 +1,6 @@
-
 import React from 'react';
 import { getStrictPitchName } from '../services/midiSpelling';
+import { PivotSearchMetric } from '../services/pairwisePivotSearch';
 
 const INTERVAL_OPTIONS = [
     { label: 'Unison (P1)', val: 0 },
@@ -15,6 +15,7 @@ const INTERVAL_OPTIONS = [
 ];
 
 export type SearchResolution = 'half' | 'full' | 'double';
+type PivotMetricKey = 'viable' | 'avgDiss' | 'delay' | 'vwDiss' | 'objective';
 
 interface StrettoConfigProps {
     selectedIntervals: number[];
@@ -27,16 +28,64 @@ interface StrettoConfigProps {
     setIncludeExtensions: (val: boolean) => void;
     pivotMidi: number;
     setPivotMidi: (val: number) => void;
+    pivotOptions: number[];
+    onFindOptimalPivot: () => void;
+    pivotSearchResults: PivotSearchMetric[];
 }
 
-export default function StrettoConfig({ 
-    selectedIntervals, setSelectedIntervals, 
+function toPercent(value: number): string {
+    return `${(value * 100).toFixed(1)}%`;
+}
+
+function renderMetricBar(value: number, invert = false): React.ReactElement {
+    const bounded = Math.min(1, Math.max(0, value));
+    const normalized = invert ? 1 - bounded : bounded;
+    return (
+        <div className="h-1.5 w-full bg-gray-800 rounded">
+            <div className="h-1.5 rounded bg-brand-primary" style={{ width: `${Math.round(normalized * 100)}%` }} />
+        </div>
+    );
+}
+
+function metricLabel(key: PivotMetricKey): string {
+    switch (key) {
+        case 'viable': return 'Viable pair %';
+        case 'avgDiss': return 'Avg viable dissonance %';
+        case 'delay': return 'Delay coverage %';
+        case 'vwDiss': return 'Variety-weighted delay dissonance %';
+        case 'objective': return 'Objective score';
+    }
+}
+
+function metricCalculation(row: PivotSearchMetric, key: PivotMetricKey): string {
+    switch (key) {
+        case 'viable':
+            return `viablePairRate = viablePairs / totalPairs = ${row.viablePairs} / ${row.totalPairs} = ${toPercent(row.viablePairRate)}`;
+        case 'avgDiss':
+            return `averageViableDissonance = mean(dissonanceRatio | viable pair). Displayed value = ${toPercent(row.averageViableDissonance)}.`;
+        case 'delay':
+            return `delayCoverageRate = delaysWithViablePairs / totalDelays = ${row.delaysWithViablePairs} / ${row.totalDelays} = ${toPercent(row.delayCoverageRate)}`;
+        case 'vwDiss':
+            return `Per delay: sort viable dissonance ascending, apply weights 1,1/2,1/4,...; then mean across all delays. Result = ${toPercent(row.varietyWeightedDelayDissonance)}.`;
+        case 'objective':
+            return `objectiveScore = 0.4·viablePairRate + 0.3·delayCoverageRate + 0.3·(1−varietyWeightedDelayDissonance) = ${(row.objectiveScore * 100).toFixed(2)}%.`;
+    }
+}
+
+export default function StrettoConfig({
+    selectedIntervals, setSelectedIntervals,
     searchRes, setSearchRes,
     includeInversions, setIncludeInversions,
     includeExtensions, setIncludeExtensions,
-    pivotMidi, setPivotMidi
+    pivotMidi, setPivotMidi,
+    pivotOptions,
+    onFindOptimalPivot,
+    pivotSearchResults
 }: StrettoConfigProps) {
-    
+
+    const [activeMetric, setActiveMetric] = React.useState<PivotMetricKey>('objective');
+    const [activeRowPivot, setActiveRowPivot] = React.useState<number | null>(null);
+
     const toggleInterval = (val: number, checked: boolean) => {
         if (checked) {
             if (!selectedIntervals.includes(val)) setSelectedIntervals([...selectedIntervals, val]);
@@ -44,6 +93,15 @@ export default function StrettoConfig({
             setSelectedIntervals(selectedIntervals.filter(c => c !== val));
         }
     };
+
+    const best = pivotSearchResults[0] ?? null;
+    const activeRow = pivotSearchResults.find((r) => r.pivotMidi === activeRowPivot) ?? best;
+
+    React.useEffect(() => {
+        if (best) {
+            setActiveRowPivot((prev) => prev ?? best.pivotMidi);
+        }
+    }, [best]);
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -53,15 +111,14 @@ export default function StrettoConfig({
                     {includeInversions && (
                         <div className="flex items-center gap-2 bg-gray-900 px-2 py-1 rounded border border-gray-700 animate-fade-in">
                             <span className="text-[9px] text-gray-500 font-bold uppercase">Pivot:</span>
-                            <select 
+                            <select
                                 value={pivotMidi}
                                 onChange={(e) => setPivotMidi(parseInt(e.target.value))}
                                 className="bg-transparent text-[10px] text-brand-primary font-bold focus:outline-none"
                             >
-                                {Array.from({length: 24}).map((_, i) => {
-                                    const m = 48 + i; 
-                                    return <option key={m} value={m} className="bg-gray-800">{getStrictPitchName(m)}</option>
-                                })}
+                                {pivotOptions.map((m) => (
+                                    <option key={m} value={m} className="bg-gray-800">{getStrictPitchName(m)}</option>
+                                ))}
                             </select>
                         </div>
                     )}
@@ -69,8 +126,8 @@ export default function StrettoConfig({
                 <div className="grid grid-cols-3 gap-2 mb-3">
                     {INTERVAL_OPTIONS.map(opt => (
                         <label key={opt.val} className={`flex items-center justify-center px-2 py-1.5 rounded cursor-pointer border transition-all ${selectedIntervals.includes(opt.val) ? 'bg-brand-primary/20 border-brand-primary text-brand-primary' : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
-                            <input 
-                                type="checkbox" 
+                            <input
+                                type="checkbox"
                                 checked={selectedIntervals.includes(opt.val)}
                                 onChange={e => toggleInterval(opt.val, e.target.checked)}
                                 className="sr-only"
@@ -80,9 +137,9 @@ export default function StrettoConfig({
                     ))}
                 </div>
                 <div className="flex flex-wrap gap-2 border-t border-gray-700 pt-3">
-                     <label className={`flex items-center px-3 py-1.5 rounded cursor-pointer border transition-all ${includeExtensions ? 'bg-brand-secondary/20 border-brand-secondary text-brand-secondary' : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
-                        <input 
-                            type="checkbox" 
+                    <label className={`flex items-center px-3 py-1.5 rounded cursor-pointer border transition-all ${includeExtensions ? 'bg-brand-secondary/20 border-brand-secondary text-brand-secondary' : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
+                        <input
+                            type="checkbox"
                             checked={includeExtensions}
                             onChange={e => setIncludeExtensions(e.target.checked)}
                             className="sr-only"
@@ -90,8 +147,8 @@ export default function StrettoConfig({
                         <span className="text-xs font-bold">+ 3rds & 6ths</span>
                     </label>
                     <label className={`flex items-center px-3 py-1.5 rounded cursor-pointer border transition-all ${includeInversions ? 'bg-blue-900/30 border-blue-500 text-blue-300' : 'bg-gray-900 border-gray-700 text-gray-400 hover:border-gray-500'}`}>
-                        <input 
-                            type="checkbox" 
+                        <input
+                            type="checkbox"
                             checked={includeInversions}
                             onChange={e => setIncludeInversions(e.target.checked)}
                             className="sr-only"
@@ -99,13 +156,114 @@ export default function StrettoConfig({
                         <span className="text-xs font-bold">+ Inversions</span>
                     </label>
                 </div>
+
+                {includeInversions && (
+                    <div className="mt-3 border-t border-gray-700 pt-3 space-y-3">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <div className="text-[10px] text-gray-400 font-bold uppercase">Optimal Pivot Search</div>
+                                <div className="text-[10px] text-gray-500">Subject-note constrained candidates: <span className="font-mono text-gray-300">{pivotOptions.length}</span></div>
+                            </div>
+                            <button
+                                onClick={onFindOptimalPivot}
+                                className="px-3 py-1.5 text-[11px] rounded bg-brand-primary hover:bg-brand-secondary text-white font-bold shadow"
+                            >
+                                Find Best Pivot
+                            </button>
+                        </div>
+
+                        <details className="bg-gray-900/50 border border-gray-700 rounded p-2 group">
+                            <summary className="text-[10px] text-gray-300 font-semibold cursor-pointer list-none flex items-center justify-between">
+                                <span>Metric definitions & calculation breakdown</span>
+                                <span className="text-gray-500 group-open:rotate-180 transition-transform">▾</span>
+                            </summary>
+                            <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[9px] text-gray-400">
+                                {(['viable', 'avgDiss', 'delay', 'vwDiss', 'objective'] as PivotMetricKey[]).map((key) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => setActiveMetric(key)}
+                                        className={`text-left bg-gray-900 border rounded p-2 transition-colors ${activeMetric === key ? 'border-brand-primary text-gray-200' : 'border-gray-700 hover:border-gray-500'}`}
+                                    >
+                                        <span className="font-semibold">{metricLabel(key)}</span>
+                                        <span className="block mt-1 text-[9px] text-gray-500">Tap to inspect formula on selected row.</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </details>
+
+                        {activeRow && (
+                            <div className="text-[10px] text-gray-300 bg-gray-900/60 border border-gray-700 rounded px-2 py-1.5">
+                                <span className="text-gray-400">Selected:</span> <span className="font-semibold text-brand-primary">{getStrictPitchName(activeRow.pivotMidi)}</span>
+                                <span className="text-gray-500"> · {metricLabel(activeMetric)}</span>
+                                <div className="mt-1 font-mono text-[10px] text-gray-200">{metricCalculation(activeRow, activeMetric)}</div>
+                            </div>
+                        )}
+
+                        {best && (
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                                <button onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('objective'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                    <div className="text-[9px] text-gray-400">Best Pivot</div>
+                                    <div className="text-sm font-bold text-brand-primary">{getStrictPitchName(best.pivotMidi)}</div>
+                                    <div className="text-[9px] text-gray-500">rank #1</div>
+                                </button>
+                                <button onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('viable'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                    <div className="text-[9px] text-gray-400">Viable Pairs</div>
+                                    <div className="text-sm font-mono text-gray-100">{toPercent(best.viablePairRate)}</div>
+                                    <div className="text-[9px] text-gray-500">{best.viablePairs}/{best.totalPairs}</div>
+                                    {renderMetricBar(best.viablePairRate)}
+                                </button>
+                                <button onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('delay'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                    <div className="text-[9px] text-gray-400">Delay Coverage</div>
+                                    <div className="text-sm font-mono text-gray-100">{toPercent(best.delayCoverageRate)}</div>
+                                    <div className="text-[9px] text-gray-500">{best.delaysWithViablePairs}/{best.totalDelays}</div>
+                                    {renderMetricBar(best.delayCoverageRate)}
+                                </button>
+                                <button onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('vwDiss'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                    <div className="text-[9px] text-gray-400">Vw Delay Diss.</div>
+                                    <div className="text-sm font-mono text-gray-100">{toPercent(best.varietyWeightedDelayDissonance)}</div>
+                                    <div className="text-[9px] text-gray-500">lower is better</div>
+                                    {renderMetricBar(best.varietyWeightedDelayDissonance, true)}
+                                </button>
+                            </div>
+                        )}
+
+                        {pivotSearchResults.length > 0 && (
+                            <div className="border border-gray-700 rounded overflow-hidden">
+                                <div className="grid grid-cols-6 bg-gray-900/80 text-[9px] text-gray-400 uppercase tracking-wide px-2 py-1.5">
+                                    <div>Pivot</div>
+                                    <button onClick={() => setActiveMetric('viable')} className="text-right hover:text-gray-200">Viable</button>
+                                    <button onClick={() => setActiveMetric('avgDiss')} className="text-right hover:text-gray-200">Avg Diss</button>
+                                    <button onClick={() => setActiveMetric('delay')} className="text-right hover:text-gray-200">Delay</button>
+                                    <button onClick={() => setActiveMetric('vwDiss')} className="text-right hover:text-gray-200">Vw Diss</button>
+                                    <button onClick={() => setActiveMetric('objective')} className="text-right hover:text-gray-200">Score</button>
+                                </div>
+                                <div className="max-h-40 overflow-y-auto">
+                                    {pivotSearchResults.slice(0, 12).map((row, idx) => (
+                                        <button
+                                            key={row.pivotMidi}
+                                            onClick={() => setActiveRowPivot(row.pivotMidi)}
+                                            className={`w-full grid grid-cols-6 text-[10px] px-2 py-2 border-t border-gray-800 transition-colors text-left ${row.pivotMidi === activeRow?.pivotMidi ? 'bg-brand-primary/15' : idx === 0 ? 'bg-brand-primary/12' : 'bg-gray-900/40 text-gray-300 hover:bg-gray-900/70'}`}
+                                        >
+                                            <div className={`${idx === 0 ? 'text-brand-primary font-bold' : 'text-gray-200'}`}>{getStrictPitchName(row.pivotMidi)}</div>
+                                            <div className="text-right font-mono">{toPercent(row.viablePairRate)}</div>
+                                            <div className="text-right font-mono">{toPercent(row.averageViableDissonance)}</div>
+                                            <div className="text-right font-mono">{toPercent(row.delayCoverageRate)}</div>
+                                            <div className="text-right font-mono">{toPercent(row.varietyWeightedDelayDissonance)}</div>
+                                            <div className="text-right font-mono text-gray-500">{(row.objectiveScore * 100).toFixed(1)}%</div>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             <div className="p-4 bg-gray-800 rounded border border-gray-700 shadow-sm">
                 <h3 className="text-xs font-bold text-gray-400 mb-3 uppercase tracking-widest">Entry Resolution</h3>
                 <div className="grid grid-cols-3 gap-2">
                     {(['half', 'full', 'double'] as SearchResolution[]).map(res => (
-                        <button 
+                        <button
                             key={res}
                             onClick={() => setSearchRes(res)}
                             className={`px-2 py-2 rounded text-xs font-bold border transition-all ${searchRes === res ? 'bg-brand-primary text-white border-brand-primary shadow-lg' : 'bg-gray-900 border-gray-700 text-gray-500 hover:bg-gray-800'}`}
