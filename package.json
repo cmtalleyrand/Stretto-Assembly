@@ -8,13 +8,16 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit",
+    "test": "npm run test:stretto:active",
     "diagnose:stretto": "node --import tsx components/services/strettoDiagnostics.ts",
     "diagnose:stretto:full": "STRETTO_DIAGNOSTIC_FULL=1 node --import tsx components/services/strettoDiagnostics.ts",
+    "test:stretto:active": "node --import tsx components/stretto/harmonicRegionDiagnosticsTest.ts && node --import tsx components/stretto/searchStatusTest.ts && node --import tsx components/stretto/selectionPolicy.test.ts && node --import tsx components/services/midiSpelling.test.ts && node --import tsx components/services/strettoTypesConversionTest.ts && node --import tsx components/services/pairwisePivotSearchTest.ts && node --import tsx components/services/strettoPairwisePolicyTest.ts && node --import tsx components/services/strettoCombinedOverlapRunTest.ts && node --import tsx components/services/strettoDagTraversalTest.ts && node --import tsx components/services/strettoIntegrationTest.ts && node --import tsx components/services/strettoScoringRegression.ts",
     "test:stretto:scoring-regression": "node --import tsx components/services/strettoScoringRegression.ts",
-    "test:stretto:pairwise-logic": "node --import tsx components/services/strettoPairwiseLogicCheck.ts",
+    "test:stretto:pairwise-logic": "node --import tsx components/services/strettoPairwiseLogicCheck.diagnostic.ts",
     "test:stretto:dag": "node --import tsx components/services/strettoDagTraversalTest.ts",
     "test:stretto:integration": "node --import tsx components/services/strettoIntegrationTest.ts",
-    "test:stretto:all": "npm run test:stretto:scoring-regression && npm run test:stretto:pairwise-logic && npm run test:stretto:dag && npm run test:stretto:integration"
+    "test:stretto:all": "npm run test:stretto:active",
+    "diagnose:stretto:pairwise-logic": "node --import tsx components/services/strettoPairwiseLogicCheck.diagnostic.ts"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",

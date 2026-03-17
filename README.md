@@ -175,3 +175,13 @@ The canonical tuple `(d_i, t_i, v_i, inv_i, trunc_i)` is now documented as the n
 | Type surface (`types.ts::StrettoChainOption`) | Compatibility mode (legacy fields) |
 | Search/generation (`components/services/strettoGenerator.ts`) | Compatibility mode (legacy fields + `variantIndices`) |
 | UI rendering (`components/stretto/StrettoChainView.tsx`, `components/stretto/StrettoResultsList.tsx`) | Compatibility mode |
+
+---
+
+## Test entrypoints
+
+- Canonical regression command: `npm test`.
+- Resolution: `npm test` delegates to `npm run test:stretto:active` in `package.json`.
+- Inclusion criterion: only test files executed by `test:stretto:active` are treated as mandatory regression gates (`ACTIVE`).
+- Diagnostic criterion: files intentionally excluded from `test:stretto:active` are archived as non-test-suffix diagnostics and run only on demand (for example, `npm run diagnose:stretto:pairwise-logic`).
+- File-level classification is tracked in `docs/test-inventory.md`.
