@@ -1144,12 +1144,22 @@ export async function searchStrettoChains(
         }
     }
 
-    const validDelays: number[] = [];
-    const maxDelayTicks = Math.floor(subjectLengthTicks * (2/3));
-    
     // Delays happen in half-beat intervals (8th notes)
-    const delayStep = ppq / 2; 
-    for (let d = delayStep; d <= maxDelayTicks; d += delayStep) validDelays.push(d);
+    const delayStep = ppq / 2;
+
+    // Adjacent delays: used for triplet enumeration (rule A.6 cap at 2/3 Sb)
+    const validAdjacentDelays: number[] = [];
+    const maxAdjacentDelayTicks = Math.floor(subjectLengthTicks * (2/3));
+    for (let d = delayStep; d <= maxAdjacentDelayTicks; d += delayStep) validAdjacentDelays.push(d);
+
+    // Pairwise delays: extends to Sb - delayStep for long-range pair lookups.
+    // Entries i and j overlap whenever cumulative delay < Sb, which can exceed 2/3 Sb.
+    const validPairwiseDelays: number[] = [];
+    const maxPairwiseDelayTicks = subjectLengthTicks - delayStep;
+    for (let d = delayStep; d <= maxPairwiseDelayTicks; d += delayStep) validPairwiseDelays.push(d);
+
+    // Legacy alias used by stageStats and admissibility model
+    const validDelays = validAdjacentDelays;
     
     const transpositions = Array.from(INTERVALS.TRAD_TRANSPOSITIONS);
     if (options.thirdSixthMode !== 'None') {
@@ -1226,10 +1236,12 @@ export async function searchStrettoChains(
         const vA = variants[iA];
         for (let iB = 0; iB < variants.length; iB++) {
             const vB = variants[iB];
-            for (const d of validDelays) {
+            for (const d of validPairwiseDelays) {
                 for (const t of relativeTranspositionDeltas) {
+                    // Admissibility model only covers adjacent delays (≤ 2/3 Sb).
+                    // Extended delays (> 2/3 Sb) are for long-range lookups only — precompute unconditionally.
                     const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
-                    if (admissiblePairKeys && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
+                    if (admissiblePairKeys && d <= maxAdjacentDelayTicks && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
                         continue;
                     }
                     stageStats.pairwiseTotal++;
@@ -1622,7 +1634,10 @@ export async function searchStrettoChains(
         const depth = chain.length;
         const prevEntry = chain[depth - 1];
 
-        const isFinalThird = depth >= options.targetChainLength - Math.ceil(options.targetChainLength / 3);
+        // Sb/3 rule relaxations (A.1 repeat allowed, A.3 recoil skip) only activate
+        // in the final third AND at depth >= 7. For chains of length >= 7, entries e1-e6
+        // always use strict rules so triplet precomputation is simpler (no short-delay branches).
+        const isFinalThird = depth >= 7 && depth >= options.targetChainLength - Math.ceil(options.targetChainLength / 3);
         const prevEntryLengthTicks = chain[depth - 1].length;
 
         // Hoist chain note events once per node so checkMetricCompliance doesn't rebuild per candidate
@@ -1650,7 +1665,10 @@ export async function searchStrettoChains(
 
             if (depth >= 3) {
                 const prevPrevDelayTicks = Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq);
-                if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
+                // A.3 Expansion recoil: if d_{n-1} > d_{n-2} and d_{n-1} > Sb/3, then d_n < d_{n-2} - 0.5.
+                // Under strict gate (depth < 7), the Sb/3 threshold is bypassed — recoil always applies.
+                const recoilThresholdMet = !isFinalThird || prevDelayTicks > (prevSubjectLengthTicks / 3);
+                if (prevDelayTicks > prevPrevDelayTicks && recoilThresholdMet) {
                     maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
                 }
             }
@@ -1691,8 +1709,10 @@ export async function searchStrettoChains(
 
         for (const delayTicks of possibleDelaysTicks) {
             // A.1 Global Uniqueness: delays > Sb/3 must be unique across the chain.
-            // O(1) set membership check per candidate delay.
-            if (delayTicks > oneThirdSubjectTicks && usedLongDelays.has(delayTicks)) {
+            // Under the strict rule gate (depth < 7), ALL delays are treated as long
+            // so uniqueness is always required. This simplifies triplet precomputation.
+            const delayIsLong = delayTicks > oneThirdSubjectTicks || !isFinalThird;
+            if (delayIsLong && usedLongDelays.has(delayTicks)) {
                 stageStats.globalLineageStageRejected++;
                 continue;
             }
@@ -1858,8 +1878,8 @@ export async function searchStrettoChains(
                     if ((allowedVoicesForTrans.get(t)?.length ?? 0) === 0) continue;
 
                     edgesTraversed++;
-                    // Propagate A.1 delay-set: add this delay if it's > Sb/3
-                    const needsNewLongDelaySet = delayTicks > oneThirdSubjectTicks && !usedLongDelays.has(delayTicks);
+                    // Propagate A.1 delay-set: under strict gate (depth < 7), all delays are tracked.
+                    const needsNewLongDelaySet = delayIsLong && !usedLongDelays.has(delayTicks);
                     const newUsedLongDelays = needsNewLongDelaySet
                         ? new Set(usedLongDelays).add(delayTicks)
                         : usedLongDelays;
