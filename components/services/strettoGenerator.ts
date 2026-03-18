@@ -5,7 +5,7 @@ import { calculateStrettoScore, SubjectVariant, InternalNote } from './strettoSc
 import { getInvertedPitch } from './strettoCore';
 
 // --- Constants & Types ---
-const MAX_SEARCH_NODES = 2000000; // Increased to allow deeper search
+// Node budget removed — time is the only search limit.
 const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
@@ -2008,10 +2008,6 @@ export async function searchStrettoChains(
                 return true;
             }
         }
-        if (nodesVisited > MAX_SEARCH_NODES) {
-            if (!terminationReason) terminationReason = 'NodeLimit';
-            return true;
-        }
         return false;
     }
 
@@ -2268,10 +2264,11 @@ export async function searchStrettoChains(
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
 
-                    // Iterate triplets starting with vA
+                    // Iterate triplets starting with vA.
+                    // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
+                    // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
                     for (const triplet of tripletsForVA) {
                         operationCounter++;
-                        nodesVisited++;
                         if (shouldYieldToEventLoop(operationCounter)) {
                             await new Promise<void>((resolve) => setTimeout(resolve, 0));
                         }
@@ -2523,7 +2520,7 @@ export async function searchStrettoChains(
 
     // --- POST-SEARCH: Score all found chains ---
     let sourceUnscored = unscoredResults;
-    let stopReason: StrettoSearchReport['stats']['stopReason'] = unscoredResults.length > 0 ? 'Success' : (terminationReason || 'Exhausted');
+    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || 'Exhausted';
 
     // Fallback to partials if no full-length results.
     // Voice assignment is deferred to here to avoid expensive CSP during traversal.
@@ -2585,7 +2582,7 @@ export async function searchStrettoChains(
             metricOffsetTicks: offsetTicks,
             timeoutExtensionAppliedMs,
             coverage: {
-                nodeBudgetUsedPercent: roundToWholePercent(Math.min(1, nodesVisited / MAX_SEARCH_NODES)),
+                nodeBudgetUsedPercent: 0, // No node budget — time-only gating
                 maxFrontierSize,
                 maxFrontierClassCount,
                 edgesTraversed,
