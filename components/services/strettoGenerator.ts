@@ -803,6 +803,8 @@ function hasFeasibleTripletAssignment(
  * PHASE 5 CHECK: Metric Compliance
  * REFACTORED: Uses Scan-Line algorithm on raw ticks.
  */
+type NoteEvent = [number, number, number]; // [start, end, pitch]
+
 function checkMetricCompliance(
     newVariant: SubjectVariant,
     newEntry: StrettoChainOption,
@@ -812,24 +814,26 @@ function checkMetricCompliance(
     ppq: number,
     metricOffset: number = 0,
     tsNum: number = 4,
-    tsDenom: number = 4
+    tsDenom: number = 4,
+    prebuiltChainNoteEvents?: NoteEvent[]
 ): boolean {
 
     const newStartTick = Math.round(newEntry.startBeat * ppq);
 
-    // Pre-build a flat list of (startTick, endTick, absolutePitch) for every note in every
-    // voice (new entry + entire chain). Built once here so the P4-vs-bass lookup inside the
-    // pairwise loop is a single linear scan over a cached array rather than a repeated
-    // re-traversal of the chain.
-    type NoteEvent = [number, number, number]; // [start, end, pitch]
+    // Build allNoteEvents: new entry notes + chain notes.
+    // If chain notes are pre-built (hoisted from expandNode), reuse them.
     const allNoteEvents: NoteEvent[] = [];
     for (const n of newVariant.notes) {
         allNoteEvents.push([newStartTick + n.relTick, newStartTick + n.relTick + n.durationTicks, n.pitch + newEntry.transposition]);
     }
-    for (let k = 0; k < chain.length; k++) {
-        const eStart = Math.round(chain[k].startBeat * ppq);
-        for (const n of variants[variantIndices[k]].notes) {
-            allNoteEvents.push([eStart + n.relTick, eStart + n.relTick + n.durationTicks, n.pitch + chain[k].transposition]);
+    if (prebuiltChainNoteEvents) {
+        for (const ev of prebuiltChainNoteEvents) allNoteEvents.push(ev);
+    } else {
+        for (let k = 0; k < chain.length; k++) {
+            const eStart = Math.round(chain[k].startBeat * ppq);
+            for (const n of variants[variantIndices[k]].notes) {
+                allNoteEvents.push([eStart + n.relTick, eStart + n.relTick + n.durationTicks, n.pitch + chain[k].transposition]);
+            }
         }
     }
     const overallBassAt = (tick: number): number => {
@@ -941,11 +945,11 @@ export function violatesCombinedDissonanceStarts(
     // Sort runs by start tick, then merge adjacent/overlapping into macro-runs.
     // A-B's run [15,16], A-C's [16,17], A-B's [17,18] → one macro-run of count 3.
     // Two runs are part of the same macro-run when the earlier ends at or after the later starts.
-    const sorted = [...runSpans].sort((a, b) => a.startTick - b.startTick);
+    runSpans.sort((a, b) => a.startTick - b.startTick);
     let macroRunCount = 0;
     let macroRunEnd = -Infinity;
     let prevStart = -Infinity;
-    for (const span of sorted) {
+    for (const span of runSpans) {
         if (span.startTick <= macroRunEnd) {
             // Adjacent or overlapping: extend current macro-run.
             macroRunCount++;
@@ -1601,6 +1605,17 @@ export async function searchStrettoChains(
         return chain.map((e, i) => ({ ...e, voiceIndex: voices[i] }));
     }
 
+    function buildChainNoteEvents(chain: StrettoChainOption[], variantIndices: number[]): NoteEvent[] {
+        const events: NoteEvent[] = [];
+        for (let k = 0; k < chain.length; k++) {
+            const eStart = Math.round(chain[k].startBeat * ppq);
+            for (const n of variants[variantIndices[k]].notes) {
+                events.push([eStart + n.relTick, eStart + n.relTick + n.durationTicks, n.pitch + chain[k].transposition]);
+            }
+        }
+        return events;
+    }
+
     function expandNode(node: DagNode): DagNode[] {
         const successors: DagNode[] = [];
         const { chain, variantIndices, nInv, nTrunc, nRestricted, nFree, usedLongDelays, longDelaySignature } = node;
@@ -1609,6 +1624,9 @@ export async function searchStrettoChains(
 
         const isFinalThird = depth >= options.targetChainLength - Math.ceil(options.targetChainLength / 3);
         const prevEntryLengthTicks = chain[depth - 1].length;
+
+        // Hoist chain note events once per node so checkMetricCompliance doesn't rebuild per candidate
+        const chainNoteEvents = buildChainNoteEvents(chain, variantIndices);
 
         const possibleDelaysTicks: number[] = [];
         let minD = delayStep;
@@ -1833,7 +1851,7 @@ export async function searchStrettoChains(
                     // Metric compliance is independent of output-voice assignment because it only
                     // inspects temporal/pitch overlap against existing entries. Evaluate once per
                     // (variant, delay, transposition) candidate and reuse across voice placements.
-                    if (!checkMetricCompliance(variant, metricProbeEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom)) continue;
+                    if (!checkMetricCompliance(variant, metricProbeEntry, chain, variants, variantIndices, ppq, offsetTicks, tsNum, tsDenom, chainNoteEvents)) continue;
 
                     // D.0: Pre-search voice domain filter — skip candidates with no valid voice
                     // given e0's register constraints. Voice assignment is post-hoc (Option D).
@@ -1867,6 +1885,20 @@ export async function searchStrettoChains(
 
     const oneThirdSubjectTicks = subjectLengthTicks / 3;
 
+    // Deferred partial storage: raw chain data without voice assignment.
+    // Voice assignment is deferred to post-search to avoid expensive CSP during traversal.
+    interface DeferredPartial {
+        chain: StrettoChainOption[];
+        variantIndices: number[];
+    }
+    const deferredPartials: DeferredPartial[] = [];
+
+    // Phase A/B boundary: BFS up to this depth, then DFS beyond.
+    // The BFS handles depths 1–PHASE_A_DEPTH where DAG merging prunes the frontier.
+    // Beyond this depth, delays are tight (branching factor ~1-20), so DFS is cheaper
+    // than maintaining a frontier Map with key computation and merging.
+    const PHASE_A_DEPTH = Math.min(6, options.targetChainLength);
+
     let frontier: DagNode[] = [{
         chain: [{ startBeat: 0, transposition: 0, type: 'N', length: variants[0].lengthTicks, voiceIndex: options.subjectVoiceIndex }],
         variantIndices: [0],
@@ -1883,11 +1915,79 @@ export async function searchStrettoChains(
     let frontierSizeAtTermination = 0;
     let frontierClassesAtTermination = 0;
 
+    // --- Helper: check time/node limits and handle timeout extension ---
+    function checkLimits(): boolean {
+        if (Date.now() - startTime > activeTimeLimitMs) {
+            const canExtend = timeoutExtensionAppliedMs === 0 && shouldExtendTimeoutNearCompletion(maxDepth, options.targetChainLength);
+            if (canExtend) {
+                timeoutExtensionAppliedMs = NEAR_COMPLETION_TIMEOUT_EXTENSION_MS;
+                activeTimeLimitMs += timeoutExtensionAppliedMs;
+            } else {
+                if (!terminationReason) terminationReason = 'Timeout';
+                return true;
+            }
+        }
+        if (nodesVisited > MAX_SEARCH_NODES) {
+            if (!terminationReason) terminationReason = 'NodeLimit';
+            return true;
+        }
+        return false;
+    }
+
+    // --- Helper: record a completed chain ---
+    function recordCompletedChain(chain: StrettoChainOption[], variantIndices: number[]): void {
+        const sig = getChainSignature(chain);
+        if (!seenSignatures.has(sig)) {
+            seenSignatures.add(sig);
+            const assigned = assignVoices([...chain], [...variantIndices]);
+            if (assigned !== null) {
+                unscoredResults.push({ entries: assigned, variantIndices: [...variantIndices] });
+            }
+        }
+    }
+
+    // --- Helper: record a partial chain (deferred voice assignment) ---
+    function recordDeferredPartial(chain: StrettoChainOption[], variantIndices: number[]): void {
+        if (deferredPartials.length >= MAX_PARTIALS) return;
+        const sig = getChainSignature(chain);
+        if (!seenPartialSigs.has(sig)) {
+            seenPartialSigs.add(sig);
+            deferredPartials.push({ chain: [...chain], variantIndices: [...variantIndices] });
+        }
+    }
+
+    // --- Phase B: DFS from Phase A frontier to target depth ---
+    // At this depth, delays are very tight (progressive tightening), so branching
+    // factor is ~1-20 per level. DFS is cheaper than BFS frontier management.
+    // Long-range pair checks are sparse: cumulative delay typically exceeds Sb,
+    // so entries 3+ apart rarely overlap.
+    function dfsExtend(node: DagNode): void {
+        nodesVisited++;
+        operationCounter++;
+        maxDepth = Math.max(maxDepth, node.chain.length);
+
+        if (node.chain.length === options.targetChainLength) {
+            recordCompletedChain(node.chain, node.variantIndices);
+            return;
+        }
+
+        if (node.chain.length >= 3) {
+            recordDeferredPartial(node.chain, node.variantIndices);
+        }
+
+        if (checkLimits()) return;
+
+        const successors = expandNode(node);
+        for (const successor of successors) {
+            dfsExtend(successor);
+            if (terminationReason) return;
+        }
+    }
+
+    // --- Phase A: BFS to PHASE_A_DEPTH ---
+    // Uses DAG merging to prune equivalent frontier nodes at each layer.
     while (frontier.length > 0) {
         maxFrontierSize = Math.max(maxFrontierSize, frontier.length);
-        // Frontier class counting and deterministic sorting removed from hot loop —
-        // they were O(n log n) / O(n) per layer on potentially huge frontiers,
-        // contributing nothing to correctness. Stats are filled at termination.
         const nextLayer = new Map<string, DagNode>();
         let stopTraversal = false;
 
@@ -1900,44 +2000,38 @@ export async function searchStrettoChains(
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
             }
 
-            if (Date.now() - startTime > activeTimeLimitMs) {
-                const canExtend = timeoutExtensionAppliedMs === 0 && shouldExtendTimeoutNearCompletion(maxDepth, options.targetChainLength);
-                if (canExtend) {
-                    timeoutExtensionAppliedMs = NEAR_COMPLETION_TIMEOUT_EXTENSION_MS;
-                    activeTimeLimitMs += timeoutExtensionAppliedMs;
-                } else {
-                    if (!terminationReason) terminationReason = 'Timeout';
-                    stopTraversal = true;
-                    break;
-                }
-            }
-            if (nodesVisited > MAX_SEARCH_NODES) {
-                if (!terminationReason) terminationReason = 'NodeLimit';
+            if (checkLimits()) {
                 stopTraversal = true;
                 break;
             }
 
+            // If target reached during Phase A (target <= PHASE_A_DEPTH)
             if (node.chain.length === options.targetChainLength) {
-                const sig = getChainSignature(node.chain);
-                if (!seenSignatures.has(sig)) {
-                    seenSignatures.add(sig);
-                    const assigned = assignVoices([...node.chain], [...node.variantIndices]);
-                    if (assigned !== null) {
-                        unscoredResults.push({ entries: assigned, variantIndices: [...node.variantIndices] });
-                    }
-                }
+                recordCompletedChain(node.chain, node.variantIndices);
                 continue;
             }
 
-            if (node.chain.length >= 3 && unscoredPartials.length < MAX_PARTIALS) {
-                const sig = getChainSignature(node.chain);
-                if (!seenPartialSigs.has(sig)) {
-                    seenPartialSigs.add(sig);
-                    const assignedPartial = assignVoices([...node.chain], [...node.variantIndices]);
-                    if (assignedPartial !== null) {
-                        unscoredPartials.push({ entries: assignedPartial, variantIndices: [...node.variantIndices] });
+            // At Phase A boundary: switch to DFS for remaining depth
+            if (node.chain.length >= PHASE_A_DEPTH) {
+                if (node.chain.length >= 3) {
+                    recordDeferredPartial(node.chain, node.variantIndices);
+                }
+                // Launch DFS from this node
+                const successors = expandNode(node);
+                for (const successor of successors) {
+                    dfsExtend(successor);
+                    if (terminationReason) {
+                        stopTraversal = true;
+                        break;
                     }
                 }
+                if (stopTraversal) break;
+                continue;
+            }
+
+            // Collect partial during BFS (deferred voice assignment)
+            if (node.chain.length >= 3) {
+                recordDeferredPartial(node.chain, node.variantIndices);
             }
 
             const successors = expandNode(node);
@@ -1954,12 +2048,11 @@ export async function searchStrettoChains(
         frontier = resolveNextFrontierLayer(nextLayer, stopTraversal);
 
         // Record frontier state at termination (last iteration before loop exits).
-        // Class counting deferred to here instead of per-iteration.
         if (frontier.length === 0 || stopTraversal) {
             const termFrontier = stopTraversal ? Array.from(nextLayer.values()) : [];
             frontierSizeAtTermination = termFrontier.length;
-            maxFrontierClassCount = maxFrontierSize; // upper-bound estimate (exact counting removed from hot path)
-            frontierClassesAtTermination = termFrontier.length; // conservative estimate
+            maxFrontierClassCount = maxFrontierSize;
+            frontierClassesAtTermination = termFrontier.length;
         }
     }
 
@@ -1967,8 +2060,15 @@ export async function searchStrettoChains(
     let sourceUnscored = unscoredResults;
     let stopReason: StrettoSearchReport['stats']['stopReason'] = unscoredResults.length > 0 ? 'Success' : (terminationReason || 'Exhausted');
 
-    // Fallback to partials if no full-length results
-    if (unscoredResults.length === 0 && unscoredPartials.length > 0) {
+    // Fallback to partials if no full-length results.
+    // Voice assignment is deferred to here to avoid expensive CSP during traversal.
+    if (unscoredResults.length === 0 && deferredPartials.length > 0) {
+        for (const dp of deferredPartials) {
+            const assigned = assignVoices(dp.chain, dp.variantIndices);
+            if (assigned !== null) {
+                unscoredPartials.push({ entries: assigned, variantIndices: dp.variantIndices });
+            }
+        }
         sourceUnscored = unscoredPartials;
         if (!terminationReason) stopReason = 'Exhausted';
     }
