@@ -1236,7 +1236,10 @@ export async function searchStrettoChains(
         const vA = variants[iA];
         for (let iB = 0; iB < variants.length; iB++) {
             const vB = variants[iB];
+            // Optimization: if variant A is truncated, pairs only overlap when d < lenA.
+            const maxDelayForVA = vA.lengthTicks;
             for (const d of validPairwiseDelays) {
+                if (d >= maxDelayForVA) break; // No overlap possible beyond variant A's length
                 for (const t of relativeTranspositionDeltas) {
                     // Admissibility model only covers adjacent delays (≤ 2/3 Sb).
                     // Extended delays (> 2/3 Sb) are for long-range lookups only — precompute unconditionally.
@@ -1391,6 +1394,11 @@ export async function searchStrettoChains(
 
             const d1 = p1.d;
             const d2 = p2.d;
+
+            // A.10: no truncated entries at delay >= 0.5*Sb
+            // vB (= p1.vB = p2.vA) enters at delay d1; vC enters at delay d2
+            if (d1 >= subjectLengthTicks / 2 && variants[p1.vB].truncationBeats > 0) continue;
+            if (d2 >= subjectLengthTicks / 2 && variants[p2.vB].truncationBeats > 0) continue;
 
             // Rule: Max Expansion (using ticks, assuming step size)
             if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
@@ -1836,6 +1844,10 @@ export async function searchStrettoChains(
                     if (t === prevTransposition) continue;
                     if (!allowedTranspositions.has(t)) continue;
                     for (let varIdx = 0; varIdx < variants.length; varIdx++) {
+                        // A.9: e1 must not be inverted
+                        if (depth === 1 && variants[varIdx].type === 'I') continue;
+                        // A.10: no truncated entries at delay >= 0.5*Sb
+                        if (delayTicks >= subjectLengthTicks / 2 && variants[varIdx].truncationBeats > 0) continue;
                         const immPrevVarIdx = variantIndices[depth - 1];
                         const immRelTrans = t - chain[depth - 1].transposition;
                         const immPair = getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
@@ -1857,6 +1869,12 @@ export async function searchStrettoChains(
                 const variant = variants[varIdx];
                 const isInv = variant.type === 'I';
                 const isTrunc = variant.truncationBeats > 0;
+
+                // A.9: e1 must not be inverted
+                if (depth === 1 && isInv) continue;
+
+                // A.10: no truncated entries at delay >= 0.5*Sb
+                if (isTrunc && delayTicks >= subjectLengthTicks / 2) continue;
 
                 // Structural transform-following rule:
                 // any transformed predecessor (inversion OR truncation) must be followed by a normal entry.
@@ -1885,6 +1903,19 @@ export async function searchStrettoChains(
                     if (nextRestricted > 1 && nextRestricted >= nextFree) continue;
                     if (isRestricted && !checkQuota(options.thirdSixthMode, nRestricted)) continue;
                     if (options.disallowComplexExceptions && (isInv || isTrunc) && isRestricted) continue;
+
+                    // C.3: No duplicate transpositions among active entries at this entry point.
+                    // An entry is "active" if its notes are still sounding when the new entry begins.
+                    let transpositionDuplicate = false;
+                    for (let k = chain.length - 1; k >= 0; k--) {
+                        const kEntry = chain[k];
+                        const kStartTicks = Math.round(kEntry.startBeat * ppq);
+                        if (kStartTicks + subjectLengthTicks <= absStartTicks) break;
+                        const kEndTicks = kStartTicks + variants[variantIndices[k]].lengthTicks;
+                        if (absStartTicks >= kEndTicks) continue;
+                        if (kEntry.transposition === t) { transpositionDuplicate = true; break; }
+                    }
+                    if (transpositionDuplicate) continue;
 
                     // Collect overlapping pairwise records for this candidate.
                     // Iterate backward: entries are chronologically ordered, so once an
@@ -2166,6 +2197,9 @@ export async function searchStrettoChains(
                     const isInv = variant.type === 'I';
                     const isTrunc = variant.truncationBeats > 0;
 
+                    // A.10: no truncated entries at delay >= 0.5*Sb
+                    if (isTrunc && d >= halfSubjectTicks) continue;
+
                     // A.8 Transform-following: transformed predecessor must be followed by normal
                     const prevVariant = variants[prevVarIdx];
                     if ((prevVariant.type === 'I' || prevVariant.truncationBeats > 0) && (isInv || isTrunc)) continue;
@@ -2185,6 +2219,18 @@ export async function searchStrettoChains(
 
                     // Voice domain filter
                     if ((allowedVoicesForTrans.get(t)?.length ?? 0) === 0) continue;
+
+                    // C.3: No duplicate transpositions among active entries
+                    let transpositionDuplicate = false;
+                    for (let k = depth - 1; k >= 0; k--) {
+                        const kEntry = state.chain[k];
+                        const kStartTicks = Math.round(kEntry.startBeat * ppq);
+                        if (kStartTicks + subjectLengthTicks <= absStartTicks) break;
+                        const kEndTicks = kStartTicks + variants[state.variantIndices[k]].lengthTicks;
+                        if (absStartTicks >= kEndTicks) continue;
+                        if (kEntry.transposition === t) { transpositionDuplicate = true; break; }
+                    }
+                    if (transpositionDuplicate) continue;
 
                     // Long-range pairwise checks: verify all overlapping pairs not covered by triplet windows
                     let harmonicFail = false;
@@ -2249,6 +2295,10 @@ export async function searchStrettoChains(
             // Iterate over valid e0→e1 pairs at this delay from the pairwise table
             for (let vA = 0; vA < variants.length; vA++) {
                 if (terminationReason) break;
+                // A.9: e1 must not be inverted
+                if (variants[vA].type === 'I') continue;
+                // A.10: no truncated entries at delay >= 0.5*Sb (firstDelay is always >= 0.5*Sb)
+                if (variants[vA].truncationBeats > 0) continue;
                 const transMap = pairwiseCompatibleTriplets.get(e0VarIdx)?.get(vA)?.get(firstDelay);
                 if (!transMap) continue;
 
@@ -2300,10 +2350,35 @@ export async function searchStrettoChains(
                         if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
                         if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
 
-                        // A.8 Transform-following
+                        // A.10: no truncated entries at delay >= 0.5*Sb
                         const varA = variants[vA];
                         const varB = variants[vB];
                         const varC = variants[vC];
+                        if (varB.truncationBeats > 0 && delayAB >= halfSubjectTicks) continue;
+                        if (varC.truncationBeats > 0 && delayBC >= halfSubjectTicks) continue;
+
+                        // C.3: No duplicate transpositions among active entries.
+                        // e0 (t=0) is always active at e1 start (firstDelay < Sb).
+                        // e1 (t=tE1) is active at e2 start if e1Start + lenA > e2Start.
+                        // e0 is active at e2 start if e2Start < Sb.
+                        // Similarly check e3.
+                        if (tE1 === 0) continue; // e1 same transposition as e0
+                        const e1Start_pre = firstDelay;
+                        const e2Start_pre = firstDelay + delayAB;
+                        const e3Start_pre = e2Start_pre + delayBC;
+                        // At e2 entry: check against active entries (e0, e1)
+                        {
+                            if (tE2 === 0 && e2Start_pre < subjectLengthTicks) continue; // e0 still active, same trans
+                            if (tE2 === tE1 && e2Start_pre < e1Start_pre + varA.lengthTicks) continue; // e1 still active, same trans
+                        }
+                        // At e3 entry: check against active entries (e0, e1, e2)
+                        {
+                            if (tE3 === 0 && e3Start_pre < subjectLengthTicks) continue;
+                            if (tE3 === tE1 && e3Start_pre < e1Start_pre + varA.lengthTicks) continue;
+                            if (tE3 === tE2 && e3Start_pre < e2Start_pre + varB.lengthTicks) continue;
+                        }
+
+                        // A.8 Transform-following
                         const e1Transformed = varA.type === 'I' || varA.truncationBeats > 0;
                         const e2Transformed = varB.type === 'I' || varB.truncationBeats > 0;
                         const e3Transformed = varC.type === 'I' || varC.truncationBeats > 0;

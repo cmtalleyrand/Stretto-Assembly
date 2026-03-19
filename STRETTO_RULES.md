@@ -32,6 +32,8 @@ Any chain candidate that violates *any* of these rules is immediately discarded 
 6.  **Adjacent Transposition Separation:** For every adjacent pair `(e_i, e_{i+1})`, enforce `|t_i - t_{i+1}| >= 5` semitones (perfect fourth minimum).
 7.  **Transform-Following Normality:** Any inversion or truncation must be immediately followed by a normal (non-inverted, non-truncated) entry.
 8.  **Maximum Contraction Bound:** For each adjacent pair, contraction magnitude is bounded by one-quarter subject length: $d_i - d_{i+1} \le 0.25Sb$.
+9.  **First Entry Non-Inversion:** Entry e1 (the first imitative entry after the subject statement) must not be inverted. The opening imitation establishes the stretto texture and must use the original subject form.
+10. **No Truncation at Long Delay:** If $d_i \ge Sb/2$, then $trunc_i = 0$. An entry arriving at a large delay has room for the full subject and must use it; truncation is only permitted at tighter delays where overlap demands it.
 
 Implementation invariant: Rule A.6 is an immediate-neighbor predicate and is therefore enforced during successor extension against the direct predecessor `(e_{i-1}, e_i)` only; non-adjacent overlapping pairs remain governed by harmonic compatibility rules, not A.6.
 
@@ -54,6 +56,7 @@ Voice indices are ordered from highest register to lowest (0 = soprano … `ense
 ### C. Voice Allocation
 1.  **Re-entry:** Any voice becomes available for re-entry 1 beat (`ppq`) before its current occupant's final note ends.
 2.  **Post-hoc assignment:** Voice indices (`v_i`) are not tracked during BFS. After search, a CSP backtracker assigns voices to all entries in a completed chain, enforcing §B across all temporal pairs and §C re-entry. Chains for which no valid assignment exists are discarded.
+3.  **Active Transposition Uniqueness:** At the entry point of $e_i$, no other currently active entry may share the same transposition ($t_i \ne t_j$ for all $j < i$ where $e_j$ is still sounding at $e_i$'s start). Two entries at the same transposition produce identical pitch content, which defeats the purpose of imitative counterpoint.
 
 ### D. Optional Consonant Termination
 If `requireConsonantEnd` is enabled, dissonant endpoints invalidate the chain.

@@ -57,6 +57,8 @@ These rules enforce that the chain genuinely tightens. Source: `STRETTO_RULES.md
 | A.6 Universal max delay | `d_n ≤ 2/3 × Sb` for all entries |
 | A.7 Adjacent transposition separation | `|t_i − t_{i+1}| ≥ 5` semitones for every adjacent pair |
 | A.8 Transform-following normality | Any inversion or truncation must be immediately followed by a normal (non-inverted, non-truncated) entry |
+| A.9 First entry non-inversion | Entry e1 must not be inverted — the opening imitation uses the original subject form |
+| A.10 No truncation at long delay | If `d_i ≥ Sb/2`, then `trunc_i = 0` — entries arriving at large delays must use the full subject |
 
 ### B. Voice interval constraints (clear spacing between voices)
 
@@ -78,6 +80,7 @@ Source: `STRETTO_RULES.md §C`.
 
 - Voice assignment (`v_i`) is **post-hoc**: a CSP backtracker assigns voices after chain search. Chains with no valid assignment are discarded.
 - Re-entry: a voice becomes available for re-entry 1 beat (`ppq`) before its current occupant's final note ends.
+- Active transposition uniqueness: at entry point of `e_i`, no currently active entry may share the same transposition (`t_i ≠ t_j` for all active `e_j`). Enforced during chain search, not post-hoc.
 
 ### D. Consonant termination (optional)
 
