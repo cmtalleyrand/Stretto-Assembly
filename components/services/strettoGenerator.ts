@@ -1414,6 +1414,7 @@ export async function searchStrettoChains(
 
     // --- PRECOMPUTE TRIPLES ---
     const harmonicallyValidTriples = new Set<string>();
+    const harmonicallyValidTripletShapes = new Set<string>();
     // Numeric window-transition index is precomputed once so expandNode never rebuilds it.
 
     const pairsByFirst = new Map<number, PairTuple[]>();
@@ -1430,6 +1431,7 @@ export async function searchStrettoChains(
 
         const nextPairs = pairsByFirst.get(p1.vB) || [];
         for (const p2 of nextPairs) {
+            stageStats.tripleCandidates++;
             const pairBC = getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
             if (!pairBC) continue;
 
@@ -1515,8 +1517,8 @@ export async function searchStrettoChains(
                 continue;
             }
 
+            let tripletHasValidDelayContext = false;
             for (const d0 of validTripletDelayAs) {
-                stageStats.tripleCandidates++;
                 operationCounter++;
                 if (shouldYieldToEventLoop(operationCounter)) {
                     await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1546,6 +1548,7 @@ export async function searchStrettoChains(
 
                 const key = toTripleKey(vA, vB, vC, d0, d1, d2, p1.t, p2.t);
                 harmonicallyValidTriples.add(key);
+                tripletHasValidDelayContext = true;
 
                 const nextTransition: NextTransition = {
                     nextVariantIndex: vC,
@@ -1556,11 +1559,15 @@ export async function searchStrettoChains(
                     isFreeInterval: pairBC.isFreeInterval
                 };
                 appendWindowTransition(vA, vB, d0, d1, p1.t, nextTransition);
+            }
 
-                stageStats.harmonicallyValidTriples++;
+            if (tripletHasValidDelayContext) {
+                harmonicallyValidTripletShapes.add(`${vA}|${vB}|${vC}|${d1}|${d2}|${p1.t}|${p2.t}`);
             }
         }
     }
+
+    stageStats.harmonicallyValidTriples = harmonicallyValidTripletShapes.size;
 
     // --- Triplet suffix/prefix index for triplet-join Phase A ---
     // Each TripletRecord captures a valid triplet with its pairwise records for
