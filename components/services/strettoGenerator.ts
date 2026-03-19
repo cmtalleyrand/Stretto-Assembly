@@ -1400,6 +1400,32 @@ export async function searchStrettoChains(
             if (d1 >= subjectLengthTicks / 2 && variants[p1.vB].truncationBeats > 0) continue;
             if (d2 >= subjectLengthTicks / 2 && variants[p2.vB].truncationBeats > 0) continue;
 
+            // A.7: Adjacent transposition separation >= 5 semitones (both edges)
+            if (!pairAB.meetsAdjacentTranspositionSeparation) continue;
+            if (!pairBC.meetsAdjacentTranspositionSeparation) continue;
+
+            // A.8: Transform-following — transformed entry must be followed by normal
+            const vAVariant = variants[p1.vA];
+            const vBVariant = variants[p1.vB];
+            const vCVariant = variants[p2.vB];
+            const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
+            const bTransformed = vBVariant.type === 'I' || vBVariant.truncationBeats > 0;
+            const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
+            if (aTransformed && bTransformed) continue;
+            if (bTransformed && cTransformed) continue;
+
+            // A.1 local: within-triplet delay uniqueness
+            if (d1 === d2) continue;
+
+            // A.2: Half-length contraction (OR form) — if d1 >= Sb/2 or d2 >= Sb/2, then d2 < d1
+            if ((d1 >= subjectLengthTicks / 2 || d2 >= subjectLengthTicks / 2) && d2 >= d1) continue;
+
+            // A.5: Maximum contraction bound — d1 − d2 ≤ 0.25 × Sb
+            if (d1 - d2 > subjectLengthTicks / 4) continue;
+
+            // A.4: Post-truncation contraction — after truncated entry, next delay contracts by >= 1 beat
+            if (vBVariant.truncationBeats > 0 && d1 >= subjectLengthTicks / 3 && d2 > d1 - ppq) continue;
+
             // Rule: Max Expansion (using ticks, assuming step size)
             if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
             
@@ -1812,7 +1838,7 @@ export async function searchStrettoChains(
                     // Without this guard, summing adjacent legal deltas can drift to values
                     // (e.g. 14) outside the historical transposition vocabulary.
                     if (!allowedTranspositions.has(t)) continue;
-                    if (!transition.pairRecord!.meetsAdjacentTranspositionSeparation) continue;
+                    // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
                         varIdx: transition.nextVariantIndex,
@@ -1869,30 +1895,8 @@ export async function searchStrettoChains(
                 const variant = variants[varIdx];
                 const isInv = variant.type === 'I';
                 const isTrunc = variant.truncationBeats > 0;
-
-                // A.9: e1 must not be inverted
-                if (depth === 1 && isInv) continue;
-
-                // A.10: no truncated entries at delay >= 0.5*Sb
-                if (isTrunc && delayTicks >= subjectLengthTicks / 2) continue;
-
-                // Structural transform-following rule:
-                // any transformed predecessor (inversion OR truncation) must be followed by a normal entry.
-                // This is an O(1) local-state check using the predecessor variant index.
-                const prevVariant = variants[variantIndices[depth - 1]];
-                const prevIsInv = prevVariant.type === 'I';
-                const prevIsTrunc = prevVariant.truncationBeats > 0;
-                if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
-
-                if (depth >= 2) {
-                    const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-                    const prevSubjectLengthTicks = chain[depth - 1].length;
-                    const halfSubjectTicks = prevSubjectLengthTicks / 2;
-
-                    // Long-delay contraction (OR form):
-                    // if either previous or current delay is at least half subject length, enforce contraction.
-                    if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
-                }
+                // A.9, A.10, A.8, A.2: depth=1 checked during candidate construction;
+                // depth>=2 guaranteed by triplet precomp (A.7, A.8, A.10, A.2, A.5).
 
                 if (isInv && !checkQuota(options.inversionMode, nInv)) continue;
                 if (isTrunc && !checkQuota(options.truncationMode, nTrunc)) continue;
@@ -2190,22 +2194,12 @@ export async function searchStrettoChains(
                     const t = prevTrans + transition.transpositionDelta;
                     if (t === prevTrans) continue;
                     if (!allowedTranspositions.has(t)) continue;
-                    if (!transition.pairRecord!.meetsAdjacentTranspositionSeparation) continue;
+                    // A.7, A.8, A.10, A.2 within-triplet: guaranteed by triplet precomp
 
                     const varIdx = transition.nextVariantIndex;
                     const variant = variants[varIdx];
                     const isInv = variant.type === 'I';
                     const isTrunc = variant.truncationBeats > 0;
-
-                    // A.10: no truncated entries at delay >= 0.5*Sb
-                    if (isTrunc && d >= halfSubjectTicks) continue;
-
-                    // A.8 Transform-following: transformed predecessor must be followed by normal
-                    const prevVariant = variants[prevVarIdx];
-                    if ((prevVariant.type === 'I' || prevVariant.truncationBeats > 0) && (isInv || isTrunc)) continue;
-
-                    // A.2 Half-length contraction (OR form, candidate side)
-                    if ((prevDelayTicks >= halfSubjectTicks || d >= halfSubjectTicks) && d >= prevDelayTicks) continue;
 
                     // Quota checks
                     if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
@@ -2333,15 +2327,11 @@ export async function searchStrettoChains(
                         // A.2 Half-length contraction (OR form)
                         if ((firstDelay >= halfSubjectTicks || delayAB >= halfSubjectTicks) && delayAB >= firstDelay) continue;
 
-                        // A.1 All three delays must be unique (strict)
-                        if (firstDelay === delayAB || firstDelay === delayBC || delayAB === delayBC) continue;
+                        // A.1 Cross-boundary uniqueness (within-triplet d1≠d2 guaranteed by triplet precomp)
+                        if (firstDelay === delayAB || firstDelay === delayBC) continue;
 
                         // A.3 Expansion recoil: if delayAB > firstDelay, then delayBC < firstDelay - delayStep
                         if (delayAB > firstDelay && delayBC >= firstDelay) continue;
-
-                        // A.7 Adjacent transposition separation for inner triplet edges
-                        if (!triplet.pairAB.meetsAdjacentTranspositionSeparation) continue;
-                        if (!triplet.pairBC.meetsAdjacentTranspositionSeparation) continue;
 
                         // Derive absolute transpositions for e2 and e3
                         const tE2 = tE1 + tAB;
@@ -2350,14 +2340,10 @@ export async function searchStrettoChains(
                         if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
                         if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
 
-                        // A.10: no truncated entries at delay >= 0.5*Sb
+                        // C.3: No duplicate transpositions among active entries.
                         const varA = variants[vA];
                         const varB = variants[vB];
                         const varC = variants[vC];
-                        if (varB.truncationBeats > 0 && delayAB >= halfSubjectTicks) continue;
-                        if (varC.truncationBeats > 0 && delayBC >= halfSubjectTicks) continue;
-
-                        // C.3: No duplicate transpositions among active entries.
                         // e0 (t=0) is always active at e1 start (firstDelay < Sb).
                         // e1 (t=tE1) is active at e2 start if e1Start + lenA > e2Start.
                         // e0 is active at e2 start if e2Start < Sb.
@@ -2377,13 +2363,6 @@ export async function searchStrettoChains(
                             if (tE3 === tE1 && e3Start_pre < e1Start_pre + varA.lengthTicks) continue;
                             if (tE3 === tE2 && e3Start_pre < e2Start_pre + varB.lengthTicks) continue;
                         }
-
-                        // A.8 Transform-following
-                        const e1Transformed = varA.type === 'I' || varA.truncationBeats > 0;
-                        const e2Transformed = varB.type === 'I' || varB.truncationBeats > 0;
-                        const e3Transformed = varC.type === 'I' || varC.truncationBeats > 0;
-                        if (e1Transformed && e2Transformed) continue;
-                        if (e2Transformed && e3Transformed) continue;
 
                         // Quota checks
                         let nInv = 0, nTrunc = 0, nRestricted = 0, nFree = 1;
