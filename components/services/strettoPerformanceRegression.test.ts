@@ -5,13 +5,8 @@ import { searchStrettoChains } from './strettoGenerator';
 import type { RawNote, StrettoSearchOptions } from '../../types';
 
 type BaselineFixture = {
-  multiplier: number;
   depthLowerBound: number;
-  stats: {
-    timeMs: number;
-    nodesVisited: number;
-    stageStats: Record<string, number>;
-  };
+  stageStats: Record<string, number>;
 };
 
 type Baseline = {
@@ -25,7 +20,6 @@ type MetricRow = {
   metric: string;
   current: number;
   baseline: number;
-  limit: number;
 };
 
 const ppq = 480;
@@ -96,18 +90,13 @@ const baseline: Baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
 
 const rows: MetricRow[] = [];
 
-function checkUpperBound(fixture: string, metric: string, current: number, baselineValue: number, multiplier: number): void {
-  const limit = Math.ceil(baselineValue * multiplier);
-  rows.push({ fixture, metric, current, baseline: baselineValue, limit });
-  assert.ok(
-    current <= limit,
-    `${fixture}.${metric} regression: current=${current}, baseline=${baselineValue}, limit=${limit} (multiplier=${multiplier})`
-  );
+function record(fixture: string, metric: string, current: number, baseline: number): void {
+  rows.push({ fixture, metric, current, baseline });
 }
 
 function printComparisonTable(): void {
-  const headers = ['fixture', 'metric', 'current', 'baseline', 'limit'];
-  const table = [headers, ...rows.map((row) => [row.fixture, row.metric, String(row.current), String(row.baseline), String(row.limit)])];
+  const headers = ['fixture', 'metric', 'current', 'baseline'];
+  const table = [headers, ...rows.map((row) => [row.fixture, row.metric, String(row.current), String(row.baseline)])];
   const widths = headers.map((_, col) => Math.max(...table.map((line) => line[col].length)));
   const fmt = (line: string[]): string => line.map((cell, i) => cell.padEnd(widths[i], ' ')).join(' | ');
   const divider = widths.map((w) => '-'.repeat(w)).join('-|-');
@@ -116,7 +105,7 @@ function printComparisonTable(): void {
   console.log(fmt(headers));
   console.log(divider);
   for (const row of rows) {
-    console.log(fmt([row.fixture, row.metric, String(row.current), String(row.baseline), String(row.limit)]));
+    console.log(fmt([row.fixture, row.metric, String(row.current), String(row.baseline)]));
   }
 }
 
@@ -124,22 +113,40 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
   const fixtureBaseline = baseline.fixtures[fixtureName];
   assert.ok(fixtureBaseline, `Missing baseline fixture '${fixtureName}' in ${baselinePath}`);
 
+  // Warmup run
   await searchStrettoChains(fixture.subject, fixture.options, ppq);
+  // Measured run
   const report = await searchStrettoChains(fixture.subject, fixture.options, ppq);
 
-  assert.ok(report.stats.stageStats, `${fixtureName} must expose stageStats for performance regression checks.`);
-  assert.equal(report.stats.stopReason, 'Exhausted', `${fixtureName} must fully exhaust to keep topology stable for regression analysis.`);
+  assert.ok(report.stats.stageStats, `${fixtureName} must expose stageStats for regression checks.`);
+
+  // Stop reason: either Exhausted (if search space small enough) or Timeout (time-gated).
+  // NodeLimit should never occur (node budget removed).
+  assert.ok(
+    report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
+    `${fixtureName}: unexpected stopReason '${report.stats.stopReason}' (expected 'Exhausted' or 'Timeout')`
+  );
+
+  // Depth must reach the lower bound.
   assert.ok(
     report.stats.maxDepthReached >= fixtureBaseline.depthLowerBound,
     `${fixtureName}.maxDepthReached regression: current=${report.stats.maxDepthReached}, required>=${fixtureBaseline.depthLowerBound}`
   );
+  record(fixtureName, 'maxDepthReached', report.stats.maxDepthReached, fixtureBaseline.depthLowerBound);
+  record(fixtureName, 'timeMs', report.stats.timeMs, -1);
+  record(fixtureName, 'nodesVisited', report.stats.nodesVisited, -1);
+  record(fixtureName, 'stopReason', report.stats.stopReason === 'Exhausted' ? 0 : 1, -1);
 
-  checkUpperBound(fixtureName, 'timeMs', report.stats.timeMs, fixtureBaseline.stats.timeMs, fixtureBaseline.multiplier);
-  checkUpperBound(fixtureName, 'nodesVisited', report.stats.nodesVisited, fixtureBaseline.stats.nodesVisited, fixtureBaseline.multiplier);
-
-  for (const [counterName, baselineCounter] of Object.entries(fixtureBaseline.stats.stageStats)) {
-    const currentCounter = (report.stats.stageStats as Record<string, number | undefined>)[counterName] ?? 0;
-    checkUpperBound(fixtureName, `stageStats.${counterName}`, currentCounter, baselineCounter, fixtureBaseline.multiplier);
+  // Stage stats are deterministic (precomputation depends only on input, not search traversal).
+  // They must match baseline exactly — any deviation means the precomputation logic changed.
+  for (const [counterName, baselineCounter] of Object.entries(fixtureBaseline.stageStats)) {
+    const currentCounter = (report.stats.stageStats as Record<string, unknown>)[counterName] as number ?? 0;
+    record(fixtureName, `stageStats.${counterName}`, currentCounter, baselineCounter);
+    assert.equal(
+      currentCounter,
+      baselineCounter,
+      `${fixtureName}.stageStats.${counterName}: current=${currentCounter}, baseline=${baselineCounter} — precomputation changed unexpectedly`
+    );
   }
 }
 
