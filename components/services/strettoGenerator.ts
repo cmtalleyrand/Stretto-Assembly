@@ -2289,6 +2289,10 @@ export async function searchStrettoChains(
                         // A.3 Expansion recoil: if delayAB > firstDelay, then delayBC < firstDelay - delayStep
                         if (delayAB > firstDelay && delayBC >= firstDelay) continue;
 
+                        // A.7 Adjacent transposition separation for inner triplet edges
+                        if (!triplet.pairAB.meetsAdjacentTranspositionSeparation) continue;
+                        if (!triplet.pairBC.meetsAdjacentTranspositionSeparation) continue;
+
                         // Derive absolute transpositions for e2 and e3
                         const tE2 = tE1 + tAB;
                         const tE3 = tE2 + tBC;
@@ -2396,6 +2400,11 @@ export async function searchStrettoChains(
                         const extensionStack: TripletJoinState[] = [seedState];
                         while (extensionStack.length > 0) {
                             if (terminationReason) break;
+                            operationCounter++;
+                            if (shouldYieldToEventLoop(operationCounter)) {
+                                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                            }
+                            if (checkLimits()) break;
                             const current = extensionStack.pop()!;
                             const currentDepth = current.chain.length;
 
@@ -2520,7 +2529,7 @@ export async function searchStrettoChains(
 
     // --- POST-SEARCH: Score all found chains ---
     let sourceUnscored = unscoredResults;
-    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || 'Exhausted';
+    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || (unscoredResults.length > 0 ? 'Success' : 'Exhausted');
 
     // Fallback to partials if no full-length results.
     // Voice assignment is deferred to here to avoid expensive CSP during traversal.
