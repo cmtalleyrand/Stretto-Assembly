@@ -2383,6 +2383,7 @@ export async function searchStrettoChains(
 
                         if (nInv > 0 && !checkQuota(options.inversionMode, nInv - 1)) continue;
                         if (nTrunc > 0 && !checkQuota(options.truncationMode, nTrunc - 1)) continue;
+                        if (nRestricted > 0 && !checkQuota(options.thirdSixthMode, nRestricted - 1)) continue;
                         if (nRestricted > 1 && nRestricted >= nFree) continue;
 
                         // e0 pairwise: check e0→e2 if overlapping
