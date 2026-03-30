@@ -4,6 +4,7 @@ import type { RawNote, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
 const delayStep = ppq / 2;
+const restrictedIntervalClasses = new Set([3, 4, 8, 9]);
 
 function assertChainStructure(
   result: Awaited<ReturnType<typeof searchStrettoChains>>['results'][number],
@@ -33,6 +34,20 @@ function assertChainStructure(
       `${label}: transposition ${entry.transposition} must be an integer number of semitones (chain ${result.id}, entry ${i})`
     );
   }
+}
+
+function countRestrictedAdjacentIntervals(
+  result: Awaited<ReturnType<typeof searchStrettoChains>>['results'][number],
+  startIndex: number,
+  endIndex: number
+): number {
+  let restrictedCount = 0;
+  for (let i = startIndex; i < endIndex; i++) {
+    const delta = result.entries[i + 1].transposition - result.entries[i].transposition;
+    const intervalClass = ((delta % 12) + 12) % 12;
+    if (restrictedIntervalClasses.has(intervalClass)) restrictedCount++;
+  }
+  return restrictedCount;
 }
 
 async function assertAdmissibilityPruningParity(
@@ -254,6 +269,64 @@ async function assertAdmissibilityPruningParity(
     );
   }
   console.log(`[integration:fixture-D] stopReason=${report.stats.stopReason} chains=${report.results.length}`);
+}
+
+// ── Fixture E: long-chain third/sixth quota in both Phase-A triplets ───────
+// A 7-entry search under thirdSixthMode = 1 must preserve the per-triplet
+// adjacent third/sixth cap in both the seed window (e0→e3) and the extension
+// window (e3→e6).
+{
+  const subject: RawNote[] = [
+    { midi: 60, ticks: 0,    durationTicks: 480, velocity: 90, name: 'C4' },
+    { midi: 62, ticks: 480,  durationTicks: 480, velocity: 90, name: 'D4' },
+    { midi: 64, ticks: 960,  durationTicks: 480, velocity: 90, name: 'E4' },
+    { midi: 65, ticks: 1440, durationTicks: 480, velocity: 90, name: 'F4' },
+    { midi: 67, ticks: 1920, durationTicks: 480, velocity: 90, name: 'G4' }
+  ];
+  const options: StrettoSearchOptions = {
+    ensembleTotal: 4,
+    targetChainLength: 7,
+    subjectVoiceIndex: 1,
+    truncationMode: 'None',
+    truncationTargetBeats: 1,
+    inversionMode: 'None',
+    useChromaticInversion: false,
+    thirdSixthMode: 1,
+    pivotMidi: 60,
+    requireConsonantEnd: false,
+    disallowComplexExceptions: false,
+    maxPairwiseDissonance: 0.75,
+    maxSearchTimeMs: 5000,
+    scaleRoot: 0,
+    scaleMode: 'Major'
+  };
+  const report = await searchStrettoChains(subject, options, ppq);
+  assert.equal(
+    report.stats.stopReason,
+    'Success',
+    'fixture-E: constrained long-chain search must complete successfully within the test budget'
+  );
+  assert.ok(
+    report.results.length > 0,
+    'fixture-E: constrained long-chain search must yield at least one admissible chain'
+  );
+  for (const result of report.results) {
+    assertChainStructure(result, options.ensembleTotal, 'fixture-E');
+    assert.equal(
+      result.entries.length,
+      options.targetChainLength,
+      `fixture-E: every accepted chain must reach the full target depth (chain ${result.id})`
+    );
+    assert.ok(
+      countRestrictedAdjacentIntervals(result, 0, 2) <= 1,
+      `fixture-E: seed triplet e0→e3 must contain at most one adjacent 3rd/6th when thirdSixthMode = 1 (chain ${result.id})`
+    );
+    assert.ok(
+      countRestrictedAdjacentIntervals(result, 3, 5) <= 1,
+      `fixture-E: extension triplet e3→e6 must contain at most one adjacent 3rd/6th when thirdSixthMode = 1 (chain ${result.id})`
+    );
+  }
+  console.log(`[integration:fixture-E] stopReason=${report.stats.stopReason} chains=${report.results.length}`);
 }
 
 console.log('stretto integration tests passed');
