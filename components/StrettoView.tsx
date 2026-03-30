@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
-import { parseSimpleAbc, extractKeyFromAbc } from './services/abcBridge';
+import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
 import { searchStrettoChains } from './services/strettoGenerator'; 
 import { getStrictPitchName } from './services/midiSpelling';
@@ -13,10 +13,12 @@ import { useStrettoAssembly } from '../hooks/useStrettoAssembly';
 import { predictKey } from './services/analysis/keyPrediction'; // Robust key finding
 
 import StrettoConfig, { SearchResolution } from './stretto/StrettoConfig';
+import { computeSubjectPivotCandidates, rankPivotCandidates, PivotSearchMetric, PivotCandidateObservation } from './services/pairwisePivotSearch';
 import StrettoList from './stretto/StrettoList';
 import StrettoInspector from './stretto/StrettoInspector';
 import StrettoFooter from './stretto/StrettoFooter';
 import StrettoChainView from './stretto/StrettoChainView';
+import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
 
 interface StrettoViewProps {
@@ -71,6 +73,7 @@ export default function StrettoView({
     const [selectedCandidate, setSelectedCandidate] = useState<StrettoCandidate | null>(null);
     const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
     const [discoveryFilterContext, setDiscoveryFilterContext] = useState<StrettoListFilterContext | null>(null);
+    const [pivotSearchResults, setPivotSearchResults] = useState<PivotSearchMetric[]>([]);
     
     // Master Transposition State (Post-processing)
     const [masterTransposition, setMasterTransposition] = useState<number>(0);
@@ -89,7 +92,8 @@ export default function StrettoView({
         disallowComplexExceptions: false,
         maxPairwiseDissonance: 1.0, // Default to Allow All
         scaleRoot: 0,
-        scaleMode: 'Major'
+        scaleMode: 'Major',
+        maxSearchTimeMs: 30000
     });
     
     const [chainResults, setChainResults] = useState<StrettoChainResult[]>([]);
@@ -118,6 +122,20 @@ export default function StrettoView({
         if (mode === 'abc') return parseSimpleAbc(abcInput, ppq || 480);
         return initialNotes;
     }, [mode, abcInput, initialNotes, ppq]);
+
+
+    const pivotOptions = useMemo(() => {
+        const candidates = computeSubjectPivotCandidates(subjectNotes);
+        if (candidates.length > 0) return candidates;
+        return [searchOptions.pivotMidi];
+    }, [subjectNotes, searchOptions.pivotMidi]);
+
+    useEffect(() => {
+        if (pivotOptions.length === 0) return;
+        if (!pivotOptions.includes(searchOptions.pivotMidi)) {
+            setSearchOptions((prev) => ({ ...prev, pivotMidi: pivotOptions[0] }));
+        }
+    }, [pivotOptions, searchOptions.pivotMidi]);
 
     const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
     const abcKeyLabel = useMemo(() => {
@@ -258,18 +276,26 @@ export default function StrettoView({
         intervalsToCheck.forEach(interval => {
             for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
                 // PASS pivotMidi and derived root from searchOptions
-                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot));
+                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 if (includeInversions) {
-                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot));
+                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 }
             }
         });
         return candidates;
-    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, ts, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot]);
+    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, ts, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const processedDiscoveryResults = useMemo(() => {
-        return pairwiseResults.filter(r => gradeFilter[r.grade]);
-    }, [pairwiseResults, gradeFilter]);
+        return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
+    }, [pairwiseResults, gradeFilter, searchOptions.maxPairwiseDissonance]);
+
+    useEffect(() => {
+        setCheckedIds((prev) => pruneCheckedIdsByHardPairwisePolicy(prev, pairwiseResults, searchOptions.maxPairwiseDissonance));
+        setSelectedCandidate((prev) => {
+            if (!prev) return null;
+            return isCandidateAllowedByHardPairwisePolicy(prev, searchOptions.maxPairwiseDissonance) ? prev : null;
+        });
+    }, [pairwiseResults, searchOptions.maxPairwiseDissonance]);
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
@@ -277,7 +303,13 @@ export default function StrettoView({
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
         setTimeout(async () => {
             try {
-                const report = await searchStrettoChains(subjectNotes.filter(n => !!n), { ...searchOptions, voiceNames }, ppq || 480);
+                const sourceMeter = mode === 'abc' ? extractMeterFromAbc(abcInput) : null;
+                const report = await searchStrettoChains(subjectNotes.filter(n => !!n), {
+                    ...searchOptions,
+                    voiceNames,
+                    meterNumerator: sourceMeter?.num ?? ts.num,
+                    meterDenominator: sourceMeter?.den ?? ts.den,
+                }, ppq || 480);
                 setChainResults(report.results); setSearchReport(report);
             } catch (e) { alert("Search failed."); } finally { setIsSearching(false); }
         }, 100);
@@ -349,7 +381,7 @@ export default function StrettoView({
         const chainRegions = generatePolyphonicHarmonicRegions(allNotes, searchOptions.scaleRoot);
 
         return { id: selectedChain.id, intervalLabel: "Chain", intervalSemis: 0, delayBeats: 0, delayTicks: 0, grade: 'STRONG', errors: [], notes: allNotes, regions: chainRegions, dissonanceRatio: 0, pairDissonanceScore: 0, endsOnDissonance: false };
-    }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot]);
+    }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const handlePlay = (notes: RawNote[]) => {
         if (isPlaying) { stopPlayback(); setIsPlaying(false); return; }
@@ -362,6 +394,68 @@ export default function StrettoView({
             duration: n.durationTicks * (0.5 / currentPpq), 
             velocity: n.velocity 
         })), () => setIsPlaying(false));
+    };
+
+
+    const runOptimalPivotSearch = () => {
+        if (!includeInversions || subjectNotes.length === 0 || pivotOptions.length === 0) {
+            setPivotSearchResults([]);
+            return;
+        }
+
+        const validNotes = subjectNotes.filter((n) => !!n);
+        if (validNotes.length === 0) {
+            setPivotSearchResults([]);
+            return;
+        }
+
+        const durationTicks = Math.max(...validNotes.map((n) => n.ticks + n.durationTicks));
+        const maxDelay = durationTicks * (2 / 3);
+        const currentPpq = ppq || 480;
+        let stepTicks = currentPpq;
+        if (searchRes === 'half') stepTicks = currentPpq / 2;
+        else if (searchRes === 'double') stepTicks = currentPpq * 2;
+
+        let intervalsToCheck = [...configIntervals];
+        if (includeExtensions) {
+            const exts = [3, 4, 8, 9, -3, -4, -8, -9];
+            exts.forEach((e) => { if (!intervalsToCheck.includes(e)) intervalsToCheck.push(e); });
+        }
+
+        const ranked = rankPivotCandidates({
+            pivots: pivotOptions,
+            referencePivot: searchOptions.pivotMidi,
+            evaluatePivot: (pivotMidi) => {
+                const observations: PivotCandidateObservation[] = [];
+                intervalsToCheck.forEach((interval) => {
+                    for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
+                        const candidate = analyzeStrettoCandidate(
+                            validNotes,
+                            interval,
+                            Math.round(d),
+                            currentPpq,
+                            ts,
+                            true,
+                            pivotMidi,
+                            searchOptions.useChromaticInversion,
+                            searchOptions.scaleRoot,
+                            searchOptions.maxPairwiseDissonance
+                        );
+                        observations.push({
+                            delayTicks: candidate.delayTicks,
+                            dissonanceRatio: candidate.dissonanceRatio,
+                            isViable: candidate.grade !== 'INVALID'
+                        });
+                    }
+                });
+                return observations;
+            }
+        });
+
+        setPivotSearchResults(ranked);
+        if (ranked.length > 0) {
+            setSearchOptions((prev) => ({ ...prev, pivotMidi: ranked[0].pivotMidi }));
+        }
     };
 
     const toggleCheck = (id: string) => {
@@ -491,6 +585,9 @@ export default function StrettoView({
                         setIncludeExtensions={setIncludeExtensions} 
                         pivotMidi={searchOptions.pivotMidi}
                         setPivotMidi={(val) => setSearchOptions({...searchOptions, pivotMidi: val})}
+                        pivotOptions={pivotOptions}
+                        onFindOptimalPivot={runOptimalPivotSearch}
+                        pivotSearchResults={pivotSearchResults}
                     />
                     
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

@@ -339,8 +339,10 @@ export interface StrettoChainOption {
  * `delayBeatsFromPreviousEntry` is a first-class stored value in canonical form.
  *
  * Invariants:
- * - For `e0`: `delayBeatsFromPreviousEntry = 0`, `transpositionSemisFromE0 = 0`,
- *   `isInverted = false`, and `isTruncated = false`.
+ * - For `e0`: `delayBeatsFromPreviousEntry = 0` (sentinel, not a real delay —
+ *   rule evaluators must skip index 0 when applying delay-based constraints
+ *   such as A.2–A.6), `transpositionSemitones = 0`, `isInverted = false`,
+ *   and `isTruncated = false`.
  * - For every entry index `i > 0`: `delayBeatsFromPreviousEntry >= 0`.
  * - Monotone nondecreasing chain timing: defining
  *   `t_i = Σ_{k=0..i} chain[k].delayBeatsFromPreviousEntry`, then
@@ -348,7 +350,7 @@ export interface StrettoChainOption {
  */
 export interface CanonicalStrettoChainEntry {
     delayBeatsFromPreviousEntry: number;
-    transpositionSemisFromE0: number;
+    transpositionSemitones: number;
     voiceIndex: number;
     isInverted: boolean;
     isTruncated: boolean;
@@ -416,7 +418,7 @@ export function fromLegacyChainOption(
 
     return {
         delayBeatsFromPreviousEntry: legacy.startBeat - previousStartBeatFromE0,
-        transpositionSemisFromE0: legacy.transposition,
+        transpositionSemitones: legacy.transposition,
         voiceIndex: legacy.voiceIndex,
         isInverted: legacy.type === 'I',
         isTruncated: hasFullLength ? legacy.length < context.fullLengthTicks! : false,
@@ -432,7 +434,7 @@ export function toLegacyChainOption(
 
     return {
         startBeat: previousStartBeatFromE0 + canonical.delayBeatsFromPreviousEntry,
-        transposition: canonical.transpositionSemisFromE0,
+        transposition: canonical.transpositionSemitones,
         type: canonical.isInverted ? 'I' : 'N',
         length,
         voiceIndex: canonical.voiceIndex,
@@ -481,7 +483,17 @@ export function fromLegacyChainOptions(
 ): CanonicalStrettoChainEntry[] {
     let previousStartBeatFromE0 = 0;
 
-    return legacyEntries.map((legacy) => {
+    return legacyEntries.map((legacy, index) => {
+        // Invariant: legacy startBeat values must be monotone non-decreasing.
+        // A negative computed delay (i > 0) means the input chain is not ordered
+        // correctly and would silently corrupt rule evaluations that depend on d_i.
+        if (index > 0 && legacy.startBeat < previousStartBeatFromE0) {
+            throw new Error(
+                `fromLegacyChainOptions: entry ${index} startBeat (${legacy.startBeat}) ` +
+                `is less than previous startBeat (${previousStartBeatFromE0}). ` +
+                `Chain entries must be in non-decreasing temporal order.`
+            );
+        }
         const canonical = fromLegacyChainOption(legacy, {
             previousStartBeatFromE0,
             fullLengthTicks: context.fullLengthTicks,
@@ -549,11 +561,16 @@ export interface StrettoSearchReport {
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
         coverage?: {
             nodeBudgetUsedPercent: number;
             maxFrontierSize: number;
             maxFrontierClassCount: number;
+            edgesTraversed: number;
+            frontierSizeAtTermination: number;
+            frontierClassesAtTermination: number;
+            completionRatioLowerBound?: number;
         };
         stageStats?: {
             validDelayCount: number;
@@ -562,17 +579,26 @@ export interface StrettoSearchReport {
             pairwiseCompatible: number;
             pairwiseWithFourth: number;
             pairwiseWithVoiceCrossing: number;
+            pairwiseP4TwoVoiceDissonant: number;
+            pairwiseParallelRejected?: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
             tripleLowerBoundRejected: number;
             tripleParallelRejected: number;
             tripleVoiceRejected: number;
+            tripleP4BassRejected: number;
             harmonicallyValidTriples: number;
             deterministicDagMergedNodes: number;
             pairStageRejected: number;
             tripletStageRejected: number;
             globalLineageStageRejected: number;
             structuralScanInvocations: number;
+            dissonanceSpans?: { startTick: number; endTick: number }[];
+            p4Spans?: { startTick: number; endTick: number }[];
+            parallelPerfectLocationTicks?: number[];
+            transitionWindowLookups?: number;
+            transitionsReturned?: number;
+            candidateTransitionsEnumerated?: number;
         };
     };
 }
@@ -593,6 +619,10 @@ export interface StrettoSearchOptions {
     disallowComplexExceptions: boolean;
     maxPairwiseDissonance: number;
     voiceNames?: Record<number, string>;
+    meterNumerator?: number;
+    meterDenominator?: number;
     scaleRoot: number; // 0-11
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.
+    maxSearchTimeMs?: number;
+    collectDiagnosticSpans?: boolean;
 }

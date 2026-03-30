@@ -8,9 +8,10 @@ These rules explicitly prevent chains where added entries fail to increase stret
 
 Notation: $n$ is entry index, $d_n$ is delay between entries $(n-1)\rightarrow n$, $Sb$ is current entry subject length in beats, and $B$ is one beat.
 
-1. **Half-length contraction trigger:** if $d_{n-1} > Sb/2$, then $d_n < d_{n-1} - 0.5B$.
+1. **Half-length contraction trigger (OR form):** if $d_{n-1} \ge Sb/2$ **or** $d_n \ge Sb/2$, then $d_n < d_{n-1}$.
 2. **Expansion recoil trigger:** if $d_{n-1} > d_{n-2}$ and $d_{n-1} > Sb/3$, then $d_n < d_{n-2} - 0.5B$.
 3. **Post-truncation contraction:** after a truncated entry, the next delay must contract by at least $1B$, unless $d_{n-1} < Sb/3$.
+4. **Maximum contraction bound:** $d_{n-1} - d_n \le 0.25Sb$.
 
 ## 🚨 Critical P4/P5/P8 Policy Clarification
 1. **Parallel perfect 4ths are permitted unconditionally.**
@@ -24,18 +25,38 @@ Any chain candidate that violates *any* of these rules is immediately discarded 
 
 ### A. Distance & Rhythm Rules
 1.  **Global Uniqueness:** Every delay interval used in the chain must be unique if > 1/3 length.
-2.  **Half-Length Trigger:** If previous delay exceeds half subject length, current delay must contract by at least 0.5 beat.
+2.  **Half-Length Trigger (OR form):** If previous or current delay is at least half subject length, current delay must be strictly smaller than previous.
 3.  **Expansion Recoil:** If previous delay expanded and exceeded one-third subject length, current delay must contract by at least 0.5 beat relative to two entries ago.
 4.  **Post-Truncation Contraction:** After a truncated entry, next delay must contract by at least 1 beat unless previous delay is below one-third subject length.
 5.  **Universal Distance Limits:** All entries are allowed a maximum delay of **66% (2/3)** of the subject length.
+6.  **Adjacent Transposition Separation:** For every adjacent pair `(e_i, e_{i+1})`, enforce `|t_i - t_{i+1}| >= 5` semitones (perfect fourth minimum).
+7.  **Transform-Following Normality:** Any inversion or truncation must be immediately followed by a normal (non-inverted, non-truncated) entry.
+8.  **Maximum Contraction Bound:** For each adjacent pair, contraction magnitude is bounded by one-quarter subject length: $d_i - d_{i+1} \le 0.25Sb$.
+9.  **First Entry Non-Inversion:** Entry e1 (the first imitative entry after the subject statement) must not be inverted. The opening imitation establishes the stretto texture and must use the original subject form.
+10. **No Truncation at Long Delay:** If $d_i \ge Sb/2$, then $trunc_i = 0$. An entry arriving at a large delay has room for the full subject and must use it; truncation is only permitted at tighter delays where overlap demands it.
 
-### B. Voice Interval Constraints (Relative)
-The algorithm strictly enforces vertical ordering:
-1.  **Neighbor Below ($v+1$):** $T(v) \ge T(v+1)$.
-2.  **Neighbor Above ($v-1$):** $T(v) \le T(v-1)$.
+Implementation invariant: Rule A.6 is an immediate-neighbor predicate and is therefore enforced during successor extension against the direct predecessor `(e_{i-1}, e_i)` only; non-adjacent overlapping pairs remain governed by harmonic compatibility rules, not A.6.
+
+### B. Voice Interval Constraints
+
+**Scope:** Rules apply to **all temporal pairs** in a chain — not only to entries that sound simultaneously. When a new entry is assigned to a voice, the ordering constraints are checked relative to the most recent prior chain entry in every other voice, whether or not that prior entry is still sounding. These are register-identity constraints (a voice maintains its register relationship throughout the chain), not acoustic simultaneity constraints.
+
+Voice indices are ordered from highest register to lowest (0 = soprano … `ensembleTotal−1` = bass). Voices that are `dist` steps apart must satisfy a minimum transposition gap:
+
+| Rule | Distance between voice indices | Pair type | Minimum gap: T(higher register) − T(lower register) |
+|---|---|---|---|
+| 2A | dist = 1 | Non-bass adjacent pair (e.g. soprano–alto, alto–tenor) | ≥ 0 semitones |
+| 2B | dist = 1 | Tenor–bass pair (lowest adjacent pair) | ≥ 7 semitones |
+| 3A | dist = 2 | Non-bass pair (e.g. soprano–tenor, alto–bass... non-lowest) | ≥ 7 semitones |
+| 3B | dist = 2 | Alto–bass pair (lowest dist-2 pair) | ≥ 12 semitones |
+| — | dist ≥ 3 | Any pair 3 or more voice-steps apart | ≥ 12 semitones |
+
+**Implementation note:** These rules are enforced post-hoc by a CSP backtracker (`assignVoices`) that runs after chain search completes and checks every pair of entries in the chain, ordered by voice register.
 
 ### C. Voice Allocation
-1.  **Re-entry:** Any voice becomes available for re-entry 1 beat before its final note ends.
+1.  **Re-entry:** Any voice becomes available for re-entry 1 beat (`ppq`) before its current occupant's final note ends.
+2.  **Post-hoc assignment:** Voice indices (`v_i`) are not tracked during BFS. After search, a CSP backtracker assigns voices to all entries in a completed chain, enforcing §B across all temporal pairs and §C re-entry. Chains for which no valid assignment exists are discarded.
+3.  **Active Transposition Uniqueness:** At the entry point of $e_i$, no other currently active entry may share the same transposition ($t_i \ne t_j$ for all $j < i$ where $e_j$ is still sounding at $e_i$'s start). Two entries at the same transposition produce identical pitch content, which defeats the purpose of imitative counterpoint.
 
 ### D. Optional Consonant Termination
 If `requireConsonantEnd` is enabled, dissonant endpoints invalidate the chain.

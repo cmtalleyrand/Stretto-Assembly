@@ -45,7 +45,7 @@ export function getIntervalLabel(semitones: number): string {
 
     // Map for simple intervals (0-11)
     const map: Record<number, string> = {
-        0: 'P8', 1: 'm2', 2: 'M2', 3: 'm3', 4: 'M3', 5: 'P4', 6: 'TT', 
+        0: 'P8', 1: 'm2', 2: 'M2', 3: 'm3', 4: 'M3', 5: 'P4', 6: 'TT',
         7: 'P5', 8: 'm6', 9: 'M6', 10: 'm7', 11: 'M7'
     };
 
@@ -54,23 +54,30 @@ export function getIntervalLabel(semitones: number): string {
         return `${signStr}${map[abs % 12]}`;
     }
 
-    // Compound Intervals
     const octaves = Math.floor(abs / 12);
     const simple = abs % 12;
-    
-    // Standard names for common compounds
-    // P8 + P5 = 12 + 7 = 19 (P12)
-    if (simple === 7 && octaves === 1) return `${signStr}P12`;
-    // P8 + P8 = 24 (P15)
-    if (simple === 0 && octaves === 2) return `${signStr}P15`;
-    // P8 + P4 = 12 + 5 = 17 (P11)
-    if (simple === 5 && octaves === 1) return `${signStr}P11`;
-    // P8 + M3 = 12 + 4 = 16 (M10)
-    if (simple === 4 && octaves === 1) return `${signStr}M10`;
 
-    // Fallback: Base + Octave
-    // Format: "+P5(+8va)"
-    return `${signStr}${map[simple]}(+${octaves} 8va)`;
+    // Use canonical compound interval spelling (e.g., m17, M20) instead of octave suffixes.
+    const intervalClassToBase: Record<number, { quality: 'P' | 'm' | 'M' | 'A'; number: number } | undefined> = {
+        0: { quality: 'P', number: 1 },
+        1: { quality: 'm', number: 2 },
+        2: { quality: 'M', number: 2 },
+        3: { quality: 'm', number: 3 },
+        4: { quality: 'M', number: 3 },
+        5: { quality: 'P', number: 4 },
+        6: { quality: 'A', number: 4 },
+        7: { quality: 'P', number: 5 },
+        8: { quality: 'm', number: 6 },
+        9: { quality: 'M', number: 6 },
+        10: { quality: 'm', number: 7 },
+        11: { quality: 'M', number: 7 },
+    };
+
+    const descriptor = intervalClassToBase[simple];
+    if (!descriptor) return `${signStr}${map[simple]}`;
+
+    const compoundNumber = descriptor.number + (octaves * 7);
+    return `${signStr}${descriptor.quality}${compoundNumber}`;
 }
 
 export function getRhythmAbbreviation(durationTicks: number, ppq: number): string {

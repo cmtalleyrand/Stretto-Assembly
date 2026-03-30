@@ -1,0 +1,28 @@
+{
+  "version": 4,
+  "updateGuidance": [
+    "Update this baseline only when a deliberate algorithmic change alters precomputation or search architecture.",
+    "Stage stats are deterministic and must match exactly — they depend only on the input fixture, not search traversal.",
+    "Before updating values, re-run correctness-oriented stretto tests and document the rationale in the associated commit/PR."
+  ],
+  "fixtures": {
+    "target8_scale8": {
+      "depthLowerBound": 7,
+      "stageStats": {
+        "pairwiseTotal": 731,
+        "pairwiseCompatible": 504,
+        "tripleCandidates": 254016,
+        "harmonicallyValidTriples": 41158
+      }
+    },
+    "target8_scale10": {
+      "depthLowerBound": 7,
+      "stageStats": {
+        "pairwiseTotal": 934,
+        "pairwiseCompatible": 585,
+        "tripleCandidates": 342225,
+        "harmonicallyValidTriples": 48665
+      }
+    }
+  }
+}
