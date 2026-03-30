@@ -3,7 +3,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
-import { searchStrettoChains } from './services/strettoGenerator'; 
 import { getStrictPitchName } from './services/midiSpelling';
 import { downloadStrettoCandidate, downloadStrettoSelection } from './services/strettoExport';
 import { Spinner, DocumentTextIcon } from './Icons';
@@ -38,6 +37,22 @@ interface SavedSubject {
     id: string;
     name: string;
     data: string;
+}
+
+interface StrettoSearchWorkerRequest {
+    subject: RawNote[];
+    options: StrettoSearchOptions;
+    ppq: number;
+}
+
+interface StrettoSearchWorkerSuccess {
+    ok: true;
+    report: StrettoSearchReport;
+}
+
+interface StrettoSearchWorkerFailure {
+    ok: false;
+    error: string;
 }
 
 export default function StrettoView({
@@ -299,17 +314,41 @@ export default function StrettoView({
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
+    const runChainSearchInWorker = (request: StrettoSearchWorkerRequest): Promise<StrettoSearchReport> => {
+        return new Promise((resolve, reject) => {
+            const worker = new Worker(new URL('./workers/strettoSearchWorker.ts', import.meta.url), { type: 'module' });
+            worker.onmessage = (event: MessageEvent<StrettoSearchWorkerSuccess | StrettoSearchWorkerFailure>) => {
+                const payload = event.data;
+                worker.terminate();
+                if (payload.ok) {
+                    resolve(payload.report);
+                    return;
+                }
+                reject(new Error((payload as StrettoSearchWorkerFailure).error));
+            };
+            worker.onerror = (event: ErrorEvent) => {
+                worker.terminate();
+                reject(new Error(event.message || 'Stretto search worker failed.'));
+            };
+            worker.postMessage(request);
+        });
+    };
+
     const handleChainSearch = async () => {
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
         setTimeout(async () => {
             try {
                 const sourceMeter = mode === 'abc' ? extractMeterFromAbc(abcInput) : null;
-                const report = await searchStrettoChains(subjectNotes.filter(n => !!n), {
+                const report = await runChainSearchInWorker({
+                    subject: subjectNotes.filter(n => !!n),
+                    options: {
                     ...searchOptions,
                     voiceNames,
                     meterNumerator: sourceMeter?.num ?? ts.num,
                     meterDenominator: sourceMeter?.den ?? ts.den,
-                }, ppq || 480);
+                    },
+                    ppq: ppq || 480
+                });
                 setChainResults(report.results); setSearchReport(report);
             } catch (e) { alert("Search failed."); } finally { setIsSearching(false); }
         }, 100);
