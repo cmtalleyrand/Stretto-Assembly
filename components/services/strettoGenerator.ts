@@ -2421,7 +2421,7 @@ export async function searchStrettoChains(
                         if (firstDelay === delayAB || firstDelay === delayBC) continue;
 
                         // A.3 Expansion recoil: if delayAB > firstDelay, then delayBC < firstDelay - delayStep
-                        if (delayAB > firstDelay && delayBC >= firstDelay) continue;
+                        if (delayAB > firstDelay && delayBC >= firstDelay - delayStep) continue;
 
                         // Derive absolute transpositions for e2 and e3
                         const tE2 = tE1 + tAB;
