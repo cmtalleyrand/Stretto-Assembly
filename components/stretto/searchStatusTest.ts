@@ -1,4 +1,4 @@
-import { deriveSearchDiagnosticsPresentation, deriveSearchStatusPresentation } from './searchStatus';
+import { deriveSearchDiagnosticsPresentation, deriveSearchRuntimePresentation, deriveSearchStatusPresentation } from './searchStatus';
 import { StrettoSearchReport } from '../../types';
 
 function mkReport(
@@ -86,6 +86,17 @@ if (!diagnostics.constraintSignals.some((signal) => signal.includes('Triplet rej
 }
 if (!diagnostics.constraintSignals.some((signal) => signal.includes('terminationFrontier=40 (8 classes)'))) {
   throw new Error('Diagnostics must expose termination frontier coverage signal.');
+}
+
+const runtime = deriveSearchRuntimePresentation(12000, 30000);
+if (runtime.elapsedPercent !== 40) {
+  throw new Error('Runtime presentation must expose deterministic elapsed-percent quantization.');
+}
+if (runtime.algorithmPhase !== 'Triplet Gate Construction') {
+  throw new Error('Runtime phase classification must align with elapsed budget segment.');
+}
+if (runtime.estimatedRemainingMs !== 18000) {
+  throw new Error('Runtime remaining-time estimate must be budget minus elapsed.');
 }
 
 console.log('searchStatusTest passed');
