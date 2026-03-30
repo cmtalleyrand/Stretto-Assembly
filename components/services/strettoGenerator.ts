@@ -9,7 +9,7 @@ import { getInvertedPitch } from './strettoCore';
 const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const MAX_RESULTS = 50;
-const EVENT_LOOP_YIELD_INTERVAL = 2048;
+const EVENT_LOOP_YIELD_INTERVAL = 1024;
 // Removed EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY — no longer needed with active-tail DAG keys.
 
 interface TripletKeyParts {
@@ -2340,12 +2340,16 @@ export async function searchStrettoChains(
         // independently enumerate e1's absolute transposition and derive e2/e3.
         const minFirstDelay = Math.ceil(halfSubjectTicks / delayStep) * delayStep;
         const maxFirstDelay = Math.floor(subjectLengthTicks * (2 / 3) / delayStep) * delayStep;
-        const tripletsByVA = new Map<number, typeof allTripletRecords>();
+        const tripletsByVAAndDelayAB = new Map<number, Map<number, typeof allTripletRecords>>();
         for (const tripletRecord of allTripletRecords) {
-            if (!tripletsByVA.has(tripletRecord.vA)) {
-                tripletsByVA.set(tripletRecord.vA, []);
+            if (!tripletsByVAAndDelayAB.has(tripletRecord.vA)) {
+                tripletsByVAAndDelayAB.set(tripletRecord.vA, new Map<number, typeof allTripletRecords>());
             }
-            tripletsByVA.get(tripletRecord.vA)!.push(tripletRecord);
+            const byDelay = tripletsByVAAndDelayAB.get(tripletRecord.vA)!;
+            if (!byDelay.has(tripletRecord.d1)) {
+                byDelay.set(tripletRecord.d1, []);
+            }
+            byDelay.get(tripletRecord.d1)!.push(tripletRecord);
         }
 
         for (let firstDelay = minFirstDelay; firstDelay <= maxFirstDelay; firstDelay += delayStep) {
@@ -2373,14 +2377,19 @@ export async function searchStrettoChains(
                     // Iterate triplets starting with vA.
                     // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
                     // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
-                    const tripletsForVA = tripletsByVA.get(vA) ?? [];
-                    if (tripletsForVA.length === 0) continue;
-                    for (const triplet of tripletsForVA) {
-                        operationCounter++;
-                        if (shouldYieldToEventLoop(operationCounter)) {
-                            await new Promise<void>((resolve) => setTimeout(resolve, 0));
-                        }
-                        if (checkLimits()) break;
+                    const tripletsForVAByDelay = tripletsByVAAndDelayAB.get(vA);
+                    if (!tripletsForVAByDelay || tripletsForVAByDelay.size === 0) continue;
+                    const minDelayAB = Math.ceil((firstDelay - oneQuarterSubjectTicks) / delayStep) * delayStep;
+                    const maxDelayAB = Math.floor((firstDelay + oneQuarterSubjectTicks) / delayStep) * delayStep;
+                    for (let candidateDelayAB = minDelayAB; candidateDelayAB <= maxDelayAB; candidateDelayAB += delayStep) {
+                        const tripletsAtDelayAB = tripletsForVAByDelay.get(candidateDelayAB);
+                        if (!tripletsAtDelayAB || tripletsAtDelayAB.length === 0) continue;
+                        for (const triplet of tripletsAtDelayAB) {
+                            operationCounter++;
+                            if (shouldYieldToEventLoop(operationCounter)) {
+                                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                            }
+                            if (checkLimits()) break;
 
                         const { vB, vC, d1: delayAB, d2: delayBC, tAB, tBC } = triplet;
 
@@ -2560,6 +2569,7 @@ export async function searchStrettoChains(
                                 }
                                 extensionStack.push(succ);
                             }
+                        }
                         }
                     }
                 } // end tE1 loop
