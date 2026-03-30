@@ -2369,6 +2369,8 @@ export async function searchStrettoChains(
                     if (!allowedTranspositions.has(tE1)) continue;
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
+                    const firstWindowTransitions = getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
+                    if (!firstWindowTransitions || firstWindowTransitions.size === 0) continue;
 
                     // Iterate triplets starting with vA.
                     // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
@@ -2383,6 +2385,20 @@ export async function searchStrettoChains(
                         if (checkLimits()) break;
 
                         const { vB, vC, d1: delayAB, d2: delayBC, tAB, tBC } = triplet;
+
+                        // Re-validate first-window triplet lineage before seeding.
+                        // This preserves precompute-enforced constraints (including
+                        // first-window spacing checks) after direct seed construction.
+                        const firstWindowCandidates = firstWindowTransitions.get(delayAB);
+                        if (!firstWindowCandidates || firstWindowCandidates.length === 0) continue;
+                        let matchesFirstWindowLineage = false;
+                        for (const transition of firstWindowCandidates) {
+                            if (transition.nextVariantIndex === vB && transition.transpositionDelta === tAB) {
+                                matchesFirstWindowLineage = true;
+                                break;
+                            }
+                        }
+                        if (!matchesFirstWindowLineage) continue;
 
                         // A.5 Maximum contraction: |firstDelay - delayAB| <= Sb/4
                         // (use the in-scope constant oneQuarterSubjectTicks for quarter-length bounds)
