@@ -2391,6 +2391,7 @@ export async function searchStrettoChains(
                     // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
                     const tripletsForVA = allTripletRecords.filter((tripletRec) => tripletRec.vA === vA);
                     if (tripletsForVA.length === 0) continue;
+                    let hasViableTripletSeed = false;
                     for (const triplet of tripletsForVA) {
                         operationCounter++;
                         if (shouldYieldToEventLoop(operationCounter)) {
@@ -2480,6 +2481,11 @@ export async function searchStrettoChains(
                             e0e3Pair = getPairRecord(e0VarIdx, vC, cumDelay_e0e3, tE3);
                             if (!e0e3Pair) continue;
                         }
+
+                        hasViableTripletSeed = true;
+                        break;
+                    }
+                    if (!hasViableTripletSeed) continue;
 
                     const initialWindowMap = getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
                     if (!initialWindowMap || initialWindowMap.size === 0) continue;
@@ -2666,8 +2672,6 @@ export async function searchStrettoChains(
                 } // end tE1 loop
             } // end vA loop
         } // end firstDelay loop
-    } // end triplet-seed enumeration
-
         // Cross-triplet dissonance union check is integrated into tripletJoinExtend
         // via the long-range pair collection. Future: cluster ban for 3+ simultaneous
         // voices where no pair is consonant.
