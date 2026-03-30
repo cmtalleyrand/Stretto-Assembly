@@ -975,6 +975,14 @@ export function violatesCombinedDissonanceStarts(
     return false;
 }
 
+function rebaseRunSpansToAbsolute(runSpans: SimultaneitySpan[], pairAnchorStartTick: number): SimultaneitySpan[] {
+    if (runSpans.length === 0) return [];
+    return runSpans.map((span) => ({
+        startTick: span.startTick + pairAnchorStartTick,
+        endTick: span.endTick + pairAnchorStartTick
+    }));
+}
+
 // --- Generator ---
 
 export async function searchStrettoChains(
@@ -2018,9 +2026,14 @@ export async function searchStrettoChains(
                     // streak longer than 2. Uses 'none' bass-role (fewest dissonance runs;
                     // 'a'/'b' can only add more via P4-as-bass) so pruning is conservative.
                     // Cheaper than checkMetricCompliance, so runs first.
-                    const allRunSpans: SimultaneitySpan[] = [...immPair.bassRoleDissonanceRunSpans.none];
-                    for (const { pairRecord } of overlappingPairs) {
-                        for (const s of pairRecord.bassRoleDissonanceRunSpans.none) allRunSpans.push(s);
+                    const immediatePairStartTicks = Math.round(chain[chain.length - 1].startBeat * ppq);
+                    const allRunSpans: SimultaneitySpan[] = rebaseRunSpansToAbsolute(
+                        immPair.bassRoleDissonanceRunSpans.none,
+                        immediatePairStartTicks
+                    );
+                    for (const { entry, pairRecord } of overlappingPairs) {
+                        const pairStartTicks = Math.round(entry.startBeat * ppq);
+                        for (const s of rebaseRunSpansToAbsolute(pairRecord.bassRoleDissonanceRunSpans.none, pairStartTicks)) allRunSpans.push(s);
                     }
                     if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
@@ -2293,7 +2306,11 @@ export async function searchStrettoChains(
                     // Long-range pairwise checks: verify all overlapping pairs not covered by triplet windows
                     let harmonicFail = false;
                     const immPair = transition.pairRecord!;
-                    const allRunSpans: SimultaneitySpan[] = [...immPair.bassRoleDissonanceRunSpans.none];
+                    const immediatePairStartTicks = Math.round(state.chain[depth - 1].startBeat * ppq);
+                    const allRunSpans: SimultaneitySpan[] = rebaseRunSpansToAbsolute(
+                        immPair.bassRoleDissonanceRunSpans.none,
+                        immediatePairStartTicks
+                    );
 
                     for (let k = depth - 3; k >= 0; k--) {
                         const kEntry = state.chain[k];
@@ -2307,7 +2324,7 @@ export async function searchStrettoChains(
                         const relTrans = t - kEntry.transposition;
                         const pr = getPairRecord(kVarIdx, varIdx, relDelay, relTrans);
                         if (!pr) { harmonicFail = true; break; }
-                        for (const s of pr.bassRoleDissonanceRunSpans.none) allRunSpans.push(s);
+                        for (const s of rebaseRunSpansToAbsolute(pr.bassRoleDissonanceRunSpans.none, kStart)) allRunSpans.push(s);
                     }
                     if (harmonicFail) continue;
 
@@ -2551,25 +2568,26 @@ export async function searchStrettoChains(
                                     const tAC = tAB + tBC;
                                     const pairAC = dAC < varA.lengthTicks ? getPairRecord(vA, vC, dAC, tAC) ?? null : null;
 
-                                    const seedSpans: SimultaneitySpan[] = [
-                                        ...e0e1Pair.bassRoleDissonanceRunSpans.none,
-                                        ...pairAB.bassRoleDissonanceRunSpans.none,
-                                        ...pairBC.bassRoleDissonanceRunSpans.none
-                                    ];
-                                    if (pairAC) {
-                                        for (const s of pairAC.bassRoleDissonanceRunSpans.none) seedSpans.push(s);
-                                    }
-                                    if (e0e2Pair) {
-                                        for (const s of e0e2Pair.bassRoleDissonanceRunSpans.none) seedSpans.push(s);
-                                    }
-                                    if (e0e3Pair) {
-                                        for (const s of e0e3Pair.bassRoleDissonanceRunSpans.none) seedSpans.push(s);
-                                    }
-                                    if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
-
+                                    const e0Start = 0;
                                     const e1Start = firstDelay;
                                     const e2Start = firstDelay + delayAB;
                                     const e3Start = e2Start + delayBC;
+
+                                    const seedSpans: SimultaneitySpan[] = [
+                                        ...rebaseRunSpansToAbsolute(e0e1Pair.bassRoleDissonanceRunSpans.none, e0Start),
+                                        ...rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.none, e1Start),
+                                        ...rebaseRunSpansToAbsolute(pairBC.bassRoleDissonanceRunSpans.none, e2Start)
+                                    ];
+                                    if (pairAC) {
+                                        for (const s of rebaseRunSpansToAbsolute(pairAC.bassRoleDissonanceRunSpans.none, e1Start)) seedSpans.push(s);
+                                    }
+                                    if (e0e2Pair) {
+                                        for (const s of rebaseRunSpansToAbsolute(e0e2Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
+                                    }
+                                    if (e0e3Pair) {
+                                        for (const s of rebaseRunSpansToAbsolute(e0e3Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
+                                    }
+                                    if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                                     const seedChain: StrettoChainOption[] = [
                                         e0Entry,
