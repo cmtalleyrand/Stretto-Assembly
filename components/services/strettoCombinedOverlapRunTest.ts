@@ -47,4 +47,15 @@ assert.equal(
   'Adjacent run starting from a strong beat must be rejected (C4A).'
 );
 
+// In 3/4, beat 2 is weak; this pair must be admitted when meter arguments are propagated.
+const twoRunsStartingOnBeat2_3over4 = [
+  { startTick: 480, endTick: 600 },
+  { startTick: 600, endTick: 720 },
+];
+assert.equal(
+  violatesCombinedDissonanceStarts(twoRunsStartingOnBeat2_3over4, 480, 0, 3, 4),
+  false,
+  'Combined-run gate must evaluate strong-beat classification using the active 3/4 meter grid.'
+);
+
 console.log('strettoCombinedOverlapRunTest passed');

@@ -940,7 +940,9 @@ function checkMetricCompliance(
 export function violatesCombinedDissonanceStarts(
     runSpans: SimultaneitySpan[],
     ppq: number,
-    metricOffset: number = 0
+    metricOffset: number = 0,
+    tsNum: number = 4,
+    tsDenom: number = 4
 ): boolean {
     if (runSpans.length === 0) return false;
     // Sort runs by start tick, then merge adjacent/overlapping into macro-runs.
@@ -961,11 +963,11 @@ export function violatesCombinedDissonanceStarts(
             macroRunEnd = span.endTick;
             prevStart = span.startTick;
         }
-        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq);
+        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
         if (macroRunCount > 2) return true;
         if (isStrong && macroRunCount > 1) return true;
         if (macroRunCount === 2) {
-            const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq);
+            const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq, tsNum, tsDenom);
             if (isStrong || prevIsStrong) return true;
         }
         if (macroRunCount === 1) prevStart = span.startTick;
@@ -2020,7 +2022,7 @@ export async function searchStrettoChains(
                     for (const { pairRecord } of overlappingPairs) {
                         for (const s of pairRecord.bassRoleDissonanceRunSpans.none) allRunSpans.push(s);
                     }
-                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks)) continue;
+                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                     const metricProbeEntry: StrettoChainOption = {
                         startBeat: absStartBeat,
@@ -2310,7 +2312,7 @@ export async function searchStrettoChains(
                     if (harmonicFail) continue;
 
                     // Combined dissonance-run gate on immediate + long-range pairs
-                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks)) continue;
+                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                     // Metric compliance
                     const metricProbeEntry: StrettoChainOption = {
@@ -2370,6 +2372,8 @@ export async function searchStrettoChains(
                     // Iterate triplets starting with vA.
                     // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
                     // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
+                    const tripletsForVA = allTripletRecords.filter((tripletRec) => tripletRec.vA === vA);
+                    if (tripletsForVA.length === 0) continue;
                     for (const triplet of tripletsForVA) {
                         operationCounter++;
                         if (shouldYieldToEventLoop(operationCounter)) {
@@ -2380,8 +2384,8 @@ export async function searchStrettoChains(
                         const { vB, vC, d1: delayAB, d2: delayBC, tAB, tBC } = triplet;
 
                         // A.5 Maximum contraction: |firstDelay - delayAB| <= Sb/4
-                        if (firstDelay - delayAB > quarterSubjectTicks) continue;
-                        if (delayAB - firstDelay > quarterSubjectTicks) continue;
+                        if (firstDelay - delayAB > oneQuarterSubjectTicks) continue;
+                        if (delayAB - firstDelay > oneQuarterSubjectTicks) continue;
 
                         // A.2 Half-length contraction (OR form)
                         if ((firstDelay >= halfSubjectTicks || delayAB >= halfSubjectTicks) && delayAB >= firstDelay) continue;
@@ -2460,6 +2464,8 @@ export async function searchStrettoChains(
                             if (!e0e3Pair) continue;
                         }
 
+                    const initialWindowMap = getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
+                    if (!initialWindowMap || initialWindowMap.size === 0) continue;
                     for (const [delayAB, abTransitions] of initialWindowMap) {
                         for (const transitionAB of abTransitions) {
                             operationCounter++;
@@ -2559,7 +2565,7 @@ export async function searchStrettoChains(
                                     if (e0e3Pair) {
                                         for (const s of e0e3Pair.bassRoleDissonanceRunSpans.none) seedSpans.push(s);
                                     }
-                                    if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks)) continue;
+                                    if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
                                     const e1Start = firstDelay;
                                     const e2Start = firstDelay + delayAB;
@@ -2642,6 +2648,7 @@ export async function searchStrettoChains(
                 } // end tE1 loop
             } // end vA loop
         } // end firstDelay loop
+    } // end triplet-seed enumeration
 
         // Cross-triplet dissonance union check is integrated into tripletJoinExtend
         // via the long-range pair collection. Future: cluster ban for 3+ simultaneous
