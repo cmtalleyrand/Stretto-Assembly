@@ -2363,6 +2363,13 @@ export async function searchStrettoChains(
         // independently enumerate e1's absolute transposition and derive e2/e3.
         const minFirstDelay = Math.ceil(halfSubjectTicks / delayStep) * delayStep;
         const maxFirstDelay = Math.floor(subjectLengthTicks * (2 / 3) / delayStep) * delayStep;
+        const tripletsByVA = new Map<number, typeof allTripletRecords>();
+        for (const tripletRecord of allTripletRecords) {
+            if (!tripletsByVA.has(tripletRecord.vA)) {
+                tripletsByVA.set(tripletRecord.vA, []);
+            }
+            tripletsByVA.get(tripletRecord.vA)!.push(tripletRecord);
+        }
 
         for (let firstDelay = minFirstDelay; firstDelay <= maxFirstDelay; firstDelay += delayStep) {
             if (terminationReason) break;
@@ -2389,7 +2396,7 @@ export async function searchStrettoChains(
                     // Iterate triplets starting with vA.
                     // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
                     // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
-                    const tripletsForVA = allTripletRecords.filter((tripletRec) => tripletRec.vA === vA);
+                    const tripletsForVA = tripletsByVA.get(vA) ?? [];
                     if (tripletsForVA.length === 0) continue;
                     for (const triplet of tripletsForVA) {
                         operationCounter++;
@@ -2401,6 +2408,7 @@ export async function searchStrettoChains(
                         const { vB, vC, d1: delayAB, d2: delayBC, tAB, tBC } = triplet;
 
                         // A.5 Maximum contraction: |firstDelay - delayAB| <= Sb/4
+                        // (use the in-scope constant oneQuarterSubjectTicks for quarter-length bounds)
                         if (firstDelay - delayAB > oneQuarterSubjectTicks) continue;
                         if (delayAB - firstDelay > oneQuarterSubjectTicks) continue;
 
