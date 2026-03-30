@@ -2393,102 +2393,8 @@ export async function searchStrettoChains(
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
 
-                    // Iterate triplets starting with vA.
-                    // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
-                    // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
                     const tripletsForVA = tripletsByVA.get(vA) ?? [];
                     if (tripletsForVA.length === 0) continue;
-                    for (const triplet of tripletsForVA) {
-                        operationCounter++;
-                        if (shouldYieldToEventLoop(operationCounter)) {
-                            await new Promise<void>((resolve) => setTimeout(resolve, 0));
-                        }
-                        if (checkLimits()) break;
-
-                        const { vB, vC, d1: delayAB, d2: delayBC, tAB, tBC } = triplet;
-
-                        // A.5 Maximum contraction: |firstDelay - delayAB| <= Sb/4
-                        // (use the in-scope constant oneQuarterSubjectTicks for quarter-length bounds)
-                        if (firstDelay - delayAB > oneQuarterSubjectTicks) continue;
-                        if (delayAB - firstDelay > oneQuarterSubjectTicks) continue;
-
-                        // A.2 Half-length contraction (OR form)
-                        if ((firstDelay >= halfSubjectTicks || delayAB >= halfSubjectTicks) && delayAB >= firstDelay) continue;
-
-                        // A.1 Cross-boundary uniqueness (within-triplet d1≠d2 guaranteed by triplet precomp)
-                        if (firstDelay === delayAB || firstDelay === delayBC) continue;
-
-                        // A.3 Expansion recoil: if delayAB > firstDelay, then delayBC < firstDelay - delayStep
-                        if (delayAB > firstDelay && delayBC >= firstDelay) continue;
-
-                        // Derive absolute transpositions for e2 and e3
-                        const tE2 = tE1 + tAB;
-                        const tE3 = tE2 + tBC;
-                        if (!allowedTranspositions.has(tE2) || !allowedTranspositions.has(tE3)) continue;
-                        if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
-                        if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
-
-                        // C.3: No duplicate transpositions among active entries.
-                        const varA = variants[vA];
-                        const varB = variants[vB];
-                        const varC = variants[vC];
-                        // e0 (t=0) is always active at e1 start (firstDelay < Sb).
-                        // e1 (t=tE1) is active at e2 start if e1Start + lenA > e2Start.
-                        // e0 is active at e2 start if e2Start < Sb.
-                        // Similarly check e3.
-                        if (tE1 === 0) continue; // e1 same transposition as e0
-                        const e1Start_pre = firstDelay;
-                        const e2Start_pre = firstDelay + delayAB;
-                        const e3Start_pre = e2Start_pre + delayBC;
-                        // At e2 entry: check against active entries (e0, e1)
-                        {
-                            if (tE2 === 0 && e2Start_pre < subjectLengthTicks) continue; // e0 still active, same trans
-                            if (tE2 === tE1 && e2Start_pre < e1Start_pre + varA.lengthTicks) continue; // e1 still active, same trans
-                        }
-                        // At e3 entry: check against active entries (e0, e1, e2)
-                        {
-                            if (tE3 === 0 && e3Start_pre < subjectLengthTicks) continue;
-                            if (tE3 === tE1 && e3Start_pre < e1Start_pre + varA.lengthTicks) continue;
-                            if (tE3 === tE2 && e3Start_pre < e2Start_pre + varB.lengthTicks) continue;
-                        }
-
-                        // Quota checks
-                        let nInv = 0, nTrunc = 0, nRestricted = 0, nFree = 1;
-                        if (varA.type === 'I') nInv++;
-                        if (varA.truncationBeats > 0) nTrunc++;
-                        if (varB.type === 'I') nInv++;
-                        if (varB.truncationBeats > 0) nTrunc++;
-                        if (varC.type === 'I') nInv++;
-                        if (varC.truncationBeats > 0) nTrunc++;
-
-                        // Interval class quotas
-                        if (e0e1Pair.isRestrictedInterval) nRestricted++;
-                        if (e0e1Pair.isFreeInterval) nFree++;
-                        if (triplet.pairAB.isRestrictedInterval) nRestricted++;
-                        if (triplet.pairAB.isFreeInterval) nFree++;
-                        if (triplet.pairBC.isRestrictedInterval) nRestricted++;
-                        if (triplet.pairBC.isFreeInterval) nFree++;
-
-                        if (nInv > 0 && !checkQuota(options.inversionMode, nInv - 1)) continue;
-                        if (nTrunc > 0 && !checkQuota(options.truncationMode, nTrunc - 1)) continue;
-                        if (nRestricted > 0 && !checkQuota(options.thirdSixthMode, nRestricted - 1)) continue;
-                        if (nRestricted > 1 && nRestricted >= nFree) continue;
-
-                        // e0 pairwise: check e0→e2 if overlapping
-                        const cumDelay_e0e2 = firstDelay + delayAB;
-                        let e0e2Pair: PairwiseCompatibilityRecord | undefined;
-                        if (cumDelay_e0e2 < subjectLengthTicks) {
-                            e0e2Pair = getPairRecord(e0VarIdx, vB, cumDelay_e0e2, tE2);
-                            if (!e0e2Pair) continue;
-                        }
-                        // e0→e3 if overlapping
-                        const cumDelay_e0e3 = cumDelay_e0e2 + delayBC;
-                        let e0e3Pair: PairwiseCompatibilityRecord | undefined;
-                        if (cumDelay_e0e3 < subjectLengthTicks) {
-                            e0e3Pair = getPairRecord(e0VarIdx, vC, cumDelay_e0e3, tE3);
-                            if (!e0e3Pair) continue;
-                        }
-
                     const initialWindowMap = getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
                     if (!initialWindowMap || initialWindowMap.size === 0) continue;
                     for (const [delayAB, abTransitions] of initialWindowMap) {
@@ -2557,6 +2463,7 @@ export async function searchStrettoChains(
 
                                     if (nInv > 0 && !checkQuota(options.inversionMode, nInv - 1)) continue;
                                     if (nTrunc > 0 && !checkQuota(options.truncationMode, nTrunc - 1)) continue;
+                                    if (nRestricted > 0 && !checkQuota(options.thirdSixthMode, nRestricted - 1)) continue;
                                     if (nRestricted > 1 && nRestricted >= nFree) continue;
 
                                     const cumDelay_e0e2 = firstDelay + delayAB;
@@ -2674,8 +2581,6 @@ export async function searchStrettoChains(
                 } // end tE1 loop
             } // end vA loop
         } // end firstDelay loop
-    } // end triplet-seed enumeration
-
         // Cross-triplet dissonance union check is integrated into tripletJoinExtend
         // via the long-range pair collection. Future: cluster ban for 3+ simultaneous
         // voices where no pair is consonant.
