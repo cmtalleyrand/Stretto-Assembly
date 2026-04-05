@@ -2336,8 +2336,13 @@ export async function searchStrettoChains(
         }
 
         // --- Seed: iterate firstDelay × e1 transposition × triplet ---
-        // The triplet's tAB/tBC are RELATIVE transposition deltas, so we must
-        // independently enumerate e1's absolute transposition and derive e2/e3.
+        // The triplet stores edge deltas:
+        //   tAB = t(e2) - t(e1)
+        //   tBC = t(e3) - t(e2)
+        // where t(eX) is the absolute entry transposition in semitones.
+        // Therefore we enumerate absolute tE1 first, then derive:
+        //   tE2 = tE1 + tAB
+        //   tE3 = tE2 + tBC
         const minFirstDelay = Math.ceil(halfSubjectTicks / delayStep) * delayStep;
         const maxFirstDelay = Math.floor(subjectLengthTicks * (2 / 3) / delayStep) * delayStep;
         const tripletsByVAAndDelayAB = new Map<number, Map<number, typeof allTripletRecords>>();
@@ -2393,7 +2398,7 @@ export async function searchStrettoChains(
                             }
                             if (checkLimits()) break;
 
-                        const { vB, vC, d1: delayAB, d2: delayBC, tAB, tBC } = triplet;
+                        const { vB, vC, d1: delayAB, d2: delayBC, tAB: transpositionDeltaAB, tBC: transpositionDeltaBC } = triplet;
 
                         // Re-validate first-window triplet lineage before seeding.
                         // This preserves precompute-enforced constraints (including
@@ -2402,7 +2407,7 @@ export async function searchStrettoChains(
                         if (!firstWindowCandidates || firstWindowCandidates.length === 0) continue;
                         let matchesFirstWindowLineage = false;
                         for (const transition of firstWindowCandidates) {
-                            if (transition.nextVariantIndex === vB && transition.transpositionDelta === tAB) {
+                            if (transition.nextVariantIndex === vB && transition.transpositionDelta === transpositionDeltaAB) {
                                 matchesFirstWindowLineage = true;
                                 break;
                             }
@@ -2424,8 +2429,8 @@ export async function searchStrettoChains(
                         if (delayAB > firstDelay && delayBC >= firstDelay - delayStep) continue;
 
                         // Derive absolute transpositions for e2 and e3
-                        const tE2 = tE1 + tAB;
-                        const tE3 = tE2 + tBC;
+                        const tE2 = tE1 + transpositionDeltaAB;
+                        const tE3 = tE2 + transpositionDeltaBC;
                         if (!allowedTranspositions.has(tE2) || !allowedTranspositions.has(tE3)) continue;
                         if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
                         if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
@@ -2492,7 +2497,7 @@ export async function searchStrettoChains(
                         }
 
                         const dAC = delayAB + delayBC;
-                        const tAC = tAB + tBC;
+                        const tAC = transpositionDeltaAB + transpositionDeltaBC;
                         const pairAC = dAC < varA.lengthTicks ? getPairRecord(vA, vC, dAC, tAC) ?? null : null;
 
                         const e0Start = 0;
