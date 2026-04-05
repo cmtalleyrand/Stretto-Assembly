@@ -17,6 +17,7 @@
     "test:stretto:all": "npm run test:stretto:scoring-regression && npm run test:stretto:pairwise-logic && npm run test:stretto:dag && npm run test:stretto:integration",
     "test:stretto:performance-regression": "node --import tsx components/services/strettoPerformanceRegression.test.ts",
     "bench:stretto:precompute": "node --import tsx scripts/bench/stretto-precompute-bench.ts"
+    "test:assembly-proxy": "node --import tsx server/assemblyProxyCore.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",

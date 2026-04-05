@@ -111,6 +111,14 @@ interface PairwiseScanResult {
     dissonanceRunSpans: SimultaneitySpan[];
 }
 
+export type StrettoSearchProgressStage = 'pairwise' | 'triplet' | 'dag';
+
+export interface StrettoSearchProgressUpdate {
+    stage: StrettoSearchProgressStage;
+    completedUnits: number;
+    totalUnits: number;
+}
+
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
 }
@@ -988,7 +996,8 @@ function rebaseRunSpansToAbsolute(runSpans: SimultaneitySpan[], pairAnchorStartT
 export async function searchStrettoChains(
     rawSubject: RawNote[],
     options: StrettoSearchOptions,
-    ppq: number
+    ppq: number,
+    onProgress?: (progress: StrettoSearchProgressUpdate) => void
 ): Promise<StrettoSearchReport> {
 
     const pairwiseCompatibleTriplets: PairwiseByVariantA = new Map();
@@ -1073,10 +1082,20 @@ export async function searchStrettoChains(
     let edgesTraversed = 0;
     let maxDepth = 0;
     let operationCounter = 0;
+    let lastProgressEmitMs = 0;
     const configuredTimeLimitMs = Number.isFinite(options.maxSearchTimeMs) ? Math.max(1, Math.floor(options.maxSearchTimeMs as number)) : DEFAULT_TIME_LIMIT_MS;
     let activeTimeLimitMs = configuredTimeLimitMs;
     let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
+    const emitStageProgress = (stage: StrettoSearchProgressStage, completedUnits: number, totalUnits: number, force: boolean = false): void => {
+        if (!onProgress) return;
+        const boundedTotal = Math.max(1, Math.floor(totalUnits));
+        const boundedCompleted = Math.max(0, Math.min(Math.floor(completedUnits), boundedTotal));
+        const now = Date.now();
+        if (!force && (now - lastProgressEmitMs) < 100) return;
+        lastProgressEmitMs = now;
+        onProgress({ stage, completedUnits: boundedCompleted, totalUnits: boundedTotal });
+    };
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
     const tsNum = options.meterNumerator ?? 4;
@@ -1279,6 +1298,25 @@ export async function searchStrettoChains(
             options
         );
 
+    let pairwiseTotalUnits = 0;
+    for (let iA = 0; iA < variants.length; iA++) {
+        const vA = variants[iA];
+        for (let iB = 0; iB < variants.length; iB++) {
+            for (const d of validPairwiseDelays) {
+                if (d >= vA.lengthTicks) break;
+                for (const t of relativeTranspositionDeltas) {
+                    const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
+                    if (admissiblePairKeys && d <= maxAdjacentDelayTicks && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
+                        continue;
+                    }
+                    pairwiseTotalUnits++;
+                }
+            }
+        }
+    }
+    let pairwiseCompletedUnits = 0;
+    emitStageProgress('pairwise', 0, pairwiseTotalUnits, true);
+
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
     // Also precompute interval class metadata for quota checks.
@@ -1298,6 +1336,10 @@ export async function searchStrettoChains(
                         continue;
                     }
                     stageStats.pairwiseTotal++;
+                    pairwiseCompletedUnits++;
+                    if (pairwiseCompletedUnits % 128 === 0 || pairwiseCompletedUnits === pairwiseTotalUnits) {
+                        emitStageProgress('pairwise', pairwiseCompletedUnits, pairwiseTotalUnits);
+                    }
 
                     operationCounter++;
                     if (shouldYieldToEventLoop(operationCounter)) {
@@ -1428,6 +1470,15 @@ export async function searchStrettoChains(
         pairsByFirst.get(p.vA)!.push(p);
     }
 
+    let tripletEnumerationTotalUnits = 0;
+    for (const p1 of validPairsList) {
+        tripletEnumerationTotalUnits += pairsByFirst.get(p1.vB)?.length ?? 0;
+    }
+    const tripletRecordIndexingTotalUnits = tripletEnumerationTotalUnits;
+    const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
+    let tripletCompletedUnits = 0;
+    emitStageProgress('triplet', 0, tripletTotalUnits, true);
+
     const validTripletDelayAs = [0, ...validAdjacentDelays];
 
     for (const p1 of validPairsList) {
@@ -1437,6 +1488,10 @@ export async function searchStrettoChains(
         const nextPairs = pairsByFirst.get(p1.vB) || [];
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
+            tripletCompletedUnits++;
+            if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
+                emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
+            }
             const pairBC = getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
             if (!pairBC) continue;
 
@@ -1592,6 +1647,10 @@ export async function searchStrettoChains(
         if (!pairAB) continue;
         const nextPairsForIdx = pairsByFirst.get(p1.vB) || [];
         for (const p2 of nextPairsForIdx) {
+            tripletCompletedUnits++;
+            if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
+                emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
+            }
             const pairBC = getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
             const dAC = p1.d + p2.d;
             const tAC = p1.t + p2.t;
@@ -2062,6 +2121,16 @@ export async function searchStrettoChains(
         variantIndices: number[];
     }
     const deferredPartials: DeferredPartial[] = [];
+    emitStageProgress('triplet', tripletTotalUnits, tripletTotalUnits, true);
+    const dagTotalUnits = Math.max(1, options.targetChainLength);
+    let dagCompletedUnits = 1;
+    const emitDagProgress = (force: boolean = false): void => {
+        const nextCompletedUnits = Math.min(dagTotalUnits, Math.max(1, maxDepth));
+        if (!force && nextCompletedUnits === dagCompletedUnits) return;
+        dagCompletedUnits = nextCompletedUnits;
+        emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force);
+    };
+    emitDagProgress(true);
 
     // Phase A/B boundary: BFS up to this depth, then DFS beyond.
     // The BFS handles depths 1–PHASE_A_DEPTH where DAG merging prunes the frontier.
@@ -2131,6 +2200,7 @@ export async function searchStrettoChains(
         nodesVisited++;
         operationCounter++;
         maxDepth = Math.max(maxDepth, node.chain.length);
+        emitDagProgress();
 
         if (node.chain.length === options.targetChainLength) {
             recordCompletedChain(node.chain, node.variantIndices);
@@ -2533,6 +2603,7 @@ export async function searchStrettoChains(
                         if (!checkMetricCompliance(varC, e3Probe, seedChain.slice(0, 3), variants, [e0VarIdx, vA, vB], ppq, offsetTicks, tsNum, tsDenom, seedNoteEvents)) continue;
 
                         maxDepth = Math.max(maxDepth, 4);
+                        emitDagProgress();
 
                         const usedDelays = new Set<number>([firstDelay, delayAB, delayBC]);
 
@@ -2578,6 +2649,7 @@ export async function searchStrettoChains(
                                     dfsExtend(dagNode);
                                 }
                                 maxDepth = Math.max(maxDepth, currentDepth);
+                                emitDagProgress();
                                 continue;
                             }
 
@@ -2585,6 +2657,7 @@ export async function searchStrettoChains(
                             for (const succ of successors) {
                                 nodesVisited++;
                                 maxDepth = Math.max(maxDepth, succ.chain.length);
+                                emitDagProgress();
                                 if (succ.chain.length >= 3) {
                                     recordDeferredPartial(succ.chain, succ.variantIndices);
                                 }
@@ -2612,6 +2685,7 @@ export async function searchStrettoChains(
                 nodesVisited++;
                 operationCounter++;
                 maxDepth = Math.max(maxDepth, node.chain.length);
+                emitDagProgress();
 
                 if (shouldYieldToEventLoop(operationCounter)) {
                     await new Promise<void>((resolve) => setTimeout(resolve, 0));
