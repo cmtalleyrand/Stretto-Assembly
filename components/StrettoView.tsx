@@ -47,15 +47,20 @@ interface StrettoSearchWorkerRequest {
 
 interface StrettoSearchProgressState {
     elapsedMs: number;
-    progressPercent: number;
-    stars: string;
-    stageLabel: string;
+    stage: 'pairwise' | 'triplet' | 'dag';
+    completedUnits: number;
+    totalUnits: number;
+    heartbeat: boolean;
 }
 
 interface StrettoSearchWorkerProgress {
     ok: true;
     kind: 'progress';
     elapsedMs: number;
+    stage: 'pairwise' | 'triplet' | 'dag';
+    completedUnits: number;
+    totalUnits: number;
+    heartbeat: boolean;
     progressPercent: number;
     stars: string;
     stageLabel: string;
@@ -351,9 +356,10 @@ export default function StrettoView({
                 if (payload.ok && payload.kind === 'progress') {
                     onProgress({
                         elapsedMs: payload.elapsedMs,
-                        progressPercent: payload.progressPercent,
-                        stars: payload.stars,
-                        stageLabel: payload.stageLabel
+                        stage: payload.stage,
+                        completedUnits: payload.completedUnits,
+                        totalUnits: payload.totalUnits,
+                        heartbeat: payload.heartbeat
                     });
                     return;
                 }
@@ -376,9 +382,10 @@ export default function StrettoView({
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
         setSearchProgress({
             elapsedMs: 0,
-            progressPercent: 0,
-            stars: '★☆☆☆☆☆☆☆☆☆',
-            stageLabel: 'Initializing search worker'
+            stage: 'pairwise',
+            completedUnits: 0,
+            totalUnits: 1,
+            heartbeat: true
         });
         setTimeout(async () => {
             try {

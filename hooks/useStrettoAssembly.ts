@@ -1,6 +1,5 @@
 
 import { useState, useCallback } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { StrettoCandidate, RawNote, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc } from '../components/services/abcBridge';
 
@@ -35,8 +34,6 @@ export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts }: UseStrettoA
         setAssemblyLog([]);
         setAttemptCount(1);
         setAssemblyResult('');
-        
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         
         const totalEntries = candidates.length + 1; // Candidates + Original Subject
         const timeSigStr = ts ? `${ts.num}/${ts.den}` : '4/4';
@@ -102,13 +99,26 @@ ${filterContextText}`;
                 setAttemptCount(i);
                 setAssemblyStatus(`Attempt ${i}: Querying Gemini...`);
                 
-                const response = await ai.models.generateContent({
-                    model: 'gemini-3-pro-preview',
-                    contents: currentInput,
-                    config: { systemInstruction: systemPrompt }
+                const response = await fetch('/api/assembly', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'gemini-3-pro-preview',
+                        contents: currentInput,
+                        systemInstruction: systemPrompt
+                    })
                 });
 
-                const generatedText = response.text || '';
+                if (!response.ok) {
+                    const errorPayload = await response.json().catch(() => ({}));
+                    const errorMessage = typeof errorPayload.error === 'string' ? errorPayload.error : `Proxy request failed with status ${response.status}.`;
+                    throw new Error(errorMessage);
+                }
+
+                const responseBody = await response.json() as { text?: string };
+                const generatedText = responseBody.text || '';
                 
                 // Extract ABC part if mixed with text
                 let abcContent = generatedText;

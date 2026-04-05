@@ -21,7 +21,7 @@ npm run diagnose:stretto                   # Basic diagnostic check
 npm run diagnose:stretto:full              # Full diagnostic (extended output)
 ```
 
-Environment variable required for AI features: `GEMINI_API_KEY`.
+Environment variable required for AI features (server runtime only): `GEMINI_API_KEY`. The browser calls `POST /api/assembly`; client bundles must not embed provider secrets.
 
 ## Musical Objective
 

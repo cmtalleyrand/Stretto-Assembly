@@ -17,9 +17,10 @@ interface StrettoChainViewProps {
     isSearching: boolean;
     searchProgress?: {
         elapsedMs: number;
-        progressPercent: number;
-        stars: string;
-        stageLabel: string;
+        stage: 'pairwise' | 'triplet' | 'dag';
+        completedUnits: number;
+        totalUnits: number;
+        heartbeat: boolean;
     } | null;
     chainResults: StrettoChainResult[];
     selectedChain: StrettoChainResult | null;

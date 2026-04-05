@@ -14,6 +14,18 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  extractMeterFromAbc('X:1\nM:3/4 % Waltz meter\nK:D\nd e f'),
+  { num: 3, den: 4 },
+  'Meter extractor must ignore trailing ABC comments on the meter header line.'
+);
+
+assert.equal(
+  extractMeterFromAbc('X:1\nM:3/0\nK:C\nc d e f'),
+  null,
+  'Meter extractor must reject invalid numeric meters with zero denominator.'
+);
+
+assert.deepEqual(
   extractMeterFromAbc('X:1\nM:C\nK:C\nc d e f'),
   { num: 4, den: 4 },
   'Meter extractor must map common-time symbol C to 4/4.'
