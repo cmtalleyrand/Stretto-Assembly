@@ -60,6 +60,12 @@ interface PairTuple {
     t: number;
 }
 
+type StrettoPrecomputeBackend = 'map' | 'dense';
+
+interface StrettoPrecomputeConfig {
+    backend?: StrettoPrecomputeBackend;
+}
+
 type PairwiseByTransposition = Map<number, PairwiseCompatibilityRecord>;
 type PairwiseByDelay = Map<number, PairwiseByTransposition>;
 type PairwiseByVariantB = Map<number, PairwiseByDelay>;
@@ -88,6 +94,32 @@ interface NextTransition {
 }
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
+
+interface PairwiseTripletPrecomputeIndex {
+    setPairRecord(vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void;
+    getPairRecord(vA: number, vB: number, d: number, t: number): PairwiseCompatibilityRecord | undefined;
+    getValidPairs(): PairTuple[];
+    getPairsByFirstVariant(variantA: number): PairTuple[];
+    forEachPairTransposition(vA: number, vB: number, d: number, iteratee: (t: number, record: PairwiseCompatibilityRecord) => void): void;
+    appendWindowTransition(
+        variantLeft: number,
+        variantRight: number,
+        delayATicks: number,
+        delayABTicks: number,
+        transpositionDelta: number,
+        transition: NextTransition
+    ): void;
+    getWindowTransitions(
+        variantLeft: number,
+        variantRight: number,
+        delayATicks: number,
+        delayABTicks: number,
+        transpositionDelta: number
+    ): TransitionBucketsByDelay | undefined;
+    addTripletShapeKey(key: string): void;
+    hasTripletShapeKey(key: string): boolean;
+    getTripletShapeCount(): number;
+}
 
 interface SimultaneitySpan {
     startTick: number;
@@ -991,23 +1023,18 @@ function rebaseRunSpansToAbsolute(runSpans: SimultaneitySpan[], pairAnchorStartT
     }));
 }
 
-// --- Generator ---
+class MapPrecomputeIndex implements PairwiseTripletPrecomputeIndex {
+    private readonly pairwiseCompatibleTriplets: PairwiseByVariantA = new Map();
+    private readonly validPairsList: PairTuple[] = [];
+    private readonly pairsByFirstVariant: Map<number, PairTuple[]> = new Map();
+    private readonly transitionsByWindow: TransitionByVariantLeft = new Map();
+    private readonly harmonicallyValidTripletShapes = new Set<string>();
 
-export async function searchStrettoChains(
-    rawSubject: RawNote[],
-    options: StrettoSearchOptions,
-    ppq: number,
-    onProgress?: (progress: StrettoSearchProgressUpdate) => void
-): Promise<StrettoSearchReport> {
-
-    const pairwiseCompatibleTriplets: PairwiseByVariantA = new Map();
-    const validPairsList: PairTuple[] = [];
-
-    const setPairRecord = (vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void => {
-        let byVariantB = pairwiseCompatibleTriplets.get(vA);
+    setPairRecord(vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void {
+        let byVariantB = this.pairwiseCompatibleTriplets.get(vA);
         if (!byVariantB) {
             byVariantB = new Map();
-            pairwiseCompatibleTriplets.set(vA, byVariantB);
+            this.pairwiseCompatibleTriplets.set(vA, byVariantB);
         }
         let byDelay = byVariantB.get(vB);
         if (!byDelay) {
@@ -1021,26 +1048,45 @@ export async function searchStrettoChains(
         }
         if (byTransposition.has(t)) return;
         byTransposition.set(t, record);
-        validPairsList.push({ vA, vB, d, t });
-    };
+        const pair: PairTuple = { vA, vB, d, t };
+        this.validPairsList.push(pair);
+        const byFirst = this.pairsByFirstVariant.get(vA);
+        if (byFirst) byFirst.push(pair);
+        else this.pairsByFirstVariant.set(vA, [pair]);
+    }
 
-    const getPairRecord = (vA: number, vB: number, d: number, t: number): PairwiseCompatibilityRecord | undefined => {
-        return pairwiseCompatibleTriplets.get(vA)?.get(vB)?.get(d)?.get(t);
-    };
+    getPairRecord(vA: number, vB: number, d: number, t: number): PairwiseCompatibilityRecord | undefined {
+        return this.pairwiseCompatibleTriplets.get(vA)?.get(vB)?.get(d)?.get(t);
+    }
 
-    const transitionsByWindow: TransitionByVariantLeft = new Map();
-    const appendWindowTransition = (
+    getValidPairs(): PairTuple[] {
+        return this.validPairsList;
+    }
+
+    getPairsByFirstVariant(variantA: number): PairTuple[] {
+        return this.pairsByFirstVariant.get(variantA) ?? [];
+    }
+
+    forEachPairTransposition(vA: number, vB: number, d: number, iteratee: (t: number, record: PairwiseCompatibilityRecord) => void): void {
+        const byTransposition = this.pairwiseCompatibleTriplets.get(vA)?.get(vB)?.get(d);
+        if (!byTransposition) return;
+        for (const [t, record] of byTransposition.entries()) {
+            iteratee(t, record);
+        }
+    }
+
+    appendWindowTransition(
         variantLeft: number,
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
         transpositionDelta: number,
         transition: NextTransition
-    ): void => {
-        let byVariantRight = transitionsByWindow.get(variantLeft);
+    ): void {
+        let byVariantRight = this.transitionsByWindow.get(variantLeft);
         if (!byVariantRight) {
             byVariantRight = new Map();
-            transitionsByWindow.set(variantLeft, byVariantRight);
+            this.transitionsByWindow.set(variantLeft, byVariantRight);
         }
         let byDelayA = byVariantRight.get(variantRight);
         if (!byDelayA) {
@@ -1065,17 +1111,153 @@ export async function searchStrettoChains(
         const bucket = transitionsAtDelay.get(transition.delayTicks);
         if (bucket) bucket.push(transition);
         else transitionsAtDelay.set(transition.delayTicks, [transition]);
-    };
+    }
 
-    const getWindowTransitions = (
+    getWindowTransitions(
         variantLeft: number,
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
         transpositionDelta: number
-    ): TransitionBucketsByDelay | undefined => {
-        return transitionsByWindow.get(variantLeft)?.get(variantRight)?.get(delayATicks)?.get(delayABTicks)?.get(transpositionDelta);
-    };
+    ): TransitionBucketsByDelay | undefined {
+        return this.transitionsByWindow.get(variantLeft)?.get(variantRight)?.get(delayATicks)?.get(delayABTicks)?.get(transpositionDelta);
+    }
+
+    addTripletShapeKey(key: string): void {
+        this.harmonicallyValidTripletShapes.add(key);
+    }
+
+    hasTripletShapeKey(key: string): boolean {
+        return this.harmonicallyValidTripletShapes.has(key);
+    }
+
+    getTripletShapeCount(): number {
+        return this.harmonicallyValidTripletShapes.size;
+    }
+}
+
+class DensePrecomputeIndex implements PairwiseTripletPrecomputeIndex {
+    private readonly variantCount: number;
+    private readonly transpositions: number[];
+    private readonly delayCount: number;
+    private readonly transpositionCount: number;
+    private readonly delayToIndex: Map<number, number>;
+    private readonly transpositionToIndex: Map<number, number>;
+    private readonly pairRecordStore: Array<PairwiseCompatibilityRecord | undefined>;
+    private readonly validPairsList: PairTuple[] = [];
+    private readonly pairsByFirstVariant: Map<number, PairTuple[]> = new Map();
+    private readonly transitionsByWindow = new Map<string, TransitionBucketsByDelay>();
+    private readonly harmonicallyValidTripletShapes = new Set<string>();
+
+    constructor(variantCount: number, delays: number[], transpositions: number[]) {
+        this.variantCount = variantCount;
+        this.delayCount = delays.length;
+        this.transpositionCount = transpositions.length;
+        this.delayToIndex = new Map(delays.map((delay, idx) => [delay, idx]));
+        this.transpositionToIndex = new Map(transpositions.map((t, idx) => [t, idx]));
+        this.pairRecordStore = new Array(variantCount * variantCount * this.delayCount * this.transpositionCount);
+        this.transpositions = transpositions;
+    }
+
+    private getPairIndex(vA: number, vB: number, d: number, t: number): number | null {
+        const delayIdx = this.delayToIndex.get(d);
+        const transpositionIdx = this.transpositionToIndex.get(t);
+        if (delayIdx === undefined || transpositionIdx === undefined) return null;
+        return ((((vA * this.variantCount) + vB) * this.delayCount) + delayIdx) * this.transpositionCount + transpositionIdx;
+    }
+
+    private toWindowKey(variantLeft: number, variantRight: number, delayATicks: number, delayABTicks: number, transpositionDelta: number): string {
+        return `${variantLeft}|${variantRight}|${delayATicks}|${delayABTicks}|${transpositionDelta}`;
+    }
+
+    setPairRecord(vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void {
+        const idx = this.getPairIndex(vA, vB, d, t);
+        if (idx === null || this.pairRecordStore[idx]) return;
+        this.pairRecordStore[idx] = record;
+        const pair: PairTuple = { vA, vB, d, t };
+        this.validPairsList.push(pair);
+        const byFirst = this.pairsByFirstVariant.get(vA);
+        if (byFirst) byFirst.push(pair);
+        else this.pairsByFirstVariant.set(vA, [pair]);
+    }
+
+    getPairRecord(vA: number, vB: number, d: number, t: number): PairwiseCompatibilityRecord | undefined {
+        const idx = this.getPairIndex(vA, vB, d, t);
+        return idx === null ? undefined : this.pairRecordStore[idx];
+    }
+
+    getValidPairs(): PairTuple[] {
+        return this.validPairsList;
+    }
+
+    getPairsByFirstVariant(variantA: number): PairTuple[] {
+        return this.pairsByFirstVariant.get(variantA) ?? [];
+    }
+
+    forEachPairTransposition(vA: number, vB: number, d: number, iteratee: (t: number, record: PairwiseCompatibilityRecord) => void): void {
+        for (const t of this.transpositions) {
+            const rec = this.getPairRecord(vA, vB, d, t);
+            if (rec) iteratee(t, rec);
+        }
+    }
+
+    appendWindowTransition(
+        variantLeft: number,
+        variantRight: number,
+        delayATicks: number,
+        delayABTicks: number,
+        transpositionDelta: number,
+        transition: NextTransition
+    ): void {
+        const key = this.toWindowKey(variantLeft, variantRight, delayATicks, delayABTicks, transpositionDelta);
+        let transitionBuckets = this.transitionsByWindow.get(key);
+        if (!transitionBuckets) {
+            transitionBuckets = new Map();
+            this.transitionsByWindow.set(key, transitionBuckets);
+        }
+        const bucket = transitionBuckets.get(transition.delayTicks);
+        if (bucket) bucket.push(transition);
+        else transitionBuckets.set(transition.delayTicks, [transition]);
+    }
+
+    getWindowTransitions(
+        variantLeft: number,
+        variantRight: number,
+        delayATicks: number,
+        delayABTicks: number,
+        transpositionDelta: number
+    ): TransitionBucketsByDelay | undefined {
+        return this.transitionsByWindow.get(this.toWindowKey(variantLeft, variantRight, delayATicks, delayABTicks, transpositionDelta));
+    }
+
+    addTripletShapeKey(key: string): void {
+        this.harmonicallyValidTripletShapes.add(key);
+    }
+
+    hasTripletShapeKey(key: string): boolean {
+        return this.harmonicallyValidTripletShapes.has(key);
+    }
+
+    getTripletShapeCount(): number {
+        return this.harmonicallyValidTripletShapes.size;
+    }
+}
+
+function resolvePrecomputeBackend(config?: StrettoPrecomputeConfig): StrettoPrecomputeBackend {
+    // Serialized task marker (post 6A–6D rebase): backend switch is isolated to precompute index wiring.
+    if (config?.backend === 'map' || config?.backend === 'dense') return config.backend;
+    return process.env.STRETTO_PRECOMPUTE_BACKEND === 'dense' ? 'dense' : 'map';
+}
+
+// --- Generator ---
+
+export async function searchStrettoChains(
+    rawSubject: RawNote[],
+    options: StrettoSearchOptions,
+    ppq: number,
+    onProgress?: (progress: StrettoSearchProgressUpdate) => void,
+    internalConfig?: StrettoPrecomputeConfig
+): Promise<StrettoSearchReport> {
 
     const startTime = Date.now();
     let nodesVisited = 0;
@@ -1238,6 +1420,7 @@ export async function searchStrettoChains(
     const relativeTranspositionDeltas = Array.from(new Set(
         transpositions.flatMap((left) => transpositions.map((right) => right - left))
     ));
+    const precomputeBackend = resolvePrecomputeBackend(internalConfig);
 
 
     // D.0: Pre-search voice domain filter derived from e0's fixed voice + T(e0)=0.
@@ -1284,6 +1467,10 @@ export async function searchStrettoChains(
         transitionsReturned: 0,
         candidateTransitionsEnumerated: 0
     };
+
+    const precomputeIndex: PairwiseTripletPrecomputeIndex = precomputeBackend === 'dense'
+        ? new DensePrecomputeIndex(variants.length, validPairwiseDelays, relativeTranspositionDeltas)
+        : new MapPrecomputeIndex();
 
     const collectSpans = options.collectDiagnosticSpans === true;
     const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
@@ -1405,7 +1592,7 @@ export async function searchStrettoChains(
                     // The bassStrictA/B scans already capture this per-role.
                     // For the "2 voices only" case, both bass-role results tell us the full story.
 
-                    setPairRecord(iA, iB, d, t, {
+                    precomputeIndex.setPairRecord(iA, iB, d, t, {
                         dissonanceRatio: pairScan.dissonanceRatio,
                         hasFourth: pairScan.hasFourth,
                         p4SimultaneityCount: pairScan.p4SimultaneityCount,
@@ -1461,18 +1648,12 @@ export async function searchStrettoChains(
     }
 
     // --- PRECOMPUTE TRIPLES ---
-    const harmonicallyValidTripletShapes = new Set<string>();
     // Numeric window-transition index is precomputed once so expandNode never rebuilds it.
-
-    const pairsByFirst = new Map<number, PairTuple[]>();
-    for (const p of validPairsList) {
-        if (!pairsByFirst.has(p.vA)) pairsByFirst.set(p.vA, []);
-        pairsByFirst.get(p.vA)!.push(p);
-    }
+    const validPairsList = precomputeIndex.getValidPairs();
 
     let tripletEnumerationTotalUnits = 0;
     for (const p1 of validPairsList) {
-        tripletEnumerationTotalUnits += pairsByFirst.get(p1.vB)?.length ?? 0;
+        tripletEnumerationTotalUnits += precomputeIndex.getPairsByFirstVariant(p1.vB).length;
     }
     const tripletRecordIndexingTotalUnits = tripletEnumerationTotalUnits;
     const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
@@ -1482,17 +1663,17 @@ export async function searchStrettoChains(
     const validTripletDelayAs = [0, ...validAdjacentDelays];
 
     for (const p1 of validPairsList) {
-        const pairAB = getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
+        const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
 
-        const nextPairs = pairsByFirst.get(p1.vB) || [];
+        const nextPairs = precomputeIndex.getPairsByFirstVariant(p1.vB);
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
             tripletCompletedUnits++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
             }
-            const pairBC = getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
+            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
             if (!pairBC) continue;
 
             const d1 = p1.d;
@@ -1529,7 +1710,7 @@ export async function searchStrettoChains(
             
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
-                const pairAC = getPairRecord(vA, vC, dAC, tAC);
+                const pairAC = precomputeIndex.getPairRecord(vA, vC, dAC, tAC);
                 if (!passesTripletStage(stageStats, !!pairAC)) {
                     stageStats.triplePairwiseRejected++;
                     continue;
@@ -1550,7 +1731,7 @@ export async function searchStrettoChains(
             // Use precomputed allowedVoicePairs from pairwise records to constrain
             // the triplet voice assignment. The pairwise records already encode
             // spacing rules (neighbor, 2-gap, bass-alto), so we intersect them.
-            const pairAC_rec = (dAC < lenA) ? getPairRecord(vA, vC, dAC, tAC) ?? null : null;
+            const pairAC_rec = (dAC < lenA) ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
 
             const bassIdx = options.ensembleTotal - 1;
             const spacingFeasible = hasFeasibleTripletAssignment(
@@ -1616,16 +1797,16 @@ export async function searchStrettoChains(
                     isRestrictedInterval: pairBC.isRestrictedInterval,
                     isFreeInterval: pairBC.isFreeInterval
                 };
-                appendWindowTransition(vA, vB, d0, d1, p1.t, nextTransition);
+                precomputeIndex.appendWindowTransition(vA, vB, d0, d1, p1.t, nextTransition);
             }
 
             if (tripletHasValidDelayContext) {
-                harmonicallyValidTripletShapes.add(`${vA}|${vB}|${vC}|${d1}|${d2}|${p1.t}|${p2.t}`);
+                precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d1}|${d2}|${p1.t}|${p2.t}`);
             }
         }
     }
 
-    stageStats.harmonicallyValidTriples = harmonicallyValidTripletShapes.size;
+    stageStats.harmonicallyValidTriples = precomputeIndex.getTripletShapeCount();
 
     // --- Triplet suffix/prefix index for triplet-join Phase A ---
     // Each TripletRecord captures a valid triplet with its pairwise records for
@@ -1643,22 +1824,22 @@ export async function searchStrettoChains(
     const allTripletRecords: TripletRecord[] = [];
 
     for (const p1 of validPairsList) {
-        const pairAB = getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
+        const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
-        const nextPairsForIdx = pairsByFirst.get(p1.vB) || [];
+        const nextPairsForIdx = precomputeIndex.getPairsByFirstVariant(p1.vB);
         for (const p2 of nextPairsForIdx) {
             tripletCompletedUnits++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
             }
-            const pairBC = getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
+            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
             const dAC = p1.d + p2.d;
             const tAC = p1.t + p2.t;
             const lenA = variants[p1.vA].lengthTicks;
-            const pairAC = dAC < lenA ? getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
+            const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
 
             const tripletShapeKey = `${p1.vA}|${p1.vB}|${p2.vB}|${p1.d}|${p2.d}|${p1.t}|${p2.t}`;
-            if (!harmonicallyValidTripletShapes.has(tripletShapeKey)) continue;
+            if (!precomputeIndex.hasTripletShapeKey(tripletShapeKey)) continue;
 
             const rec: TripletRecord = {
                 vA: p1.vA, vB: p1.vB, vC: p2.vB,
@@ -1790,7 +1971,7 @@ export async function searchStrettoChains(
                     const [eIdx, lIdx] = kStart <= posStart ? [k, pos] : [pos, k];
                     const relDelay = Math.round(chain[lIdx].startBeat * ppq) - Math.round(chain[eIdx].startBeat * ppq);
                     const relTrans = chain[lIdx].transposition - chain[eIdx].transposition;
-                    const rec = getPairRecord(vIndices[eIdx], vIndices[lIdx], relDelay, relTrans);
+                    const rec = precomputeIndex.getPairRecord(vIndices[eIdx], vIndices[lIdx], relDelay, relTrans);
                     if (rec?.hasFourth) {
                         const eV = kStart <= posStart ? voices[k] : v;
                         const lV = kStart <= posStart ? v : voices[k];
@@ -1894,7 +2075,7 @@ export async function searchStrettoChains(
             const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
             stageStats.transitionWindowLookups++;
-            const windowMap = getWindowTransitions(
+            const windowMap = precomputeIndex.getWindowTransitions(
                 variantIndices[depth - 2],
                 variantIndices[depth - 1],
                 windowDelayA,
@@ -1987,7 +2168,7 @@ export async function searchStrettoChains(
                         if (delayTicks >= subjectLengthTicks / 2 && variants[varIdx].truncationBeats > 0) continue;
                         const immPrevVarIdx = variantIndices[depth - 1];
                         const immRelTrans = t - chain[depth - 1].transposition;
-                        const immPair = getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
+                        const immPair = precomputeIndex.getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
                         if (!immPair) continue;
                         if (!immPair.meetsAdjacentTranspositionSeparation) continue;
                         stageStats.candidateTransitionsEnumerated++;
@@ -2048,7 +2229,7 @@ export async function searchStrettoChains(
 
                         const relDelay = absStartTicks - prevStartTicks;
                         const relTrans = t - prevE.transposition;
-                        const pairRecord = getPairRecord(prevVarIdx, varIdx, relDelay, relTrans);
+                        const pairRecord = precomputeIndex.getPairRecord(prevVarIdx, varIdx, relDelay, relTrans);
                         if (!pairRecord) {
                             harmonicFail = true;
                             break;
@@ -2260,7 +2441,7 @@ export async function searchStrettoChains(
             const prevPrevDelay = depth >= 3 ? state.delays[state.delays.length - 2] : 0;
             const prevDelay = state.delays[state.delays.length - 1];
             const prevTransDelta = state.transpositions[depth - 1] - state.transpositions[depth - 2];
-            const windowMap = getWindowTransitions(prevPrevVarIdx, prevVarIdx, prevPrevDelay, prevDelay, prevTransDelta);
+            const windowMap = precomputeIndex.getWindowTransitions(prevPrevVarIdx, prevVarIdx, prevPrevDelay, prevDelay, prevTransDelta);
             if (!windowMap || windowMap.size === 0) return [];
 
             const prevEntry = state.chain[depth - 1];
@@ -2369,7 +2550,7 @@ export async function searchStrettoChains(
 
                         const relDelay = absStartTicks - kStart;
                         const relTrans = t - kEntry.transposition;
-                        const pr = getPairRecord(kVarIdx, varIdx, relDelay, relTrans);
+                        const pr = precomputeIndex.getPairRecord(kVarIdx, varIdx, relDelay, relTrans);
                         if (!pr) { harmonicFail = true; break; }
                         for (const s of rebaseRunSpansToAbsolute(pr.bassRoleDissonanceRunSpans.none, kStart)) allRunSpans.push(s);
                     }
@@ -2437,10 +2618,13 @@ export async function searchStrettoChains(
                 if (variants[vA].type === 'I') continue;
                 // A.10: no truncated entries at delay >= 0.5*Sb (firstDelay is always >= 0.5*Sb)
                 if (variants[vA].truncationBeats > 0) continue;
-                const transMap = pairwiseCompatibleTriplets.get(e0VarIdx)?.get(vA)?.get(firstDelay);
-                if (!transMap) continue;
+                const e0e1Pairs: Array<{ tE1: number; e0e1Pair: PairwiseCompatibilityRecord }> = [];
+                precomputeIndex.forEachPairTransposition(e0VarIdx, vA, firstDelay, (tE1, e0e1Pair) => {
+                    e0e1Pairs.push({ tE1, e0e1Pair });
+                });
+                if (e0e1Pairs.length === 0) continue;
 
-                for (const [tE1, e0e1Pair] of transMap) {
+                for (const { tE1, e0e1Pair } of e0e1Pairs) {
                     if (terminationReason) break;
 
                     // A.7 Adjacent transposition separation: |t_e0 - t_e1| >= 5
@@ -2448,7 +2632,7 @@ export async function searchStrettoChains(
                     if (!allowedTranspositions.has(tE1)) continue;
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
-                    const firstWindowTransitions = getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
+                    const firstWindowTransitions = precomputeIndex.getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
                     if (!firstWindowTransitions || firstWindowTransitions.size === 0) continue;
 
                     // Iterate triplets starting with vA.
@@ -2555,20 +2739,20 @@ export async function searchStrettoChains(
                         const cumDelay_e0e2 = firstDelay + delayAB;
                         let e0e2Pair: PairwiseCompatibilityRecord | undefined;
                         if (cumDelay_e0e2 < subjectLengthTicks) {
-                            e0e2Pair = getPairRecord(e0VarIdx, vB, cumDelay_e0e2, tE2);
+                            e0e2Pair = precomputeIndex.getPairRecord(e0VarIdx, vB, cumDelay_e0e2, tE2);
                             if (!e0e2Pair) continue;
                         }
                         // e0→e3 if overlapping
                         const cumDelay_e0e3 = cumDelay_e0e2 + delayBC;
                         let e0e3Pair: PairwiseCompatibilityRecord | undefined;
                         if (cumDelay_e0e3 < subjectLengthTicks) {
-                            e0e3Pair = getPairRecord(e0VarIdx, vC, cumDelay_e0e3, tE3);
+                            e0e3Pair = precomputeIndex.getPairRecord(e0VarIdx, vC, cumDelay_e0e3, tE3);
                             if (!e0e3Pair) continue;
                         }
 
                         const dAC = delayAB + delayBC;
                         const tAC = transpositionDeltaAB + transpositionDeltaBC;
-                        const pairAC = dAC < varA.lengthTicks ? getPairRecord(vA, vC, dAC, tAC) ?? null : null;
+                        const pairAC = dAC < varA.lengthTicks ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
 
                         const e0Start = 0;
                         const e1Start = firstDelay;
