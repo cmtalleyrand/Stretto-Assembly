@@ -1,5 +1,5 @@
 import { RawNote, StrettoSearchOptions, StrettoSearchReport } from '../../types';
-import { searchStrettoChains } from '../services/strettoGenerator';
+import { searchStrettoChains, StrettoSearchProgressStage } from '../services/strettoGenerator';
 
 interface StrettoSearchWorkerRequest {
   subject: RawNote[];
@@ -11,6 +11,10 @@ interface StrettoSearchWorkerProgress {
   ok: true;
   kind: 'progress';
   elapsedMs: number;
+  stage: StrettoSearchProgressStage;
+  completedUnits: number;
+  totalUnits: number;
+  heartbeat: boolean;
   progressPercent: number;
   stars: string;
   stageLabel: string;
@@ -37,28 +41,72 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
       const filled = Math.max(1, Math.min(10, Math.round(percent / 10)));
       return '★'.repeat(filled).padEnd(10, '☆');
     };
+    const STAGE_WEIGHTS: Record<StrettoSearchProgressStage, number> = {
+      pairwise: 0.35,
+      triplet: 0.25,
+      dag: 0.40
+    };
+    const STAGE_ORDER: StrettoSearchProgressStage[] = ['pairwise', 'triplet', 'dag'];
+    const STAGE_LABELS: Record<StrettoSearchProgressStage, string> = {
+      pairwise: 'Pairwise precomputation',
+      triplet: 'Triplet compatibility indexing',
+      dag: 'Chain expansion and scoring'
+    };
+    const weightedStagePercent = (stage: StrettoSearchProgressStage, completedUnits: number, totalUnits: number): number => {
+      const boundedTotal = Math.max(1, totalUnits);
+      const boundedCompleted = Math.max(0, Math.min(completedUnits, boundedTotal));
+      const stageRatio = boundedCompleted / boundedTotal;
+      let completedWeight = 0;
+      for (const s of STAGE_ORDER) {
+        if (s === stage) {
+          completedWeight += STAGE_WEIGHTS[s] * stageRatio;
+          break;
+        }
+        completedWeight += STAGE_WEIGHTS[s];
+      }
+      return Math.max(0, Math.min(99, Math.round(completedWeight * 100)));
+    };
+    let hasConcreteProgress = false;
 
-    const emitProgress = () => {
+    const emitHeartbeatProgress = () => {
+      if (hasConcreteProgress) return;
       const elapsedMs = Date.now() - searchStartedAt;
       const boundedPercent = Math.max(0, Math.min(99, Math.round((elapsedMs / searchBudgetMs) * 100)));
       const progressPayload: StrettoSearchWorkerProgress = {
         ok: true,
         kind: 'progress',
         elapsedMs,
+        stage: 'pairwise',
+        completedUnits: 0,
+        totalUnits: 1,
+        heartbeat: true,
         progressPercent: boundedPercent,
         stars: renderStars(boundedPercent),
-        stageLabel: boundedPercent < 35
-          ? 'Pairwise precomputation'
-          : boundedPercent < 70
-            ? 'Triplet compatibility indexing'
-            : 'Chain expansion and scoring'
+        stageLabel: 'Search active (awaiting stage metrics)'
       };
       self.postMessage(progressPayload);
     };
 
-    emitProgress();
-    heartbeatTimer = setInterval(emitProgress, 250);
-    const report = await searchStrettoChains(subject, options, ppq);
+    emitHeartbeatProgress();
+    heartbeatTimer = setInterval(emitHeartbeatProgress, 250);
+    const report = await searchStrettoChains(subject, options, ppq, (progress) => {
+      hasConcreteProgress = true;
+      const elapsedMs = Date.now() - searchStartedAt;
+      const weightedPercent = weightedStagePercent(progress.stage, progress.completedUnits, progress.totalUnits);
+      const progressPayload: StrettoSearchWorkerProgress = {
+        ok: true,
+        kind: 'progress',
+        elapsedMs,
+        stage: progress.stage,
+        completedUnits: progress.completedUnits,
+        totalUnits: progress.totalUnits,
+        heartbeat: false,
+        progressPercent: weightedPercent,
+        stars: renderStars(weightedPercent),
+        stageLabel: STAGE_LABELS[progress.stage]
+      };
+      self.postMessage(progressPayload);
+    });
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;

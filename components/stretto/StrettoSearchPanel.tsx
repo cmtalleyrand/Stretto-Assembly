@@ -11,9 +11,10 @@ interface StrettoSearchPanelProps {
     isSearching: boolean;
     searchProgress?: {
         elapsedMs: number;
-        progressPercent: number;
-        stars: string;
-        stageLabel: string;
+        stage: 'pairwise' | 'triplet' | 'dag';
+        completedUnits: number;
+        totalUnits: number;
+        heartbeat: boolean;
     } | null;
     voiceNames?: Record<number, string>;
     setVoiceNames?: (names: Record<number, string>) => void;
@@ -29,6 +30,50 @@ export default function StrettoSearchPanel({
 }: StrettoSearchPanelProps) {
     
     const [showVoiceConfig, setShowVoiceConfig] = useState(false);
+    const progressDisplay = useMemo(() => {
+        if (!searchProgress) {
+            return {
+                progressPercent: 0,
+                stageLabel: 'Initializing search worker',
+                stars: '★☆☆☆☆☆☆☆☆☆',
+                unitLabel: '0 / 1',
+                isHeartbeat: false
+            };
+        }
+        const stageWeights: Record<'pairwise' | 'triplet' | 'dag', number> = {
+            pairwise: 0.35,
+            triplet: 0.25,
+            dag: 0.40
+        };
+        const stageOrder: Array<'pairwise' | 'triplet' | 'dag'> = ['pairwise', 'triplet', 'dag'];
+        const stageLabels: Record<'pairwise' | 'triplet' | 'dag', string> = {
+            pairwise: 'Pairwise precomputation',
+            triplet: 'Triplet compatibility indexing',
+            dag: 'Chain expansion and scoring'
+        };
+        const boundedTotal = Math.max(1, searchProgress.totalUnits);
+        const boundedCompleted = Math.max(0, Math.min(searchProgress.completedUnits, boundedTotal));
+        const stageRatio = boundedCompleted / boundedTotal;
+        let weightedCompletion = 0;
+        for (const stage of stageOrder) {
+            if (stage === searchProgress.stage) {
+                weightedCompletion += stageWeights[stage] * stageRatio;
+                break;
+            }
+            weightedCompletion += stageWeights[stage];
+        }
+        const progressPercent = Math.max(0, Math.min(99, Math.round(weightedCompletion * 100)));
+        const filledStars = Math.max(1, Math.min(10, Math.round(progressPercent / 10)));
+        return {
+            progressPercent,
+            stageLabel: searchProgress.heartbeat
+                ? 'Search active (awaiting stage metrics)'
+                : stageLabels[searchProgress.stage],
+            stars: '★'.repeat(filledStars).padEnd(10, '☆'),
+            unitLabel: `${boundedCompleted} / ${boundedTotal}`,
+            isHeartbeat: searchProgress.heartbeat
+        };
+    }, [searchProgress]);
 
     const handleChange = (field: keyof StrettoSearchOptions, val: any) => {
         setOptions({ ...options, [field]: val });
@@ -410,18 +455,22 @@ export default function StrettoSearchPanel({
                 disabled={isSearching}
                 className="w-full py-2 bg-brand-primary hover:bg-brand-secondary text-white font-bold rounded shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm uppercase tracking-wide"
             >
-                {isSearching ? `Processing Combinations ${searchProgress?.stars ?? '★☆☆☆☆☆☆☆☆☆'}` : 'Run Search Algorithm v4.3'}
+                {isSearching ? `Processing Combinations ${progressDisplay.stars}` : 'Run Search Algorithm v4.3'}
             </button>
             {isSearching && searchProgress && (
                 <div className="mt-2 rounded border border-brand-primary/40 bg-black/30 px-3 py-2 text-[10px] text-gray-200">
                     <div className="flex justify-between items-center gap-2">
-                        <span className="font-semibold text-brand-primary">{searchProgress.stageLabel}</span>
-                        <span className="font-mono">{searchProgress.progressPercent}% · {(searchProgress.elapsedMs / 1000).toFixed(1)}s</span>
+                        <span className="font-semibold text-brand-primary">
+                            {progressDisplay.stageLabel}
+                            {progressDisplay.isHeartbeat ? ' · liveness heartbeat' : ''}
+                        </span>
+                        <span className="font-mono">{progressDisplay.progressPercent}% · {(searchProgress.elapsedMs / 1000).toFixed(1)}s</span>
                     </div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">Stage units: {progressDisplay.unitLabel}</div>
                     <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                         <div
                             className="h-full bg-brand-primary transition-all duration-200"
-                            style={{ width: `${Math.max(2, searchProgress.progressPercent)}%` }}
+                            style={{ width: `${Math.max(2, progressDisplay.progressPercent)}%` }}
                         />
                     </div>
                 </div>
