@@ -14,6 +14,12 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
+  extractMeterFromAbc('X:1\nK:C\n[M:9/8] c d e f g a b c\''),
+  { num: 9, den: 8 },
+  'Meter extractor must parse bracketed inline M: fields used inside tune bodies.'
+);
+
+assert.deepEqual(
   extractMeterFromAbc('X:1\nM:3/4 % Waltz meter\nK:D\nd e f'),
   { num: 3, den: 4 },
   'Meter extractor must ignore trailing ABC comments on the meter header line.'

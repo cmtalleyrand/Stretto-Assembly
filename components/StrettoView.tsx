@@ -183,13 +183,15 @@ export default function StrettoView({
         return `${NOTE_NAMES[parsed.root]} ${parsed.mode}`;
     }, [mode, abcInput]);
 
+    const parsedAbcMeter = useMemo(() => {
+        if (mode !== 'abc') return null;
+        return extractMeterFromAbc(abcInput);
+    }, [mode, abcInput]);
+
     const activeMeter = useMemo(() => {
-        if (mode === 'abc') {
-            const parsedMeter = extractMeterFromAbc(abcInput);
-            if (parsedMeter) return parsedMeter;
-        }
+        if (mode === 'abc' && parsedAbcMeter) return parsedAbcMeter;
         return ts;
-    }, [mode, abcInput, ts]);
+    }, [mode, parsedAbcMeter, ts]);
 
     const subjectPianoRollData = useMemo(() => ({
         notes: subjectNotes.map(n => ({ ...n, voiceIndex: 0 })),
@@ -621,6 +623,15 @@ export default function StrettoView({
                                 <span className="text-[10px] text-gray-600 italic">applied to note accidentals</span>
                             </div>
                         )}
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[11px] text-gray-500 uppercase tracking-wide font-bold">Detected Time Signature:</span>
+                            <span className="bg-brand-secondary/20 text-brand-secondary border border-brand-secondary/40 px-2 py-0.5 rounded font-mono text-xs font-bold">
+                                {activeMeter.num}/{activeMeter.den}
+                            </span>
+                            <span className="text-[10px] text-gray-600 italic">
+                                {parsedAbcMeter ? 'read from M: field in ABC source' : 'fallback (no valid M: field)'}
+                            </span>
+                        </div>
                     </div>
 
                     <aside className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 space-y-3">

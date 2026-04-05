@@ -115,23 +115,21 @@ function parseMeterToken(token: string): { num: number, den: number } | null {
     return null;
 }
 
+function getAbcDefaultNoteLengthFromMeter(num: number, den: number): number {
+    const meterValue = num / den;
+    return meterValue < 0.75 ? 1 / 16 : 1 / 8;
+}
+
 export function extractMeterFromAbc(abc: string): { num: number, den: number } | null {
-    const lines = abc.split(/\r?\n/);
+    const withoutComments = abc.replace(/%.*/g, ' ');
+    const meterFieldPattern = /(^|[\s\[])M\s*:\s*([^\]\s]+)/gi;
+    let match: RegExpExecArray | null = null;
 
-    for (const rawLine of lines) {
-        const lineWithoutComment = rawLine.replace(/%.*/, '').trim();
-        if (!lineWithoutComment) continue;
-
-        const headerMatch = lineWithoutComment.match(/^M\s*:\s*(.+)$/i);
-        if (!headerMatch) continue;
-
-        const parsed = parseMeterToken(headerMatch[1]);
-        if (parsed) return parsed;
-    }
-
-    const inlineHeaderMatch = abc.replace(/%.*/g, ' ').match(/(?:^|\s)M\s*:\s*([^\s]+)/i);
-    if (inlineHeaderMatch) {
-        return parseMeterToken(inlineHeaderMatch[1]);
+    while ((match = meterFieldPattern.exec(withoutComments)) !== null) {
+        const parsed = parseMeterToken(match[2]);
+        if (parsed) {
+            return parsed;
+        }
     }
 
     return null;
@@ -142,7 +140,8 @@ export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] 
     
     // Default Context
     let keyAccidentals: Record<string, number> = {};
-    let defaultNoteLength = 1/8; 
+    let defaultNoteLength = 1/8;
+    let hasExplicitDefaultNoteLength = false;
     let tempo = 120;
     
     const notes: RawNote[] = [];
@@ -187,7 +186,15 @@ export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] 
                 if (parts.length === 2) {
                     const num = parseFloat(parts[0]);
                     const den = parseFloat(parts[1]);
-                    if (!isNaN(num) && !isNaN(den) && den !== 0) defaultNoteLength = num / den;
+                    if (!isNaN(num) && !isNaN(den) && den !== 0) {
+                        defaultNoteLength = num / den;
+                        hasExplicitDefaultNoteLength = true;
+                    }
+                }
+            } else if (field === 'M' && !hasExplicitDefaultNoteLength) {
+                const parsedMeter = parseMeterToken(value.replace(/%.*/, '').trim());
+                if (parsedMeter) {
+                    defaultNoteLength = getAbcDefaultNoteLengthFromMeter(parsedMeter.num, parsedMeter.den);
                 }
             } else if (field === 'Q') {
                 if (value.includes('=')) tempo = parseFloat(value.split('=')[1]);
