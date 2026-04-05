@@ -121,22 +121,15 @@ function getAbcDefaultNoteLengthFromMeter(num: number, den: number): number {
 }
 
 export function extractMeterFromAbc(abc: string): { num: number, den: number } | null {
-    const lines = abc.split(/\r?\n/);
+    const withoutComments = abc.replace(/%.*/g, ' ');
+    const meterFieldPattern = /(^|[\s\[])M\s*:\s*([^\]\s]+)/gi;
+    let match: RegExpExecArray | null = null;
 
-    for (const rawLine of lines) {
-        const lineWithoutComment = rawLine.replace(/%.*/, '').trim();
-        if (!lineWithoutComment) continue;
-
-        const headerMatch = lineWithoutComment.match(/^M\s*:\s*(.+)$/i);
-        if (!headerMatch) continue;
-
-        const parsed = parseMeterToken(headerMatch[1]);
-        if (parsed) return parsed;
-    }
-
-    const inlineHeaderMatch = abc.replace(/%.*/g, ' ').match(/(?:^|\s)M\s*:\s*([^\s]+)/i);
-    if (inlineHeaderMatch) {
-        return parseMeterToken(inlineHeaderMatch[1]);
+    while ((match = meterFieldPattern.exec(withoutComments)) !== null) {
+        const parsed = parseMeterToken(match[2]);
+        if (parsed) {
+            return parsed;
+        }
     }
 
     return null;

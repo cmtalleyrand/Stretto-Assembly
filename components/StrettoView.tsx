@@ -629,7 +629,7 @@ export default function StrettoView({
                                 {activeMeter.num}/{activeMeter.den}
                             </span>
                             <span className="text-[10px] text-gray-600 italic">
-                                {parsedAbcMeter ? 'read from M: header' : 'fallback (no valid M: header)'}
+                                {parsedAbcMeter ? 'read from M: field in ABC source' : 'fallback (no valid M: field)'}
                             </span>
                         </div>
                     </div>
