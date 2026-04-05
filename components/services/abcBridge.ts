@@ -93,15 +93,20 @@ export function extractKeyFromAbc(abc: string): { root: number, mode: string } |
 
 
 export function extractMeterFromAbc(abc: string): { num: number, den: number } | null {
-    const lines = abc.split(/\r?\n/);
-    for (const line of lines) {
-        const m = line.trim().match(/^M\s*:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
-        if (!m) continue;
-        const num = parseInt(m[1], 10);
-        const den = parseInt(m[2], 10);
+    const numericMeter = abc.match(/(?:^|\s)M\s*:\s*([0-9]+)\s*\/\s*([0-9]+)(?=\s|$)/i);
+    if (numericMeter) {
+        const num = parseInt(numericMeter[1], 10);
+        const den = parseInt(numericMeter[2], 10);
         if (Number.isFinite(num) && Number.isFinite(den) && num > 0 && den > 0) {
             return { num, den };
         }
+    }
+
+    const symbolicMeter = abc.match(/(?:^|\s)M\s*:\s*(C\|?|c\|?)(?=\s|$)/);
+    if (symbolicMeter) {
+        const normalized = symbolicMeter[1].toUpperCase();
+        if (normalized === 'C|') return { num: 2, den: 2 };
+        if (normalized === 'C') return { num: 4, den: 4 };
     }
     return null;
 }
