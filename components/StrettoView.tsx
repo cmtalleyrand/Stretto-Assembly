@@ -45,8 +45,25 @@ interface StrettoSearchWorkerRequest {
     ppq: number;
 }
 
-interface StrettoSearchWorkerSuccess {
+interface StrettoSearchProgressState {
+    elapsedMs: number;
+    progressPercent: number;
+    stars: string;
+    stageLabel: string;
+}
+
+interface StrettoSearchWorkerProgress {
     ok: true;
+    kind: 'progress';
+    elapsedMs: number;
+    progressPercent: number;
+    stars: string;
+    stageLabel: string;
+}
+
+interface StrettoSearchWorkerResult {
+    ok: true;
+    kind: 'result';
     report: StrettoSearchReport;
 }
 
@@ -114,6 +131,7 @@ export default function StrettoView({
     const [chainResults, setChainResults] = useState<StrettoChainResult[]>([]);
     const [searchReport, setSearchReport] = useState<StrettoSearchReport | null>(null);
     const [isSearching, setIsSearching] = useState(false);
+    const [searchProgress, setSearchProgress] = useState<StrettoSearchProgressState | null>(null);
     const [selectedChain, setSelectedChain] = useState<StrettoChainResult | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
@@ -322,13 +340,25 @@ export default function StrettoView({
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
-    const runChainSearchInWorker = (request: StrettoSearchWorkerRequest): Promise<StrettoSearchReport> => {
+    const runChainSearchInWorker = (
+        request: StrettoSearchWorkerRequest,
+        onProgress: (progress: StrettoSearchProgressState) => void
+    ): Promise<StrettoSearchReport> => {
         return new Promise((resolve, reject) => {
             const worker = new Worker(new URL('./workers/strettoSearchWorker.ts', import.meta.url), { type: 'module' });
-            worker.onmessage = (event: MessageEvent<StrettoSearchWorkerSuccess | StrettoSearchWorkerFailure>) => {
+            worker.onmessage = (event: MessageEvent<StrettoSearchWorkerProgress | StrettoSearchWorkerResult | StrettoSearchWorkerFailure>) => {
                 const payload = event.data;
+                if (payload.ok && payload.kind === 'progress') {
+                    onProgress({
+                        elapsedMs: payload.elapsedMs,
+                        progressPercent: payload.progressPercent,
+                        stars: payload.stars,
+                        stageLabel: payload.stageLabel
+                    });
+                    return;
+                }
                 worker.terminate();
-                if (payload.ok) {
+                if (payload.ok && payload.kind === 'result') {
                     resolve(payload.report);
                     return;
                 }
@@ -344,6 +374,12 @@ export default function StrettoView({
 
     const handleChainSearch = async () => {
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
+        setSearchProgress({
+            elapsedMs: 0,
+            progressPercent: 0,
+            stars: '★☆☆☆☆☆☆☆☆☆',
+            stageLabel: 'Initializing search worker'
+        });
         setTimeout(async () => {
             try {
                 const report = await runChainSearchInWorker({
@@ -355,9 +391,10 @@ export default function StrettoView({
                     meterDenominator: activeMeter.den,
                     },
                     ppq: ppq || 480
-                });
+                }, setSearchProgress);
                 setChainResults(report.results); setSearchReport(report);
             } catch (e) { alert("Search failed."); } finally { setIsSearching(false); }
+            setSearchProgress(null);
         }, 100);
     };
 
@@ -658,6 +695,7 @@ export default function StrettoView({
                     setSearchOptions={setSearchOptions} 
                     onSearch={handleChainSearch} 
                     isSearching={isSearching} 
+                    searchProgress={searchProgress}
                     chainResults={chainResults} 
                     selectedChain={selectedChain} 
                     setSelectedChain={setSelectedChain} 

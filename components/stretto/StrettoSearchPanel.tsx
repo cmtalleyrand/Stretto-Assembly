@@ -9,6 +9,12 @@ interface StrettoSearchPanelProps {
     setOptions: (opt: StrettoSearchOptions) => void;
     onSearch: () => void;
     isSearching: boolean;
+    searchProgress?: {
+        elapsedMs: number;
+        progressPercent: number;
+        stars: string;
+        stageLabel: string;
+    } | null;
     voiceNames?: Record<number, string>;
     setVoiceNames?: (names: Record<number, string>) => void;
     subjectNotes: RawNote[];
@@ -18,7 +24,7 @@ interface StrettoSearchPanelProps {
 const SCALE_MODES = ['Major', 'Natural Minor', 'Harmonic Minor', 'Melodic Minor', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian'];
 
 export default function StrettoSearchPanel({ 
-    options, setOptions, onSearch, isSearching, 
+    options, setOptions, onSearch, isSearching, searchProgress,
     voiceNames, setVoiceNames, subjectNotes, ppq 
 }: StrettoSearchPanelProps) {
     
@@ -404,8 +410,22 @@ export default function StrettoSearchPanel({
                 disabled={isSearching}
                 className="w-full py-2 bg-brand-primary hover:bg-brand-secondary text-white font-bold rounded shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm uppercase tracking-wide"
             >
-                {isSearching ? 'Processing Combinations...' : 'Run Search Algorithm v4.3'}
+                {isSearching ? `Processing Combinations ${searchProgress?.stars ?? '★☆☆☆☆☆☆☆☆☆'}` : 'Run Search Algorithm v4.3'}
             </button>
+            {isSearching && searchProgress && (
+                <div className="mt-2 rounded border border-brand-primary/40 bg-black/30 px-3 py-2 text-[10px] text-gray-200">
+                    <div className="flex justify-between items-center gap-2">
+                        <span className="font-semibold text-brand-primary">{searchProgress.stageLabel}</span>
+                        <span className="font-mono">{searchProgress.progressPercent}% · {(searchProgress.elapsedMs / 1000).toFixed(1)}s</span>
+                    </div>
+                    <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
+                        <div
+                            className="h-full bg-brand-primary transition-all duration-200"
+                            style={{ width: `${Math.max(2, searchProgress.progressPercent)}%` }}
+                        />
+                    </div>
+                </div>
+            )}
             
         </div>
     );
