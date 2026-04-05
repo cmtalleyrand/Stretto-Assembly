@@ -160,12 +160,20 @@ export default function StrettoView({
         return `${NOTE_NAMES[parsed.root]} ${parsed.mode}`;
     }, [mode, abcInput]);
 
+    const activeMeter = useMemo(() => {
+        if (mode === 'abc') {
+            const parsedMeter = extractMeterFromAbc(abcInput);
+            if (parsedMeter) return parsedMeter;
+        }
+        return ts;
+    }, [mode, abcInput, ts]);
+
     const subjectPianoRollData = useMemo(() => ({
         notes: subjectNotes.map(n => ({ ...n, voiceIndex: 0 })),
         name: 'Subject',
         ppq: ppq || 480,
-        timeSignature: { numerator: ts.num, denominator: ts.den },
-    }), [subjectNotes, ppq, ts]);
+        timeSignature: { numerator: activeMeter.num, denominator: activeMeter.den },
+    }), [subjectNotes, ppq, activeMeter]);
 
     // Clear selection when subject changes
     useEffect(() => {
@@ -267,7 +275,7 @@ export default function StrettoView({
     const { 
         isAssembling, assemblyStatus, assemblyResult, assemblyLog, 
         setAssemblyResult, runAssembly 
-    } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts });
+    } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts: activeMeter });
 
     const pairwiseResults = useMemo(() => {
         if (subjectNotes.length === 0 || viewMode !== 'pairwise') return [];
@@ -291,14 +299,14 @@ export default function StrettoView({
         intervalsToCheck.forEach(interval => {
             for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
                 // PASS pivotMidi and derived root from searchOptions
-                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 if (includeInversions) {
-                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 }
             }
         });
         return candidates;
-    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, ts, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
+    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, activeMeter, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const processedDiscoveryResults = useMemo(() => {
         return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
@@ -338,14 +346,13 @@ export default function StrettoView({
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
         setTimeout(async () => {
             try {
-                const sourceMeter = mode === 'abc' ? extractMeterFromAbc(abcInput) : null;
                 const report = await runChainSearchInWorker({
                     subject: subjectNotes.filter(n => !!n),
                     options: {
                     ...searchOptions,
                     voiceNames,
-                    meterNumerator: sourceMeter?.num ?? ts.num,
-                    meterDenominator: sourceMeter?.den ?? ts.den,
+                    meterNumerator: activeMeter.num,
+                    meterDenominator: activeMeter.den,
                     },
                     ppq: ppq || 480
                 });
@@ -641,9 +648,9 @@ export default function StrettoView({
                             onToggleCheck={toggleCheck}
                             onFilterContextChange={setDiscoveryFilterContext}
                         />
-                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle)} />
+                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={activeMeter} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} />
                     </div>
-                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
+                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
                 </>
             ) : (
                 <StrettoChainView 
@@ -658,10 +665,10 @@ export default function StrettoView({
                     setVoiceNames={setVoiceNames} 
                     chainToCandidate={chainToCandidate} 
                     ppq={ppq || 480} 
-                    ts={ts} 
+                    ts={activeMeter} 
                     isPlaying={isPlaying} 
                     onPlay={handlePlay} 
-                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle)} 
+                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} 
                     searchReport={searchReport}
                     masterTransposition={masterTransposition}
                     setMasterTransposition={setMasterTransposition}
