@@ -18,9 +18,16 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@analysis/*": [
+        "components/services/*"
+      ],
+      "@analysis/midi": [
+        "components/services/midiAnalysis.ts"
       ]
     },
     "allowImportingTsExtensions": true,
-    "noEmit": true
+    "noEmit": true,
+    "baseUrl": "."
   }
 }

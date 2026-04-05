@@ -19,6 +19,7 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+          '@analysis/midi': path.resolve(__dirname, 'components/services/midiAnalysis.ts'),
         }
       }
     };
