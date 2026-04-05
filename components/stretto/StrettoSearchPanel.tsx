@@ -3,6 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { StrettoSearchOptions, StrettoConstraintMode, RawNote } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { getVoiceLabel } from '../services/midiVoices';
+import ConstraintSelector from './ConstraintSelector';
 
 interface StrettoSearchPanelProps {
     options: StrettoSearchOptions;
@@ -40,66 +41,8 @@ export default function StrettoSearchPanel({
         }
     };
 
-    const renderConstraintSelector = (label: string, field: keyof StrettoSearchOptions, value: StrettoConstraintMode) => {
-        const isNumber = typeof value === 'number';
-        const numValue = isNumber ? value : 1;
-        const isCustom = isNumber;
-
-        // Local state to allow empty string while typing
-        const [inputValue, setInputValue] = useState<string>(numValue.toString());
-
-        // Sync local state when external value changes
-        React.useEffect(() => {
-            setInputValue(numValue.toString());
-        }, [numValue]);
-
-        return (
-            <div className="bg-gray-900 p-2 rounded border border-gray-700">
-                <label className="block text-[10px] font-bold text-gray-400 mb-2 uppercase">{label}</label>
-                <div className="flex gap-1 items-center">
-                    <button
-                        onClick={() => handleChange(field, 'None')}
-                        className={`flex-1 py-1 text-[10px] rounded border transition-colors ${value === 'None' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-800 text-gray-500 border-gray-600 hover:border-gray-500'}`}
-                    >
-                        None
-                    </button>
-                    
-                    <div 
-                        className={`flex items-center border rounded transition-colors cursor-pointer ${isCustom ? 'bg-brand-primary border-brand-primary' : 'bg-gray-800 border-gray-600 hover:border-gray-500'}`}
-                        onClick={() => { if (!isCustom) handleChange(field, numValue); }}
-                    >
-                        <span className={`pl-2 pr-1 py-1 text-[10px] ${isCustom ? 'text-white' : 'text-gray-500'}`}>Max</span>
-                        <input 
-                            type="number" 
-                            min="1" 
-                            max="10"
-                            value={inputValue}
-                            onChange={(e) => {
-                                setInputValue(e.target.value);
-                                const val = parseInt(e.target.value);
-                                if (!isNaN(val) && val > 0) {
-                                    handleChange(field, val);
-                                }
-                            }}
-                            onBlur={() => {
-                                if (inputValue === '' || isNaN(parseInt(inputValue)) || parseInt(inputValue) < 1) {
-                                    setInputValue('1');
-                                    handleChange(field, 1);
-                                }
-                            }}
-                            className={`w-8 bg-transparent text-[10px] text-center outline-none ${isCustom ? 'text-white' : 'text-gray-500'}`}
-                        />
-                    </div>
-
-                    <button
-                        onClick={() => handleChange(field, 'Unlimited')}
-                        className={`flex-1 py-1 text-[10px] rounded border transition-colors ${value === 'Unlimited' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-800 text-gray-500 border-gray-600 hover:border-gray-500'}`}
-                    >
-                        Unlimited
-                    </button>
-                </div>
-            </div>
-        );
+    const handleConstraintChange = (field: keyof StrettoSearchOptions, value: StrettoConstraintMode) => {
+        setOptions({ ...options, [field]: value });
     };
 
     const availableAbove = options.subjectVoiceIndex; 
@@ -287,7 +230,12 @@ export default function StrettoSearchPanel({
 
                 {/* 2. Truncation (Col 4) */}
                 <div className="lg:col-span-4 flex flex-col gap-2">
-                    {renderConstraintSelector("Truncated Entries", "truncationMode", options.truncationMode)}
+                    <ConstraintSelector
+                        label="Truncated Entries"
+                        field="truncationMode"
+                        value={options.truncationMode}
+                        onChange={handleConstraintChange}
+                    />
                     <div className={`flex flex-col gap-2 px-1 transition-opacity ${options.truncationMode === 'None' ? 'opacity-30 pointer-events-none' : ''}`}>
                         <div className="flex items-center gap-2">
                             <label className="text-[9px] text-gray-500 block">Cut Length (Beats)</label>
@@ -305,7 +253,12 @@ export default function StrettoSearchPanel({
 
                 {/* 3. Inversion (Col 2) */}
                 <div className="lg:col-span-2 flex flex-col gap-2">
-                    {renderConstraintSelector("Inverted Entries", "inversionMode", options.inversionMode)}
+                    <ConstraintSelector
+                        label="Inverted Entries"
+                        field="inversionMode"
+                        value={options.inversionMode}
+                        onChange={handleConstraintChange}
+                    />
                     <div className={`flex flex-col gap-1 px-1 transition-opacity ${options.inversionMode === 'None' ? 'opacity-30 pointer-events-none' : ''}`}>
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] text-gray-500 whitespace-nowrap">Inv. Scale:</span>
@@ -346,7 +299,12 @@ export default function StrettoSearchPanel({
 
                 {/* 4. Intervals (Col 3) */}
                 <div className="lg:col-span-3 bg-gray-900 p-2 rounded border border-gray-700 flex flex-col gap-2">
-                    {renderConstraintSelector("3rds & 6ths (from Subj)", "thirdSixthMode", options.thirdSixthMode)}
+                    <ConstraintSelector
+                        label="3rds & 6ths (from Subj)"
+                        field="thirdSixthMode"
+                        value={options.thirdSixthMode}
+                        onChange={handleConstraintChange}
+                    />
                     
                     <div className="flex flex-col gap-2 mt-1">
                         <label className="flex items-center cursor-pointer">
