@@ -1,9 +1,14 @@
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { StrettoSearchOptions, StrettoConstraintMode, RawNote } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { getVoiceLabel } from '../services/midiVoices';
 import ConstraintSelector from './ConstraintSelector';
+import {
+    computeSearchProgressDisplay,
+    nextSearchProgressAccumulator,
+    SearchProgressAccumulator
+} from './searchProgressModel';
 
 interface StrettoSearchPanelProps {
     options: StrettoSearchOptions;
@@ -31,49 +36,14 @@ export default function StrettoSearchPanel({
 }: StrettoSearchPanelProps) {
     
     const [showVoiceConfig, setShowVoiceConfig] = useState(false);
+    const progressAccumulatorRef = useRef<SearchProgressAccumulator | null>(null);
     const progressDisplay = useMemo(() => {
         if (!searchProgress) {
-            return {
-                progressPercent: 0,
-                stageLabel: 'Initializing search worker',
-                stars: '★☆☆☆☆☆☆☆☆☆',
-                unitLabel: '0 / 1',
-                isHeartbeat: false
-            };
+            progressAccumulatorRef.current = null;
+        } else {
+            progressAccumulatorRef.current = nextSearchProgressAccumulator(searchProgress, progressAccumulatorRef.current);
         }
-        const stageWeights: Record<'pairwise' | 'triplet' | 'dag', number> = {
-            pairwise: 0.35,
-            triplet: 0.25,
-            dag: 0.40
-        };
-        const stageOrder: Array<'pairwise' | 'triplet' | 'dag'> = ['pairwise', 'triplet', 'dag'];
-        const stageLabels: Record<'pairwise' | 'triplet' | 'dag', string> = {
-            pairwise: 'Pairwise precomputation',
-            triplet: 'Triplet compatibility indexing',
-            dag: 'Chain expansion and scoring'
-        };
-        const boundedTotal = Math.max(1, searchProgress.totalUnits);
-        const boundedCompleted = Math.max(0, Math.min(searchProgress.completedUnits, boundedTotal));
-        const stageRatio = boundedCompleted / boundedTotal;
-        let weightedCompletion = 0;
-        for (const stage of stageOrder) {
-            if (stage === searchProgress.stage) {
-                weightedCompletion += stageWeights[stage] * stageRatio;
-                break;
-            }
-            weightedCompletion += stageWeights[stage];
-        }
-        const progressPercent = Math.max(0, Math.min(99, Math.round(weightedCompletion * 100)));
-        const filledStars = Math.max(1, Math.min(10, Math.round(progressPercent / 10)));
-        return {
-            progressPercent,
-            stageLabel: searchProgress.heartbeat
-                ? 'Search active (awaiting stage metrics)'
-                : stageLabels[searchProgress.stage],
-            stars: '★'.repeat(filledStars).padEnd(10, '☆'),
-            unitLabel: `${boundedCompleted} / ${boundedTotal}`,
-            isHeartbeat: searchProgress.heartbeat
-        };
+        return computeSearchProgressDisplay(searchProgress ?? null, progressAccumulatorRef.current);
     }, [searchProgress]);
 
     const handleChange = (field: keyof StrettoSearchOptions, val: any) => {
@@ -433,13 +403,20 @@ export default function StrettoSearchPanel({
                             {progressDisplay.stageLabel}
                             {progressDisplay.isHeartbeat ? ' · liveness heartbeat' : ''}
                         </span>
-                        <span className="font-mono">{progressDisplay.progressPercent}% · {(searchProgress.elapsedMs / 1000).toFixed(1)}s</span>
+                        <span className="font-mono">
+                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est · {(searchProgress.elapsedMs / 1000).toFixed(1)}s
+                        </span>
                     </div>
-                    <div className="mt-1 text-[9px] text-gray-400 font-mono">Stage units: {progressDisplay.unitLabel}</div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        Stage progress: {progressDisplay.stagePercent}% · units {progressDisplay.unitLabel}
+                    </div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        {progressDisplay.throughputLabel} · {progressDisplay.etaLabel}
+                    </div>
                     <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                         <div
                             className="h-full bg-brand-primary transition-all duration-200"
-                            style={{ width: `${Math.max(2, progressDisplay.progressPercent)}%` }}
+                            style={{ width: `${Math.max(2, progressDisplay.stagePercent)}%` }}
                         />
                     </div>
                 </div>
