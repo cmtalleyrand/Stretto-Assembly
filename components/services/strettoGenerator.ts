@@ -317,14 +317,14 @@ function runStructuralScanGuard<T>(
     return scan();
 }
 
-function buildEntryStateAdmissibilityModel(
+async function buildEntryStateAdmissibilityModel(
     variants: SubjectVariant[],
     allowedAbsoluteTranspositions: number[],
     relativeTranspositionDeltas: number[],
     delayStep: number,
     targetChainLength: number,
     options: StrettoSearchOptions
-): EntryStateAdmissibilityModel {
+): Promise<EntryStateAdmissibilityModel> {
     const allowedAbsoluteTranspositionSet = new Set(allowedAbsoluteTranspositions);
     const admissiblePairKeys: AdmissiblePairIndex = new Map();
     const addAdmissiblePair = (vA: number, vB: number, d: number, t: number): void => {
@@ -347,9 +347,14 @@ function buildEntryStateAdmissibilityModel(
         nTrunc: 0
     }];
     const visited = new Set<string>();
+    let operationCounter = 0;
 
     while (stack.length > 0) {
         const state = stack.pop()!;
+        operationCounter++;
+        if (shouldYieldToEventLoop(operationCounter)) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
         if (state.depth >= targetChainLength) continue;
 
         let minD = delayStep;
@@ -1474,9 +1479,13 @@ export async function searchStrettoChains(
 
     const collectSpans = options.collectDiagnosticSpans === true;
     const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
+    // Emit concrete stage metadata before structural admissibility precompute begins.
+    // This phase can be expensive for larger option spaces; emitting here ensures
+    // UI transitions out of heartbeat-only status immediately.
+    emitStageProgress('pairwise', 0, 1, true);
     const entryStateAdmissibilityModel = forceFullPairwiseDiagnostic
         ? { admissiblePairKeys: null, statesVisited: 0 }
-        : buildEntryStateAdmissibilityModel(
+        : await buildEntryStateAdmissibilityModel(
             variants,
             transpositions,
             relativeTranspositionDeltas,
