@@ -305,12 +305,22 @@ export default function StrettoSearchPanel({
                         onChange={handleConstraintChange}
                     />
                     <div className={`flex flex-col gap-1 px-1 transition-opacity ${options.inversionMode === 'None' ? 'opacity-30 pointer-events-none' : ''}`}>
+                        <label className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                checked={options.useChromaticInversion}
+                                onChange={(e) => handleChange('useChromaticInversion', e.target.checked)}
+                                className="h-3 w-3 rounded bg-gray-900 border-gray-600 text-brand-primary focus:ring-0"
+                            />
+                            <span className="text-[10px] text-gray-300 font-bold">Chromatic Inversion</span>
+                        </label>
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] text-gray-500 whitespace-nowrap">Inv. Scale:</span>
                             <select 
                                 value={options.scaleRoot}
                                 onChange={(e) => handleChange('scaleRoot', parseInt(e.target.value))}
-                                className="bg-gray-900 border border-gray-600 text-[10px] rounded px-1 py-0.5 text-gray-300 w-12"
+                                disabled={options.useChromaticInversion}
+                                className={`bg-gray-900 border border-gray-600 text-[10px] rounded px-1 py-0.5 text-gray-300 w-12 ${options.useChromaticInversion ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B'].map((k, i) => (
                                     <option key={k} value={i}>{k}</option>
@@ -319,7 +329,8 @@ export default function StrettoSearchPanel({
                             <select 
                                 value={options.scaleMode}
                                 onChange={(e) => handleChange('scaleMode', e.target.value)}
-                                className="bg-gray-900 border border-gray-600 text-[10px] rounded px-1 py-0.5 text-gray-300 flex-grow"
+                                disabled={options.useChromaticInversion}
+                                className={`bg-gray-900 border border-gray-600 text-[10px] rounded px-1 py-0.5 text-gray-300 flex-grow ${options.useChromaticInversion ? 'opacity-50 cursor-not-allowed' : ''}`}
                             >
                                 {SCALE_MODES.map(m => (
                                     <option key={m} value={m}>{m}</option>
