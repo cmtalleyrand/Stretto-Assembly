@@ -1251,7 +1251,7 @@ class DensePrecomputeIndex implements PairwiseTripletPrecomputeIndex {
 function resolvePrecomputeBackend(config?: StrettoPrecomputeConfig): StrettoPrecomputeBackend {
     // Serialized task marker (post 6A–6D rebase): backend switch is isolated to precompute index wiring.
     if (config?.backend === 'map' || config?.backend === 'dense') return config.backend;
-    return process.env.STRETTO_PRECOMPUTE_BACKEND === 'dense' ? 'dense' : 'map';
+    return process.env.STRETTO_PRECOMPUTE_BACKEND === 'map' ? 'map' : 'dense';
 }
 
 // --- Generator ---

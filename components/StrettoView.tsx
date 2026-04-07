@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
@@ -137,6 +137,7 @@ export default function StrettoView({
     const [searchReport, setSearchReport] = useState<StrettoSearchReport | null>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [searchProgress, setSearchProgress] = useState<StrettoSearchProgressState | null>(null);
+    const activeWorkerRef = useRef<Worker | null>(null);
     const [selectedChain, setSelectedChain] = useState<StrettoChainResult | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
@@ -351,8 +352,13 @@ export default function StrettoView({
         request: StrettoSearchWorkerRequest,
         onProgress: (progress: StrettoSearchProgressState) => void
     ): Promise<StrettoSearchReport> => {
+        if (activeWorkerRef.current) {
+            activeWorkerRef.current.terminate();
+            activeWorkerRef.current = null;
+        }
         return new Promise((resolve, reject) => {
             const worker = new Worker(new URL('./workers/strettoSearchWorker.ts', import.meta.url), { type: 'module' });
+            activeWorkerRef.current = worker;
             worker.onmessage = (event: MessageEvent<StrettoSearchWorkerProgress | StrettoSearchWorkerResult | StrettoSearchWorkerFailure>) => {
                 const payload = event.data;
                 if (payload.ok && payload.kind === 'progress') {
@@ -366,6 +372,7 @@ export default function StrettoView({
                     return;
                 }
                 worker.terminate();
+                activeWorkerRef.current = null;
                 if (payload.ok && payload.kind === 'result') {
                     resolve(payload.report);
                     return;
@@ -374,6 +381,7 @@ export default function StrettoView({
             };
             worker.onerror = (event: ErrorEvent) => {
                 worker.terminate();
+                activeWorkerRef.current = null;
                 reject(new Error(event.message || 'Stretto search worker failed.'));
             };
             worker.postMessage(request);
