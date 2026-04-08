@@ -3,6 +3,8 @@ import { RawNote, StrettoChainResult, StrettoSearchOptions, StrettoChainOption, 
 import { INTERVALS, SCALE_INTERVALS } from './strettoConstants';
 import { calculateStrettoScore, SubjectVariant, InternalNote } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
+import { buildTranspositionRuleTables, TranspositionIndex as RuleTranspositionIndex } from './stretto-opt/ruleTables';
+import { createCompatMatrix } from './stretto-opt/compatMatrix';
 
 // --- Constants & Types ---
 // Node budget removed — time is the only search limit.
@@ -1425,6 +1427,9 @@ export async function searchStrettoChains(
     const relativeTranspositionDeltas = Array.from(new Set(
         transpositions.flatMap((left) => transpositions.map((right) => right - left))
     ));
+    // Precomputed rule table: O(1) typed-array lookups replace repeated inline interval
+    // class tests inside the pairwise loop (isRestricted, isFree, adjacentSeparation).
+    const transpositionRuleTable = buildTranspositionRuleTables(relativeTranspositionDeltas);
     const precomputeBackend = resolvePrecomputeBackend(internalConfig);
 
 
@@ -1494,15 +1499,48 @@ export async function searchStrettoChains(
             options
         );
 
+    // Translate the admissibility model's nested-Map structure into a dense compat matrix
+    // so the pairwise hot-loop uses a single byte-array probe instead of 4-level Map chaining.
+    // Both validAdjacentDelays and validPairwiseDelays share the same delayStep stride from the
+    // same origin, so the pairwise loop's dIdx equals the adjacent-delay index for every d ≤ maxAdjacentDelayTicks.
+    const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
+    const admissibilityMatrix = admissiblePairKeys
+        ? (() => {
+            const transpToIdx = new Map(relativeTranspositionDeltas.map((t, i) => [t, i]));
+            const adjDelayToIdx = (d: number) => Math.round(d / delayStep) - 1;
+            const m = createCompatMatrix({
+                V: variants.length,
+                D: validAdjacentDelays.length,
+                T: relativeTranspositionDeltas.length
+            });
+            for (const [vA, byB] of admissiblePairKeys) {
+                for (const [vB, byD] of byB) {
+                    for (const [d, transpSet] of byD) {
+                        const di = adjDelayToIdx(d);
+                        if (di < 0 || di >= validAdjacentDelays.length) continue;
+                        for (const t of transpSet) {
+                            const ti = transpToIdx.get(t);
+                            if (ti === undefined) continue;
+                            m.set(vA, vB, di, ti, { status: 1, constraintClass: 0 });
+                        }
+                    }
+                }
+            }
+            return m;
+        })()
+        : null;
+
     let pairwiseTotalUnits = 0;
     for (let iA = 0; iA < variants.length; iA++) {
         const vA = variants[iA];
         for (let iB = 0; iB < variants.length; iB++) {
-            for (const d of validPairwiseDelays) {
+            for (let dIdx = 0; dIdx < validPairwiseDelays.length; dIdx++) {
+                const d = validPairwiseDelays[dIdx];
                 if (d >= vA.lengthTicks) break;
-                for (const t of relativeTranspositionDeltas) {
-                    const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
-                    if (admissiblePairKeys && d <= maxAdjacentDelayTicks && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
+                const isAdjDelay = dIdx < validAdjacentDelays.length;
+                for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
+                    if (admissibilityMatrix && isAdjDelay
+                        && admissibilityMatrix.get(iA, iB, dIdx, tIdx).status === 0) {
                         continue;
                     }
                     pairwiseTotalUnits++;
@@ -1522,13 +1560,18 @@ export async function searchStrettoChains(
             const vB = variants[iB];
             // Optimization: if variant A is truncated, pairs only overlap when d < lenA.
             const maxDelayForVA = vA.lengthTicks;
-            for (const d of validPairwiseDelays) {
+            for (let dIdx = 0; dIdx < validPairwiseDelays.length; dIdx++) {
+                const d = validPairwiseDelays[dIdx];
                 if (d >= maxDelayForVA) break; // No overlap possible beyond variant A's length
-                for (const t of relativeTranspositionDeltas) {
+                // Adjacent delays: dIdx maps directly to the compat matrix delay index.
+                const isAdjDelay = dIdx < validAdjacentDelays.length;
+                for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
+                    const t = relativeTranspositionDeltas[tIdx];
                     // Admissibility model only covers adjacent delays (≤ 2/3 Sb).
                     // Extended delays (> 2/3 Sb) are for long-range lookups only — precompute unconditionally.
-                    const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
-                    if (admissiblePairKeys && d <= maxAdjacentDelayTicks && !admissiblePairKeys.get(iA)?.get(iB)?.get(d)?.has(t)) {
+                    // Matrix byte lookup replaces 4-level Map chain for hot-path filtering.
+                    if (admissibilityMatrix && isAdjDelay
+                        && admissibilityMatrix.get(iA, iB, dIdx, tIdx).status === 0) {
                         continue;
                     }
                     stageStats.pairwiseTotal++;
@@ -1588,10 +1631,13 @@ export async function searchStrettoChains(
                         continue;
                     }
 
-                    // Precompute interval class for quota checks during traversal
-                    const intervalClass = ((t % 12) + 12) % 12;
-                    const isRestrictedInterval = [3, 4, 8, 9].includes(intervalClass);
-                    const isFreeInterval = [0, 5, 7].includes(intervalClass);
+                    // Rule table lookups replace inline interval class tests.
+                    // tIdx aligns with the rule table index because both use the same
+                    // deduplicated relativeTranspositionDeltas as their source array.
+                    const tRule = tIdx as RuleTranspositionIndex;
+                    const intervalClass = transpositionRuleTable.intervalClassAt(tRule);
+                    const isRestrictedInterval = transpositionRuleTable.isRestrictedAt(tRule);
+                    const isFreeInterval = transpositionRuleTable.isFreeAt(tRule);
 
                     // If P4 exists and only 2 voices are active at those points,
                     // the P4 is immediately dissonant (no other voice can provide the bass below).
@@ -1639,7 +1685,7 @@ export async function searchStrettoChains(
                         intervalClass,
                         isRestrictedInterval,
                         isFreeInterval,
-                        meetsAdjacentTranspositionSeparation: Math.abs(t) >= 5
+                        meetsAdjacentTranspositionSeparation: transpositionRuleTable.meetsAdjacentSeparationAt(tRule)
                     });
                     stageStats.pairwiseCompatible++;
                     if (pairScan.hasFourth) {
