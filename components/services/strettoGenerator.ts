@@ -1726,6 +1726,10 @@ export async function searchStrettoChains(
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
             tripletCompletedUnits++;
+            operationCounter++;
+            if (shouldYieldToEventLoop(operationCounter)) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            }
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
                 if (checkLimits()) break;
@@ -1817,11 +1821,6 @@ export async function searchStrettoChains(
 
             let tripletHasValidDelayContext = false;
             for (const dCtx of validTripletDelayAs) {
-                operationCounter++;
-                if (shouldYieldToEventLoop(operationCounter)) {
-                    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-                }
-
                 // A.1 local: pairwise high-delay uniqueness across (dCtx, d1, d2)
                 if (!hasPairwiseHighDelayUniqueness(dCtx, d1, d2)) continue;
 
