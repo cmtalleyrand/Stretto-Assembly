@@ -21,7 +21,7 @@ npm run diagnose:stretto                   # Basic diagnostic check
 npm run diagnose:stretto:full              # Full diagnostic (extended output)
 ```
 
-Environment variable required for AI features: `GEMINI_API_KEY`.
+Environment variable required for AI features (server runtime only): `GEMINI_API_KEY`. The browser calls `POST /api/assembly`; client bundles must not embed provider secrets.
 
 ## Musical Objective
 
@@ -123,7 +123,7 @@ See `SCORING_MECHANISM.md` for all penalty/bonus point values.
 | `components/services/strettoGenerator.ts` | Main chain search algorithm (~1800 lines) |
 | `components/services/strettoScoring.ts` | Scoring and ranking |
 | `components/services/strettoCore.ts` | Core harmonic analysis |
-| `components/services/midiAnalysis.ts` / `midiHarmony.ts` | MIDI parsing and harmonic compatibility |
+| `components/services/midiAnalysis.ts` / `midiHarmony.ts` | MIDI parsing and harmonic compatibility (canonical analysis module is `@analysis/midi`) |
 | `hooks/useMidiController.ts` | Central state management |
 | `hooks/useStrettoAssembly.ts` | Stretto search operations |
 
@@ -154,6 +154,13 @@ The normative entry representation is `e_i = (d_i, t_i, v_i, inv_i, trunc_i)` (s
 - `trunc_i` ← `L_full − length_i`
 
 Do not migrate to canonical form without updating all consumers: `types.ts`, `StrettoChainView.tsx`, `StrettoResultsList.tsx`.
+
+
+### Canonical analysis import policy
+
+- Authoritative module: `@analysis/midi` (`components/services/midiAnalysis.ts`).
+- Deprecated compatibility shim: root `midiAnalysis.ts` (pure re-export only; no logic allowed).
+- Enforcement: `npm run lint` includes `scripts/check-deprecated-analysis-imports.mjs`, which rejects direct imports from deprecated root-level paths.
 
 ## TypeScript workflow
 

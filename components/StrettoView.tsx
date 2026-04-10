@@ -1,9 +1,8 @@
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
-import { searchStrettoChains } from './services/strettoGenerator'; 
 import { getStrictPitchName } from './services/midiSpelling';
 import { downloadStrettoCandidate, downloadStrettoSelection } from './services/strettoExport';
 import { Spinner, DocumentTextIcon } from './Icons';
@@ -38,6 +37,44 @@ interface SavedSubject {
     id: string;
     name: string;
     data: string;
+}
+
+interface StrettoSearchWorkerRequest {
+    subject: RawNote[];
+    options: StrettoSearchOptions;
+    ppq: number;
+}
+
+interface StrettoSearchProgressState {
+    elapsedMs: number;
+    stage: 'pairwise' | 'triplet' | 'dag';
+    completedUnits: number;
+    totalUnits: number;
+    heartbeat: boolean;
+}
+
+interface StrettoSearchWorkerProgress {
+    ok: true;
+    kind: 'progress';
+    elapsedMs: number;
+    stage: 'pairwise' | 'triplet' | 'dag';
+    completedUnits: number;
+    totalUnits: number;
+    heartbeat: boolean;
+    progressPercent: number;
+    stars: string;
+    stageLabel: string;
+}
+
+interface StrettoSearchWorkerResult {
+    ok: true;
+    kind: 'result';
+    report: StrettoSearchReport;
+}
+
+interface StrettoSearchWorkerFailure {
+    ok: false;
+    error: string;
 }
 
 export default function StrettoView({
@@ -99,6 +136,8 @@ export default function StrettoView({
     const [chainResults, setChainResults] = useState<StrettoChainResult[]>([]);
     const [searchReport, setSearchReport] = useState<StrettoSearchReport | null>(null);
     const [isSearching, setIsSearching] = useState(false);
+    const [searchProgress, setSearchProgress] = useState<StrettoSearchProgressState | null>(null);
+    const activeWorkerRef = useRef<Worker | null>(null);
     const [selectedChain, setSelectedChain] = useState<StrettoChainResult | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
@@ -145,12 +184,22 @@ export default function StrettoView({
         return `${NOTE_NAMES[parsed.root]} ${parsed.mode}`;
     }, [mode, abcInput]);
 
+    const parsedAbcMeter = useMemo(() => {
+        if (mode !== 'abc') return null;
+        return extractMeterFromAbc(abcInput);
+    }, [mode, abcInput]);
+
+    const activeMeter = useMemo(() => {
+        if (mode === 'abc' && parsedAbcMeter) return parsedAbcMeter;
+        return ts;
+    }, [mode, parsedAbcMeter, ts]);
+
     const subjectPianoRollData = useMemo(() => ({
         notes: subjectNotes.map(n => ({ ...n, voiceIndex: 0 })),
         name: 'Subject',
         ppq: ppq || 480,
-        timeSignature: { numerator: ts.num, denominator: ts.den },
-    }), [subjectNotes, ppq, ts]);
+        timeSignature: { numerator: activeMeter.num, denominator: activeMeter.den },
+    }), [subjectNotes, ppq, activeMeter]);
 
     // Clear selection when subject changes
     useEffect(() => {
@@ -252,7 +301,7 @@ export default function StrettoView({
     const { 
         isAssembling, assemblyStatus, assemblyResult, assemblyLog, 
         setAssemblyResult, runAssembly 
-    } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts });
+    } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts: activeMeter });
 
     const pairwiseResults = useMemo(() => {
         if (subjectNotes.length === 0 || viewMode !== 'pairwise') return [];
@@ -276,14 +325,14 @@ export default function StrettoView({
         intervalsToCheck.forEach(interval => {
             for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
                 // PASS pivotMidi and derived root from searchOptions
-                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 if (includeInversions) {
-                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, ts, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
                 }
             }
         });
         return candidates;
-    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, ts, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
+    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, activeMeter, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const processedDiscoveryResults = useMemo(() => {
         return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
@@ -299,19 +348,70 @@ export default function StrettoView({
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
+    const runChainSearchInWorker = (
+        request: StrettoSearchWorkerRequest,
+        onProgress: (progress: StrettoSearchProgressState) => void
+    ): Promise<StrettoSearchReport> => {
+        if (activeWorkerRef.current) {
+            activeWorkerRef.current.terminate();
+            activeWorkerRef.current = null;
+        }
+        return new Promise((resolve, reject) => {
+            const worker = new Worker(new URL('./workers/strettoSearchWorker.ts', import.meta.url), { type: 'module' });
+            activeWorkerRef.current = worker;
+            worker.onmessage = (event: MessageEvent<StrettoSearchWorkerProgress | StrettoSearchWorkerResult | StrettoSearchWorkerFailure>) => {
+                const payload = event.data;
+                if (payload.ok && payload.kind === 'progress') {
+                    onProgress({
+                        elapsedMs: payload.elapsedMs,
+                        stage: payload.stage,
+                        completedUnits: payload.completedUnits,
+                        totalUnits: payload.totalUnits,
+                        heartbeat: payload.heartbeat
+                    });
+                    return;
+                }
+                worker.terminate();
+                activeWorkerRef.current = null;
+                if (payload.ok && payload.kind === 'result') {
+                    resolve(payload.report);
+                    return;
+                }
+                reject(new Error((payload as StrettoSearchWorkerFailure).error));
+            };
+            worker.onerror = (event: ErrorEvent) => {
+                worker.terminate();
+                activeWorkerRef.current = null;
+                reject(new Error(event.message || 'Stretto search worker failed.'));
+            };
+            worker.postMessage(request);
+        });
+    };
+
     const handleChainSearch = async () => {
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
+        setSearchProgress({
+            elapsedMs: 0,
+            stage: 'pairwise',
+            completedUnits: 0,
+            totalUnits: 1,
+            heartbeat: true
+        });
         setTimeout(async () => {
             try {
-                const sourceMeter = mode === 'abc' ? extractMeterFromAbc(abcInput) : null;
-                const report = await searchStrettoChains(subjectNotes.filter(n => !!n), {
+                const report = await runChainSearchInWorker({
+                    subject: subjectNotes.filter(n => !!n),
+                    options: {
                     ...searchOptions,
                     voiceNames,
-                    meterNumerator: sourceMeter?.num ?? ts.num,
-                    meterDenominator: sourceMeter?.den ?? ts.den,
-                }, ppq || 480);
+                    meterNumerator: activeMeter.num,
+                    meterDenominator: activeMeter.den,
+                    },
+                    ppq: ppq || 480
+                }, setSearchProgress);
                 setChainResults(report.results); setSearchReport(report);
             } catch (e) { alert("Search failed."); } finally { setIsSearching(false); }
+            setSearchProgress(null);
         }, 100);
     };
 
@@ -531,6 +631,15 @@ export default function StrettoView({
                                 <span className="text-[10px] text-gray-600 italic">applied to note accidentals</span>
                             </div>
                         )}
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[11px] text-gray-500 uppercase tracking-wide font-bold">Detected Time Signature:</span>
+                            <span className="bg-brand-secondary/20 text-brand-secondary border border-brand-secondary/40 px-2 py-0.5 rounded font-mono text-xs font-bold">
+                                {activeMeter.num}/{activeMeter.den}
+                            </span>
+                            <span className="text-[10px] text-gray-600 italic">
+                                {parsedAbcMeter ? 'read from M: field in ABC source' : 'fallback (no valid M: field)'}
+                            </span>
+                        </div>
                     </div>
 
                     <aside className="bg-gray-800/70 border border-gray-700 rounded-lg p-4 space-y-3">
@@ -602,9 +711,9 @@ export default function StrettoView({
                             onToggleCheck={toggleCheck}
                             onFilterContextChange={setDiscoveryFilterContext}
                         />
-                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={ts} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle)} />
+                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={activeMeter} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} />
                     </div>
-                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle)} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
+                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
                 </>
             ) : (
                 <StrettoChainView 
@@ -612,6 +721,7 @@ export default function StrettoView({
                     setSearchOptions={setSearchOptions} 
                     onSearch={handleChainSearch} 
                     isSearching={isSearching} 
+                    searchProgress={searchProgress}
                     chainResults={chainResults} 
                     selectedChain={selectedChain} 
                     setSelectedChain={setSelectedChain} 
@@ -619,10 +729,10 @@ export default function StrettoView({
                     setVoiceNames={setVoiceNames} 
                     chainToCandidate={chainToCandidate} 
                     ppq={ppq || 480} 
-                    ts={ts} 
+                    ts={activeMeter} 
                     isPlaying={isPlaying} 
                     onPlay={handlePlay} 
-                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle)} 
+                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} 
                     searchReport={searchReport}
                     masterTransposition={masterTransposition}
                     setMasterTransposition={setMasterTransposition}

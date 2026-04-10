@@ -15,6 +15,13 @@ interface StrettoChainViewProps {
     setSearchOptions: (opt: StrettoSearchOptions) => void;
     onSearch: () => void;
     isSearching: boolean;
+    searchProgress?: {
+        elapsedMs: number;
+        stage: 'pairwise' | 'triplet' | 'dag';
+        completedUnits: number;
+        totalUnits: number;
+        heartbeat: boolean;
+    } | null;
     chainResults: StrettoChainResult[];
     selectedChain: StrettoChainResult | null;
     setSelectedChain: (res: StrettoChainResult | null) => void;
@@ -37,7 +44,7 @@ interface StrettoChainViewProps {
 }
 
 export default function StrettoChainView({
-    searchOptions, setSearchOptions, onSearch, isSearching,
+    searchOptions, setSearchOptions, onSearch, isSearching, searchProgress,
     chainResults, selectedChain, setSelectedChain, voiceNames, setVoiceNames,
     chainToCandidate: _unusedLegacyProp, // We recreate it here to ensure correct polyphonic region generation
     ppq, ts, isPlaying, onPlay, onDownloadChain,
@@ -165,6 +172,7 @@ export default function StrettoChainView({
                 setOptions={setSearchOptions}
                 onSearch={onSearch}
                 isSearching={isSearching}
+                searchProgress={searchProgress}
                 voiceNames={voiceNames}
                 setVoiceNames={setVoiceNames}
                 subjectNotes={subjectNotes}
