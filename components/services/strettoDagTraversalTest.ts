@@ -292,6 +292,11 @@ const options: StrettoSearchOptions = {
 
 const reportA = await searchStrettoChains(subject, options, ppq);
 const reportB = await searchStrettoChains(subject, options, ppq);
+const timeoutNearCompletionReport = await searchStrettoChains(
+  subject,
+  { ...options, maxSearchTimeMs: 1 },
+  ppq
+);
 
 const structureSignature = (entries: StrettoChainOption[]) => entries
   .map((e) => `${Math.round(e.startBeat * ppq)}:${e.transposition}:${e.type}:${e.voiceIndex}`)
@@ -355,6 +360,12 @@ assert.ok(
   'search must terminate with an explicit completion reason'
 );
 assert.ok(reportA.stats.maxDepthReached >= 1, 'search run-to-completion test fixture must explore at least one expansion depth');
+assert.notEqual(
+  timeoutNearCompletionReport.stats.maxDepthReached >= options.targetChainLength &&
+  timeoutNearCompletionReport.results.length === 0,
+  true,
+  'timeout-near-completion traversal must not report target-depth reachability with zero completed chains'
+);
 
 const transformConstrainedOptions: StrettoSearchOptions = {
   ...options,
