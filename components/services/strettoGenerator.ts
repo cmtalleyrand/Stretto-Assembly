@@ -1706,9 +1706,21 @@ export async function searchStrettoChains(
     // Numeric window-transition index is precomputed once so expandNode never rebuilds it.
     const validPairsList = precomputeIndex.getValidPairs();
 
+    // Extended-delay pairs (d > 2/3 Sb, added by validPairwiseDelays) are needed for the A→C
+    // pairwise lookup (getPairRecord) but must NOT drive p1/p2 triplet enumeration — they
+    // represent cumulative offsets, not individual chain delays, and would violate A.6.
+    // Pre-filter to adjacent-only for the O(N²) triplet loops; this restores pre-extension perf.
+    const adjacentValidPairsList = validPairsList.filter(p => p.d <= maxAdjacentDelayTicks);
+    const adjacentNextPairsByVariant = new Map<number, PairTuple[]>();
+    for (const p of adjacentValidPairsList) {
+        let list = adjacentNextPairsByVariant.get(p.vA);
+        if (!list) { list = []; adjacentNextPairsByVariant.set(p.vA, list); }
+        list.push(p);
+    }
+
     let tripletEnumerationTotalUnits = 0;
-    for (const p1 of validPairsList) {
-        tripletEnumerationTotalUnits += precomputeIndex.getPairsByFirstVariant(p1.vB).length;
+    for (const p1 of adjacentValidPairsList) {
+        tripletEnumerationTotalUnits += (adjacentNextPairsByVariant.get(p1.vB) ?? []).length;
     }
     const tripletRecordIndexingTotalUnits = tripletEnumerationTotalUnits;
     const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
@@ -1717,12 +1729,22 @@ export async function searchStrettoChains(
 
     const validTripletDelayAs = [0, ...validAdjacentDelays];
 
-    for (const p1 of validPairsList) {
+    for (const p1 of adjacentValidPairsList) {
         if (terminationReason) break;
         const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
 
-        const nextPairs = precomputeIndex.getPairsByFirstVariant(p1.vB);
+        // A.7 on the A→B edge is invariant across all p2 — check once in the outer loop
+        // to skip the entire inner loop when it fails (~29% of pairs).
+        if (!pairAB.meetsAdjacentTranspositionSeparation) continue;
+
+        const d1 = p1.d;
+        const vA = p1.vA;
+        const vB = p1.vB;
+        const vAVariant = variants[vA];
+        const vBVariant = variants[vB];
+
+        const nextPairs = adjacentNextPairsByVariant.get(p1.vB) ?? [];
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
             tripletCompletedUnits++;
@@ -1734,26 +1756,15 @@ export async function searchStrettoChains(
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
                 if (checkLimits()) break;
             }
-            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
-            if (!pairBC) continue;
 
-            const d1 = p1.d;
+            // All cheap checks before the pairBC index lookup:
             const d2 = p2.d;
-            const vA = p1.vA;
-            const vB = p1.vB;
             const vC = p2.vB;
-            const vAVariant = variants[vA];
-            const vBVariant = variants[vB];
             const vCVariant = variants[vC];
 
             // A.10: no truncated entries at delay >= 0.5*Sb
-            // vB (= p1.vB = p2.vA) enters at delay d1; vC enters at delay d2
             if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) continue;
             if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) continue;
-
-            // A.7: Adjacent transposition separation >= 5 semitones (both edges)
-            if (!pairAB.meetsAdjacentTranspositionSeparation) continue;
-            if (!pairBC.meetsAdjacentTranspositionSeparation) continue;
 
             // A.8: Transform-following — transformed entry must be followed by normal
             const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
@@ -1762,9 +1773,21 @@ export async function searchStrettoChains(
             if (aTransformed && bTransformed) continue;
             if (bTransformed && cTransformed) continue;
 
-            // Rule: Max Expansion (using ticks, assuming step size)
+            // Max expansion
             if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
-            
+
+            // A.2, A.5, A.4 on the d1→d2 edge — independent of dCtx
+            if (!satisfiesHalfLengthTrigger(d1, d2)) continue;
+            if (!satisfiesMaximumContractionBound(d1, d2)) continue;
+            if (!satisfiesPostTruncationContraction(vB, d1, d2)) continue;
+
+            // Fetch pairBC only after all cheap checks have passed
+            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
+            if (!pairBC) continue;
+
+            // A.7 on B→C edge (needs pairBC)
+            if (!pairBC.meetsAdjacentTranspositionSeparation) continue;
+
             // Rule: Pair A->C compatibility (if overlapping)
             const dAC = d1 + d2;
             const tAC = p1.t + p2.t;
@@ -1830,18 +1853,8 @@ export async function searchStrettoChains(
                     if (!satisfiesHalfLengthTrigger(dCtx, d1)) continue;
                     if (!satisfiesMaximumContractionBound(dCtx, d1)) continue;
                     if (!satisfiesPostTruncationContraction(vA, dCtx, d1)) continue;
+                    if (!satisfiesExpansionRecoil(dCtx, d1, d2)) continue;
                 }
-                if (!satisfiesHalfLengthTrigger(d1, d2)) continue;
-
-                // A.5 on both adjacent edges.
-                if (!satisfiesMaximumContractionBound(d1, d2)) continue;
-
-                // A.4 on both adjacent edges.
-                if (!satisfiesPostTruncationContraction(vB, d1, d2)) continue;
-
-                // dCtx = 0 does not represent a musical predecessor; skip three-delay
-                // recoil at the chain start, but enforce it for all real windows.
-                if (dCtx !== 0 && !satisfiesExpansionRecoil(dCtx, d1, d2)) continue;
 
                 tripletHasValidDelayContext = true;
 
@@ -1878,11 +1891,11 @@ export async function searchStrettoChains(
 
     const allTripletRecords: TripletRecord[] = [];
 
-    for (const p1 of validPairsList) {
+    for (const p1 of adjacentValidPairsList) {
         if (terminationReason) break;
         const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
-        const nextPairsForIdx = precomputeIndex.getPairsByFirstVariant(p1.vB);
+        const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
         for (const p2 of nextPairsForIdx) {
             tripletCompletedUnits++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
