@@ -564,13 +564,13 @@ export interface StrettoSearchReport {
         metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
         coverage?: {
-            nodeBudgetUsedPercent: number;
+            nodeBudgetUsedPercent: number | null;
             maxFrontierSize: number;
             maxFrontierClassCount: number;
             edgesTraversed: number;
             frontierSizeAtTermination: number;
             frontierClassesAtTermination: number;
-            completionRatioLowerBound?: number;
+            completionRatioLowerBound?: number | null;
         };
         stageStats?: {
             validDelayCount: number;

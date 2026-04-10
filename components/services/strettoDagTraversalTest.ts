@@ -584,6 +584,28 @@ for (const fixture of traversalFixtures) {
   const signatures = normalizeChainSignatureSet(report);
   const nodes = report.stats.nodesVisited;
   const edges = report.stats.coverage?.edgesTraversed ?? report.stats.edgesTraversed ?? 0;
+  const coverage = report.stats.coverage;
+  if (coverage) {
+    assert.equal(
+      coverage.nodeBudgetUsedPercent,
+      null,
+      `[${fixture.name}] node-budget coverage must be null when traversal is time-budgeted only`
+    );
+    const isMathematicallyExhaustive = report.stats.stopReason === 'Exhausted' && coverage.frontierSizeAtTermination === 0;
+    if (isMathematicallyExhaustive) {
+      assert.equal(
+        coverage.completionRatioLowerBound,
+        100,
+        `[${fixture.name}] completion lower bound must be 100% only for mathematically exhaustive termination`
+      );
+    } else {
+      assert.equal(
+        coverage.completionRatioLowerBound,
+        null,
+        `[${fixture.name}] completion lower bound must be null unless mathematical exhaustiveness is proven`
+      );
+    }
+  }
 
   console.log(
     `[traversal:${fixture.name}] stopReason=${report.stats.stopReason} ` +

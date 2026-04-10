@@ -95,7 +95,17 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
   signals.push(`Global-lineage rejects: ${stageStats.globalLineageStageRejected}. Structural scans: ${stageStats.structuralScanInvocations.toLocaleString()}. DAG merges: ${stageStats.deterministicDagMergedNodes.toLocaleString()}.`);
 
   if (coverage) {
-    signals.push(`Coverage: nodeBudget=${coverage.nodeBudgetUsedPercent}% maxFrontier=${coverage.maxFrontierSize.toLocaleString()} classes=${coverage.maxFrontierClassCount.toLocaleString()} terminationFrontier=${coverage.frontierSizeAtTermination.toLocaleString()} (${coverage.frontierClassesAtTermination.toLocaleString()} classes).`);
+    const coverageTerms: string[] = [];
+    if (typeof coverage.nodeBudgetUsedPercent === 'number') {
+      coverageTerms.push(`nodeBudget=${coverage.nodeBudgetUsedPercent}%`);
+    }
+    if (typeof coverage.completionRatioLowerBound === 'number') {
+      coverageTerms.push(`completionLowerBound=${coverage.completionRatioLowerBound}%`);
+    }
+    coverageTerms.push(`maxFrontier=${coverage.maxFrontierSize.toLocaleString()}`);
+    coverageTerms.push(`classes=${coverage.maxFrontierClassCount.toLocaleString()}`);
+    coverageTerms.push(`terminationFrontier=${coverage.frontierSizeAtTermination.toLocaleString()} (${coverage.frontierClassesAtTermination.toLocaleString()} classes)`);
+    signals.push(`Coverage: ${coverageTerms.join(' ')}.`);
   }
 
   return {
