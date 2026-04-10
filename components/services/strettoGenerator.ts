@@ -158,6 +158,10 @@ export interface StrettoSearchProgressUpdate {
         chainsFound: number;
         maxDepthReached: number;
         targetChainLength: number;
+        pairwiseOperationsProcessed: number;
+        tripletOperationsProcessed: number;
+        dagNodesExpanded: number;
+        dagEdgesEvaluated: number;
     };
 }
 
@@ -1300,7 +1304,11 @@ export async function searchStrettoChains(
                 validTriplets: stageStats.harmonicallyValidTriples,
                 chainsFound: fullChainsFound,
                 maxDepthReached: maxDepth,
-                targetChainLength: options.targetChainLength
+                targetChainLength: options.targetChainLength,
+                pairwiseOperationsProcessed: stageStats.pairwiseTotal,
+                tripletOperationsProcessed: stageStats.tripleCandidates,
+                dagNodesExpanded: nodesVisited,
+                dagEdgesEvaluated: edgesTraversed
             }
         });
     };

@@ -11,7 +11,17 @@ const pairwiseStart: SearchProgressState = {
     completedUnits: 100,
     totalUnits: 1000,
     terminal: false,
-    telemetry: { validPairs: 0, validTriplets: 0, chainsFound: 0, maxDepthReached: 1, targetChainLength: 8 },
+    telemetry: {
+        validPairs: 0,
+        validTriplets: 0,
+        chainsFound: 0,
+        maxDepthReached: 1,
+        targetChainLength: 8,
+        pairwiseOperationsProcessed: 100,
+        tripletOperationsProcessed: 0,
+        dagNodesExpanded: 0,
+        dagEdgesEvaluated: 0
+    },
     heartbeat: false
 };
 
@@ -19,7 +29,7 @@ const accumulatorAfterPairwiseStart = nextSearchProgressAccumulator(pairwiseStar
 const pairwiseDisplay = computeSearchProgressDisplay(pairwiseStart, accumulatorAfterPairwiseStart);
 assert.equal(pairwiseDisplay.stageEstimatePercent, 10, 'Pairwise stage estimate should be unit-complete ratio.');
 assert.equal(pairwiseDisplay.phaseLabel, 'Phase 1 / 3', 'Pairwise stage should map to phase 1.');
-assert.match(pairwiseDisplay.throughputLabel, /Rate warming up|Rate \d+\.\d units\/s/, 'Pairwise throughput label should be populated.');
+assert.match(pairwiseDisplay.throughputLabel, /Rate warming up|Rate \d+\.\d combinations\/s/, 'Pairwise throughput label should be populated.');
 
 const pairwiseAdvance: SearchProgressState = {
     ...pairwiseStart,
@@ -29,7 +39,7 @@ const pairwiseAdvance: SearchProgressState = {
 const accumulatorAfterPairwiseAdvance = nextSearchProgressAccumulator(pairwiseAdvance, accumulatorAfterPairwiseStart);
 const pairwiseAdvanceDisplay = computeSearchProgressDisplay(pairwiseAdvance, accumulatorAfterPairwiseAdvance);
 assert.equal(pairwiseAdvanceDisplay.stageEstimatePercent, 70, 'Pairwise stage estimate should track bounded completion.');
-assert.match(pairwiseAdvanceDisplay.throughputLabel, /Rate \d+\.\d units\/s/, 'Throughput should become numeric after stage advances.');
+assert.match(pairwiseAdvanceDisplay.throughputLabel, /Rate \d+\.\d combinations\/s/, 'Throughput should become numeric after stage advances.');
 assert.equal(pairwiseAdvanceDisplay.overallEstimatePercent, 23, 'Overall estimate should use equal phase partitioning.');
 
 const tripletStart: SearchProgressState = {
@@ -38,7 +48,17 @@ const tripletStart: SearchProgressState = {
     completedUnits: 0,
     totalUnits: 500,
     terminal: false,
-    telemetry: { validPairs: 600, validTriplets: 0, chainsFound: 0, maxDepthReached: 3, targetChainLength: 8 },
+    telemetry: {
+        validPairs: 600,
+        validTriplets: 0,
+        chainsFound: 0,
+        maxDepthReached: 3,
+        targetChainLength: 8,
+        pairwiseOperationsProcessed: 700,
+        tripletOperationsProcessed: 0,
+        dagNodesExpanded: 0,
+        dagEdgesEvaluated: 0
+    },
     heartbeat: false
 };
 const accumulatorAfterTripletTransition = nextSearchProgressAccumulator(tripletStart, accumulatorAfterPairwiseAdvance);
@@ -65,7 +85,17 @@ const dagNonTerminal: SearchProgressState = {
     completedUnits: 100,
     totalUnits: 100,
     terminal: false,
-    telemetry: { validPairs: 600, validTriplets: 200, chainsFound: 10, maxDepthReached: 7, targetChainLength: 8 },
+    telemetry: {
+        validPairs: 600,
+        validTriplets: 200,
+        chainsFound: 10,
+        maxDepthReached: 7,
+        targetChainLength: 8,
+        pairwiseOperationsProcessed: 700,
+        tripletOperationsProcessed: 4500,
+        dagNodesExpanded: 1200,
+        dagEdgesEvaluated: 8400
+    },
     heartbeat: false
 };
 const dagNonTerminalDisplay = computeSearchProgressDisplay(dagNonTerminal, nextSearchProgressAccumulator(dagNonTerminal, accumulatorAfterTripletTransition));

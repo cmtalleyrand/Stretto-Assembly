@@ -12,6 +12,10 @@ export interface SearchProgressState {
         chainsFound: number;
         maxDepthReached: number;
         targetChainLength: number;
+        pairwiseOperationsProcessed: number;
+        tripletOperationsProcessed: number;
+        dagNodesExpanded: number;
+        dagEdgesEvaluated: number;
     };
     heartbeat: boolean;
 }
@@ -25,6 +29,7 @@ export interface SearchProgressAccumulator {
 export interface SearchProgressDisplay {
     stageLabel: string;
     stageEstimatePercent: number;
+    stagePercent: number;
     overallEstimatePercent: number;
     unitLabel: string;
     phaseLabel: string;
@@ -74,6 +79,7 @@ export function computeSearchProgressDisplay(
         return {
             stageLabel: 'Initializing search worker',
             stageEstimatePercent: 0,
+            stagePercent: 0,
             overallEstimatePercent: 0,
             unitLabel: '0 / 1',
             phaseLabel: 'Phase 0 / 3',
@@ -112,10 +118,11 @@ export function computeSearchProgressDisplay(
     return {
         stageLabel: progress.heartbeat ? 'Search active (collecting stage metrics)' : STAGE_LABELS[progress.stage],
         stageEstimatePercent,
+        stagePercent: stageEstimatePercent,
         overallEstimatePercent,
         unitLabel: `${boundedCompleted.toLocaleString()} / ${boundedTotal.toLocaleString()}`,
         phaseLabel: `Phase ${safePhaseIndex + 1} / ${STAGE_ORDER.length}`,
-        throughputLabel: stageRateUnitsPerSecond > 0 ? `Rate ${stageRateUnitsPerSecond.toFixed(1)} units/s` : 'Rate warming up',
+        throughputLabel: stageRateUnitsPerSecond > 0 ? `Rate ${stageRateUnitsPerSecond.toFixed(1)} combinations/s` : 'Rate warming up',
         etaLabel: `ETA ${formatSeconds(etaSeconds)}`,
         stars: '★'.repeat(filledStars).padEnd(10, '☆'),
         isHeartbeat: progress.heartbeat,

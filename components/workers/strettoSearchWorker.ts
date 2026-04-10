@@ -21,6 +21,10 @@ interface StrettoSearchWorkerProgress {
     chainsFound: number;
     maxDepthReached: number;
     targetChainLength: number;
+    pairwiseOperationsProcessed: number;
+    tripletOperationsProcessed: number;
+    dagNodesExpanded: number;
+    dagEdgesEvaluated: number;
   };
   heartbeat: boolean;
   progressPercent: number;
@@ -95,7 +99,11 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
           validTriplets: 0,
           chainsFound: 0,
           maxDepthReached: 0,
-          targetChainLength: options.targetChainLength
+          targetChainLength: options.targetChainLength,
+          pairwiseOperationsProcessed: 0,
+          tripletOperationsProcessed: 0,
+          dagNodesExpanded: 0,
+          dagEdgesEvaluated: 0
         },
         heartbeat: true,
         progressPercent: boundedPercent,

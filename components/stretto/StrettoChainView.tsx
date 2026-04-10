@@ -27,6 +27,10 @@ interface StrettoChainViewProps {
             chainsFound: number;
             maxDepthReached: number;
             targetChainLength: number;
+            pairwiseOperationsProcessed: number;
+            tripletOperationsProcessed: number;
+            dagNodesExpanded: number;
+            dagEdgesEvaluated: number;
         };
         heartbeat: boolean;
     } | null;
