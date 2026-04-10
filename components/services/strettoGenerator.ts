@@ -2863,6 +2863,13 @@ export async function searchStrettoChains(
                                             nodesVisited++;
                                             maxDepth = Math.max(maxDepth, succ.chain.length);
                                             emitDagProgress();
+                                            if (succ.chain.length === options.targetChainLength) {
+                                                // Record full-depth chains immediately on generation so a
+                                                // subsequent timeout check cannot drop a completed candidate
+                                                // that has already satisfied all structural constraints.
+                                                recordCompletedChain(succ.chain, succ.variantIndices);
+                                                continue;
+                                            }
                                             if (succ.chain.length >= 3) {
                                                 recordDeferredPartial(succ.chain, succ.variantIndices);
                                             }
