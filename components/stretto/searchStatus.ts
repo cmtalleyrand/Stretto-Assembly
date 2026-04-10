@@ -7,6 +7,15 @@ export interface SearchStatusPresentation {
   progressPercent: number;
 }
 
+export interface SearchRuntimePresentation {
+  algorithmPhase: string;
+  phaseDetail: string;
+  elapsedMs: number;
+  budgetMs: number;
+  elapsedPercent: number;
+  estimatedRemainingMs: number;
+}
+
 export interface SearchDiagnosticsPresentation {
   summary: string;
   constraintSignals: string[];
@@ -19,6 +28,47 @@ function clampPercent(value: number): number {
 function asPercent(numerator: number, denominator: number): number {
   if (denominator <= 0) return 0;
   return clampPercent((numerator / denominator) * 100);
+}
+
+function pickSearchPhase(elapsedPercent: number): Pick<SearchRuntimePresentation, 'algorithmPhase' | 'phaseDetail'> {
+  if (elapsedPercent < 20) {
+    return {
+      algorithmPhase: 'Pairwise Compatibility Precompute',
+      phaseDetail: 'Enumerating admissible delay/transposition pair relations.'
+    };
+  }
+  if (elapsedPercent < 45) {
+    return {
+      algorithmPhase: 'Triplet Gate Construction',
+      phaseDetail: 'Filtering triads with pairwise, lower-bound, and contrapuntal constraints.'
+    };
+  }
+  if (elapsedPercent < 85) {
+    return {
+      algorithmPhase: 'Deterministic DAG Expansion',
+      phaseDetail: 'Traversing chain-state frontier under lineage and interval policies.'
+    };
+  }
+  return {
+    algorithmPhase: 'Terminal Scoring & Selection',
+    phaseDetail: 'Ranking surviving chains and emitting top-K candidates.'
+  };
+}
+
+export function deriveSearchRuntimePresentation(elapsedMs: number, budgetMs: number): SearchRuntimePresentation {
+  const safeBudgetMs = Math.max(1, Math.floor(budgetMs));
+  const safeElapsedMs = Math.max(0, Math.floor(elapsedMs));
+  const elapsedPercent = clampPercent((safeElapsedMs / safeBudgetMs) * 100);
+  const estimatedRemainingMs = Math.max(0, safeBudgetMs - safeElapsedMs);
+  const phase = pickSearchPhase(elapsedPercent);
+  return {
+    algorithmPhase: phase.algorithmPhase,
+    phaseDetail: phase.phaseDetail,
+    elapsedMs: safeElapsedMs,
+    budgetMs: safeBudgetMs,
+    elapsedPercent,
+    estimatedRemainingMs
+  };
 }
 
 export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport): SearchDiagnosticsPresentation {

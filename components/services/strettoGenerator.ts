@@ -1814,21 +1814,21 @@ export async function searchStrettoChains(
             }
 
             let tripletHasValidDelayContext = false;
-            for (const d0 of validTripletDelayAs) {
+            for (const dCtx of validTripletDelayAs) {
                 operationCounter++;
                 if (shouldYieldToEventLoop(operationCounter)) {
                     await new Promise<void>((resolve) => setTimeout(resolve, 0));
                 }
 
-                // A.1 local: pairwise high-delay uniqueness across (d_A, d_B, d_C)
-                if (!hasPairwiseHighDelayUniqueness(d0, d1, d2)) continue;
+                // A.1 local: pairwise high-delay uniqueness across (dCtx, d1, d2)
+                if (!hasPairwiseHighDelayUniqueness(dCtx, d1, d2)) continue;
 
-                // Sentinel d_0 = 0 is non-musical for pairwise edge rules at chain start.
-                // Apply A.3 with d_0 = 0, but skip A.2/A.4/A.5 on the synthetic 0→d_1 edge.
-                if (d0 !== 0) {
-                    if (!satisfiesHalfLengthTrigger(d0, d1)) continue;
-                    if (!satisfiesMaximumContractionBound(d0, d1)) continue;
-                    if (!satisfiesPostTruncationContraction(vA, d0, d1)) continue;
+                // dCtx = 0 is the sentinel for the chain start (no real predecessor before e0).
+                // Apply A.3 with dCtx = 0, but skip A.2/A.4/A.5 on the synthetic 0→d_1 edge.
+                if (dCtx !== 0) {
+                    if (!satisfiesHalfLengthTrigger(dCtx, d1)) continue;
+                    if (!satisfiesMaximumContractionBound(dCtx, d1)) continue;
+                    if (!satisfiesPostTruncationContraction(vA, dCtx, d1)) continue;
                 }
                 if (!satisfiesHalfLengthTrigger(d1, d2)) continue;
 
@@ -1838,9 +1838,9 @@ export async function searchStrettoChains(
                 // A.4 on both adjacent edges.
                 if (!satisfiesPostTruncationContraction(vB, d1, d2)) continue;
 
-                // The sentinel d_0 = 0 does not represent a musical predecessor; skip
-                // three-delay recoil at the chain start, but enforce it for all real windows.
-                if (d0 !== 0 && !satisfiesExpansionRecoil(d0, d1, d2)) continue;
+                // dCtx = 0 does not represent a musical predecessor; skip three-delay
+                // recoil at the chain start, but enforce it for all real windows.
+                if (dCtx !== 0 && !satisfiesExpansionRecoil(dCtx, d1, d2)) continue;
 
                 tripletHasValidDelayContext = true;
 
@@ -1852,7 +1852,7 @@ export async function searchStrettoChains(
                     isRestrictedInterval: pairBC.isRestrictedInterval,
                     isFreeInterval: pairBC.isFreeInterval
                 };
-                precomputeIndex.appendWindowTransition(vA, vB, d0, d1, p1.t, nextTransition);
+                precomputeIndex.appendWindowTransition(vA, vB, dCtx, d1, p1.t, nextTransition);
             }
 
             if (tripletHasValidDelayContext) {
@@ -1863,13 +1863,12 @@ export async function searchStrettoChains(
 
     stageStats.harmonicallyValidTriples = precomputeIndex.getTripletShapeCount();
 
-    // --- Triplet suffix/prefix index for triplet-join Phase A ---
-    // Each TripletRecord captures a valid triplet with its pairwise records for
-    // cross-triplet dissonance union checks. Indexed by suffix (last two entries)
-    // and prefix (first two entries) for efficient joining of overlapping windows.
+    // --- Triplet records for triplet-join Phase A ---
+    // Each TripletRecord captures a valid (A,B,C) triplet with its pairwise records
+    // for cross-triplet dissonance union checks during seed extension.
     interface TripletRecord {
         vA: number; vB: number; vC: number;
-        d0: number; d1: number; d2: number;
+        d1: number; d2: number; // delays: d1 = A→B, d2 = B→C (spec: d_i = delay of entry i rel. to i-1)
         tAB: number; tBC: number;
         pairAB: PairwiseCompatibilityRecord;
         pairBC: PairwiseCompatibilityRecord;
@@ -1898,7 +1897,7 @@ export async function searchStrettoChains(
 
             const rec: TripletRecord = {
                 vA: p1.vA, vB: p1.vB, vC: p2.vB,
-                d0: 0, d1: p1.d, d2: p2.d,
+                d1: p1.d, d2: p2.d,
                 tAB: p1.t, tBC: p2.t,
                 pairAB, pairBC, pairAC
             };
@@ -2641,26 +2640,17 @@ export async function searchStrettoChains(
             return results;
         }
 
-        // --- Seed: iterate firstDelay × e1 transposition × triplet ---
-        // The triplet stores edge deltas:
-        //   tAB = t(e2) - t(e1)
-        //   tBC = t(e3) - t(e2)
-        // where t(eX) is the absolute entry transposition in semitones.
-        // Therefore we enumerate absolute tE1 first, then derive:
-        //   tE2 = tE1 + tAB
-        //   tE3 = tE2 + tBC
+        // --- Seed: iterate firstDelay × e1 transposition × window transitions ---
+        // tAB/tBC in TripletRecord are RELATIVE transposition deltas, so we enumerate
+        // absolute tE1 first, then derive tE2 = tE1 + tAB, tE3 = tE2 + tBC.
         const minFirstDelay = Math.ceil(halfSubjectTicks / delayStep) * delayStep;
         const maxFirstDelay = Math.floor(subjectLengthTicks * (2 / 3) / delayStep) * delayStep;
-        const tripletsByVAAndDelayAB = new Map<number, Map<number, typeof allTripletRecords>>();
+        const tripletsByVA = new Map<number, typeof allTripletRecords>();
         for (const tripletRecord of allTripletRecords) {
-            if (!tripletsByVAAndDelayAB.has(tripletRecord.vA)) {
-                tripletsByVAAndDelayAB.set(tripletRecord.vA, new Map<number, typeof allTripletRecords>());
+            if (!tripletsByVA.has(tripletRecord.vA)) {
+                tripletsByVA.set(tripletRecord.vA, []);
             }
-            const byDelay = tripletsByVAAndDelayAB.get(tripletRecord.vA)!;
-            if (!byDelay.has(tripletRecord.d1)) {
-                byDelay.set(tripletRecord.d1, []);
-            }
-            byDelay.get(tripletRecord.d1)!.push(tripletRecord);
+            tripletsByVA.get(tripletRecord.vA)!.push(tripletRecord);
         }
 
         for (let firstDelay = minFirstDelay; firstDelay <= maxFirstDelay; firstDelay += delayStep) {
@@ -2690,219 +2680,189 @@ export async function searchStrettoChains(
                     const firstWindowTransitions = precomputeIndex.getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
                     if (!firstWindowTransitions || firstWindowTransitions.size === 0) continue;
 
-                    // Iterate triplets starting with vA.
-                    // This is precomputation (analogous to Stage 2/3), not chain-state expansion,
-                    // so only operationCounter is incremented (for event-loop yield), not nodesVisited.
-                    const tripletsForVAByDelay = tripletsByVAAndDelayAB.get(vA);
-                    if (!tripletsForVAByDelay || tripletsForVAByDelay.size === 0) continue;
-                    const minDelayAB = Math.ceil((firstDelay - oneQuarterSubjectTicks) / delayStep) * delayStep;
-                    const maxDelayAB = Math.floor((firstDelay + oneQuarterSubjectTicks) / delayStep) * delayStep;
-                    for (let candidateDelayAB = minDelayAB; candidateDelayAB <= maxDelayAB; candidateDelayAB += delayStep) {
-                        const tripletsAtDelayAB = tripletsForVAByDelay.get(candidateDelayAB);
-                        if (!tripletsAtDelayAB || tripletsAtDelayAB.length === 0) continue;
-                        for (const triplet of tripletsAtDelayAB) {
+                    const tripletsForVA = tripletsByVA.get(vA) ?? [];
+                    if (tripletsForVA.length === 0) continue;
+                    for (const [delayAB, abTransitions] of firstWindowTransitions) {
+                        for (const transitionAB of abTransitions) {
                             operationCounter++;
                             if (shouldYieldToEventLoop(operationCounter)) {
                                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
                             }
                             if (checkLimits()) break;
 
-                        const { vB, vC, d1: delayAB, d2: delayBC, tAB: transpositionDeltaAB, tBC: transpositionDeltaBC } = triplet;
+                            const vB = transitionAB.nextVariantIndex;
+                            const tAB = transitionAB.transpositionDelta;
+                            const pairAB = transitionAB.pairRecord!;
+                            const tE2 = tE1 + tAB;
+                            if (!allowedTranspositions.has(tE2)) continue;
+                            if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
 
-                        // Re-validate first-window triplet lineage before seeding.
-                        // This preserves precompute-enforced constraints (including
-                        // first-window spacing checks) after direct seed construction.
-                        const firstWindowCandidates = firstWindowTransitions.get(delayAB);
-                        if (!firstWindowCandidates || firstWindowCandidates.length === 0) continue;
-                        let matchesFirstWindowLineage = false;
-                        for (const transition of firstWindowCandidates) {
-                            if (transition.nextVariantIndex === vB && transition.transpositionDelta === transpositionDeltaAB) {
-                                matchesFirstWindowLineage = true;
-                                break;
-                            }
-                        }
-                        if (!matchesFirstWindowLineage) continue;
+                            const secondWindowMap = precomputeIndex.getWindowTransitions(vA, vB, firstDelay, delayAB, tAB);
+                            if (!secondWindowMap || secondWindowMap.size === 0) continue;
 
-                        // A.5 Maximum contraction: |firstDelay - delayAB| <= Sb/4
-                        // (use the in-scope constant oneQuarterSubjectTicks for quarter-length bounds)
-                        if (firstDelay - delayAB > oneQuarterSubjectTicks) continue;
-                        if (delayAB - firstDelay > oneQuarterSubjectTicks) continue;
+                            const varA = variants[vA];
+                            const varB = variants[vB];
+                            if (tE1 === 0) continue;
+                            const e1Start_pre = firstDelay;
+                            const e2Start_pre = firstDelay + delayAB;
+                            if (tE2 === 0 && e2Start_pre < subjectLengthTicks) continue;
+                            if (tE2 === tE1 && e2Start_pre < e1Start_pre + varA.lengthTicks) continue;
 
-                        // A.2 Half-length contraction (OR form)
-                        if ((firstDelay >= halfSubjectTicks || delayAB >= halfSubjectTicks) && delayAB >= firstDelay) continue;
+                            for (const [delayBC, bcTransitions] of secondWindowMap) {
+                                for (const transitionBC of bcTransitions) {
+                                    operationCounter++;
+                                    if (shouldYieldToEventLoop(operationCounter)) {
+                                        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                                    }
+                                    if (checkLimits()) break;
 
-                        // A.1 Cross-boundary uniqueness (within-triplet d1≠d2 guaranteed by triplet precomp)
-                        if (firstDelay === delayAB || firstDelay === delayBC) continue;
+                                    if (firstDelay === delayBC) continue;
 
-                        // A.3 Expansion recoil: if delayAB > firstDelay, then delayBC < firstDelay - delayStep
-                        if (delayAB > firstDelay && delayBC >= firstDelay - delayStep) continue;
+                                    const vC = transitionBC.nextVariantIndex;
+                                    const tBC = transitionBC.transpositionDelta;
+                                    const pairBC = transitionBC.pairRecord!;
+                                    const tE3 = tE2 + tBC;
+                                    if (!allowedTranspositions.has(tE3)) continue;
+                                    if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
 
-                        // Derive absolute transpositions for e2 and e3
-                        const tE2 = tE1 + transpositionDeltaAB;
-                        const tE3 = tE2 + transpositionDeltaBC;
-                        if (!allowedTranspositions.has(tE2) || !allowedTranspositions.has(tE3)) continue;
-                        if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
-                        if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
+                                    const varC = variants[vC];
+                                    const e3Start_pre = e2Start_pre + delayBC;
+                                    if (tE3 === 0 && e3Start_pre < subjectLengthTicks) continue;
+                                    if (tE3 === tE1 && e3Start_pre < e1Start_pre + varA.lengthTicks) continue;
+                                    if (tE3 === tE2 && e3Start_pre < e2Start_pre + varB.lengthTicks) continue;
 
-                        // C.3: No duplicate transpositions among active entries.
-                        const varA = variants[vA];
-                        const varB = variants[vB];
-                        const varC = variants[vC];
-                        // e0 (t=0) is always active at e1 start (firstDelay < Sb).
-                        // e1 (t=tE1) is active at e2 start if e1Start + lenA > e2Start.
-                        // e0 is active at e2 start if e2Start < Sb.
-                        // Similarly check e3.
-                        if (tE1 === 0) continue; // e1 same transposition as e0
-                        const e1Start_pre = firstDelay;
-                        const e2Start_pre = firstDelay + delayAB;
-                        const e3Start_pre = e2Start_pre + delayBC;
-                        // At e2 entry: check against active entries (e0, e1)
-                        {
-                            if (tE2 === 0 && e2Start_pre < subjectLengthTicks) continue; // e0 still active, same trans
-                            if (tE2 === tE1 && e2Start_pre < e1Start_pre + varA.lengthTicks) continue; // e1 still active, same trans
-                        }
-                        // At e3 entry: check against active entries (e0, e1, e2)
-                        {
-                            if (tE3 === 0 && e3Start_pre < subjectLengthTicks) continue;
-                            if (tE3 === tE1 && e3Start_pre < e1Start_pre + varA.lengthTicks) continue;
-                            if (tE3 === tE2 && e3Start_pre < e2Start_pre + varB.lengthTicks) continue;
-                        }
+                                    let nInv = 0, nTrunc = 0, nRestricted = 0, nFree = 1;
+                                    if (varA.type === 'I') nInv++;
+                                    if (varA.truncationBeats > 0) nTrunc++;
+                                    if (varB.type === 'I') nInv++;
+                                    if (varB.truncationBeats > 0) nTrunc++;
+                                    if (varC.type === 'I') nInv++;
+                                    if (varC.truncationBeats > 0) nTrunc++;
 
-                        // Quota checks
-                        let nInv = 0, nTrunc = 0, nRestricted = 0, nFree = 1;
-                        if (varA.type === 'I') nInv++;
-                        if (varA.truncationBeats > 0) nTrunc++;
-                        if (varB.type === 'I') nInv++;
-                        if (varB.truncationBeats > 0) nTrunc++;
-                        if (varC.type === 'I') nInv++;
-                        if (varC.truncationBeats > 0) nTrunc++;
+                                    if (e0e1Pair.isRestrictedInterval) nRestricted++;
+                                    if (e0e1Pair.isFreeInterval) nFree++;
+                                    if (pairAB.isRestrictedInterval) nRestricted++;
+                                    if (pairAB.isFreeInterval) nFree++;
+                                    if (pairBC.isRestrictedInterval) nRestricted++;
+                                    if (pairBC.isFreeInterval) nFree++;
 
-                        // Interval class quotas
-                        if (e0e1Pair.isRestrictedInterval) nRestricted++;
-                        if (e0e1Pair.isFreeInterval) nFree++;
-                        if (triplet.pairAB.isRestrictedInterval) nRestricted++;
-                        if (triplet.pairAB.isFreeInterval) nFree++;
-                        if (triplet.pairBC.isRestrictedInterval) nRestricted++;
-                        if (triplet.pairBC.isFreeInterval) nFree++;
+                                    if (nInv > 0 && !checkQuota(options.inversionMode, nInv - 1)) continue;
+                                    if (nTrunc > 0 && !checkQuota(options.truncationMode, nTrunc - 1)) continue;
+                                    if (nRestricted > 0 && !checkQuota(options.thirdSixthMode, nRestricted - 1)) continue;
+                                    if (nRestricted > 1 && nRestricted >= nFree) continue;
 
-                        if (nInv > 0 && !checkQuota(options.inversionMode, nInv - 1)) continue;
-                        if (nTrunc > 0 && !checkQuota(options.truncationMode, nTrunc - 1)) continue;
-                        if (nRestricted > 0 && !checkQuota(options.thirdSixthMode, nRestricted - 1)) continue;
-                        if (nRestricted > 1 && nRestricted >= nFree) continue;
+                                    const cumDelay_e0e2 = firstDelay + delayAB;
+                                    let e0e2Pair: PairwiseCompatibilityRecord | undefined;
+                                    if (cumDelay_e0e2 < subjectLengthTicks) {
+                                        e0e2Pair = precomputeIndex.getPairRecord(e0VarIdx, vB, cumDelay_e0e2, tE2);
+                                        if (!e0e2Pair) continue;
+                                    }
+                                    const cumDelay_e0e3 = cumDelay_e0e2 + delayBC;
+                                    let e0e3Pair: PairwiseCompatibilityRecord | undefined;
+                                    if (cumDelay_e0e3 < subjectLengthTicks) {
+                                        e0e3Pair = precomputeIndex.getPairRecord(e0VarIdx, vC, cumDelay_e0e3, tE3);
+                                        if (!e0e3Pair) continue;
+                                    }
 
-                        // e0 pairwise: check e0→e2 if overlapping
-                        const cumDelay_e0e2 = firstDelay + delayAB;
-                        let e0e2Pair: PairwiseCompatibilityRecord | undefined;
-                        if (cumDelay_e0e2 < subjectLengthTicks) {
-                            e0e2Pair = precomputeIndex.getPairRecord(e0VarIdx, vB, cumDelay_e0e2, tE2);
-                            if (!e0e2Pair) continue;
-                        }
-                        // e0→e3 if overlapping
-                        const cumDelay_e0e3 = cumDelay_e0e2 + delayBC;
-                        let e0e3Pair: PairwiseCompatibilityRecord | undefined;
-                        if (cumDelay_e0e3 < subjectLengthTicks) {
-                            e0e3Pair = precomputeIndex.getPairRecord(e0VarIdx, vC, cumDelay_e0e3, tE3);
-                            if (!e0e3Pair) continue;
-                        }
+                                    const dAC = delayAB + delayBC;
+                                    const tAC = tAB + tBC;
+                                    const pairAC = dAC < varA.lengthTicks ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
 
-                        const dAC = delayAB + delayBC;
-                        const tAC = transpositionDeltaAB + transpositionDeltaBC;
-                        const pairAC = dAC < varA.lengthTicks ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
+                                    const e0Start = 0;
+                                    const e1Start = firstDelay;
+                                    const e2Start = firstDelay + delayAB;
+                                    const e3Start = e2Start + delayBC;
 
-                        const e0Start = 0;
-                        const e1Start = firstDelay;
-                        const e2Start = firstDelay + delayAB;
-                        const e3Start = e2Start + delayBC;
+                                    const seedSpans: SimultaneitySpan[] = [
+                                        ...rebaseRunSpansToAbsolute(e0e1Pair.bassRoleDissonanceRunSpans.none, e0Start),
+                                        ...rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.none, e1Start),
+                                        ...rebaseRunSpansToAbsolute(pairBC.bassRoleDissonanceRunSpans.none, e2Start)
+                                    ];
+                                    if (pairAC) {
+                                        for (const s of rebaseRunSpansToAbsolute(pairAC.bassRoleDissonanceRunSpans.none, e1Start)) seedSpans.push(s);
+                                    }
+                                    if (e0e2Pair) {
+                                        for (const s of rebaseRunSpansToAbsolute(e0e2Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
+                                    }
+                                    if (e0e3Pair) {
+                                        for (const s of rebaseRunSpansToAbsolute(e0e3Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
+                                    }
+                                    if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
 
-                        const seedSpans: SimultaneitySpan[] = [
-                            ...rebaseRunSpansToAbsolute(e0e1Pair.bassRoleDissonanceRunSpans.none, e0Start),
-                            ...rebaseRunSpansToAbsolute(triplet.pairAB.bassRoleDissonanceRunSpans.none, e1Start),
-                            ...rebaseRunSpansToAbsolute(triplet.pairBC.bassRoleDissonanceRunSpans.none, e2Start)
-                        ];
-                        if (pairAC) {
-                            for (const s of rebaseRunSpansToAbsolute(pairAC.bassRoleDissonanceRunSpans.none, e1Start)) seedSpans.push(s);
-                        }
-                        if (e0e2Pair) {
-                            for (const s of rebaseRunSpansToAbsolute(e0e2Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
-                        }
-                        if (e0e3Pair) {
-                            for (const s of rebaseRunSpansToAbsolute(e0e3Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
-                        }
-                        if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
+                                    const seedChain: StrettoChainOption[] = [
+                                        e0Entry,
+                                        { startBeat: e1Start / ppq, transposition: tE1, type: varA.type, length: varA.lengthTicks, voiceIndex: 0 },
+                                        { startBeat: e2Start / ppq, transposition: tE2, type: varB.type, length: varB.lengthTicks, voiceIndex: 0 },
+                                        { startBeat: e3Start / ppq, transposition: tE3, type: varC.type, length: varC.lengthTicks, voiceIndex: 0 }
+                                    ];
 
-                        const seedChain: StrettoChainOption[] = [
-                            e0Entry,
-                            { startBeat: e1Start / ppq, transposition: tE1, type: varA.type, length: varA.lengthTicks, voiceIndex: 0 },
-                            { startBeat: e2Start / ppq, transposition: tE2, type: varB.type, length: varB.lengthTicks, voiceIndex: 0 },
-                            { startBeat: e3Start / ppq, transposition: tE3, type: varC.type, length: varC.lengthTicks, voiceIndex: 0 }
-                        ];
+                                    const seedNoteEvents = buildChainNoteEvents(seedChain.slice(0, 3), [e0VarIdx, vA, vB]);
+                                    const e3Probe = seedChain[3];
+                                    if (!checkMetricCompliance(varC, e3Probe, seedChain.slice(0, 3), variants, [e0VarIdx, vA, vB], ppq, offsetTicks, tsNum, tsDenom, seedNoteEvents)) continue;
 
-                        const seedNoteEvents = buildChainNoteEvents(seedChain.slice(0, 3), [e0VarIdx, vA, vB]);
-                        const e3Probe = seedChain[3];
-                        if (!checkMetricCompliance(varC, e3Probe, seedChain.slice(0, 3), variants, [e0VarIdx, vA, vB], ppq, offsetTicks, tsNum, tsDenom, seedNoteEvents)) continue;
+                                    maxDepth = Math.max(maxDepth, 4);
 
-                        maxDepth = Math.max(maxDepth, 4);
-                        emitDagProgress();
+                                    const usedDelays = new Set<number>([firstDelay, delayAB, delayBC]);
 
-                        const usedDelays = new Set<number>([firstDelay, delayAB, delayBC]);
+                                    const seedState: TripletJoinState = {
+                                        chain: seedChain,
+                                        variantIndices: [e0VarIdx, vA, vB, vC],
+                                        delays: [firstDelay, delayAB, delayBC],
+                                        transpositions: [0, tE1, tE2, tE3],
+                                        nInv, nTrunc, nRestricted, nFree,
+                                        usedLongDelays: usedDelays
+                                    };
 
-                        const seedState: TripletJoinState = {
-                            chain: seedChain,
-                            variantIndices: [e0VarIdx, vA, vB, vC],
-                            delays: [firstDelay, delayAB, delayBC],
-                            transpositions: [0, tE1, tE2, tE3],
-                            nInv, nTrunc, nRestricted, nFree,
-                            usedLongDelays: usedDelays
-                        };
+                                    recordDeferredPartial(seedState.chain, seedState.variantIndices);
 
-                        recordDeferredPartial(seedState.chain, seedState.variantIndices);
+                                    const extensionStack: TripletJoinState[] = [seedState];
+                                    while (extensionStack.length > 0) {
+                                        if (terminationReason) break;
+                                        operationCounter++;
+                                        if (shouldYieldToEventLoop(operationCounter)) {
+                                            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+                                        }
+                                        if (checkLimits()) break;
+                                        const current = extensionStack.pop()!;
+                                        const currentDepth = current.chain.length;
 
-                        const extensionStack: TripletJoinState[] = [seedState];
-                        while (extensionStack.length > 0) {
-                            if (terminationReason) break;
-                            operationCounter++;
-                            if (shouldYieldToEventLoop(operationCounter)) {
-                                await new Promise<void>((resolve) => setTimeout(resolve, 0));
-                            }
-                            if (checkLimits()) break;
-                            const current = extensionStack.pop()!;
-                            const currentDepth = current.chain.length;
+                                        if (currentDepth >= 7) {
+                                            const longDelaySig = Array.from(current.usedLongDelays).sort((a, b) => a - b).join(',');
+                                            const dagNode: DagNode = {
+                                                chain: current.chain,
+                                                variantIndices: current.variantIndices,
+                                                nInv: current.nInv,
+                                                nTrunc: current.nTrunc,
+                                                nRestricted: current.nRestricted,
+                                                nFree: current.nFree,
+                                                usedLongDelays: current.usedLongDelays,
+                                                longDelaySignature: longDelaySig
+                                            };
 
-                            if (currentDepth >= 7) {
-                                const longDelaySig = Array.from(current.usedLongDelays).sort((a, b) => a - b).join(',');
-                                const dagNode: DagNode = {
-                                    chain: current.chain,
-                                    variantIndices: current.variantIndices,
-                                    nInv: current.nInv,
-                                    nTrunc: current.nTrunc,
-                                    nRestricted: current.nRestricted,
-                                    nFree: current.nFree,
-                                    usedLongDelays: current.usedLongDelays,
-                                    longDelaySignature: longDelaySig
-                                };
+                                            if (currentDepth === options.targetChainLength) {
+                                                recordCompletedChain(dagNode.chain, dagNode.variantIndices);
+                                            } else {
+                                                recordDeferredPartial(dagNode.chain, dagNode.variantIndices);
+                                                dfsExtend(dagNode);
+                                            }
+                                            maxDepth = Math.max(maxDepth, currentDepth);
+                                            emitDagProgress();
+                                            continue;
+                                        }
 
-                                if (currentDepth === options.targetChainLength) {
-                                    recordCompletedChain(dagNode.chain, dagNode.variantIndices);
-                                } else {
-                                    recordDeferredPartial(dagNode.chain, dagNode.variantIndices);
-                                    dfsExtend(dagNode);
+                                        const successors = tripletJoinExtend(current);
+                                        for (const succ of successors) {
+                                            nodesVisited++;
+                                            maxDepth = Math.max(maxDepth, succ.chain.length);
+                                            emitDagProgress();
+                                            if (succ.chain.length >= 3) {
+                                                recordDeferredPartial(succ.chain, succ.variantIndices);
+                                            }
+                                            extensionStack.push(succ);
+                                        }
+                                    }
                                 }
-                                maxDepth = Math.max(maxDepth, currentDepth);
-                                emitDagProgress();
-                                continue;
                             }
-
-                            const successors = tripletJoinExtend(current);
-                            for (const succ of successors) {
-                                nodesVisited++;
-                                maxDepth = Math.max(maxDepth, succ.chain.length);
-                                emitDagProgress();
-                                if (succ.chain.length >= 3) {
-                                    recordDeferredPartial(succ.chain, succ.variantIndices);
-                                }
-                                extensionStack.push(succ);
-                            }
-                        }
                         }
                     }
                 } // end tE1 loop

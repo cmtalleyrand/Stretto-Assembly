@@ -7,7 +7,7 @@ import StrettoInspector from './StrettoInspector';
 import { DownloadIcon } from '../Icons';
 import { generatePolyphonicHarmonicRegions, getInvertedPitch } from '../services/strettoCore'; // Use centralized inversion
 import { getStrictPitchName } from '../services/midiSpelling';
-import { deriveSearchStatusPresentation } from './searchStatus';
+import { deriveSearchRuntimePresentation, deriveSearchStatusPresentation } from './searchStatus';
 import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRegions } from './harmonicRegionDiagnostics';
 
 interface StrettoChainViewProps {
@@ -51,6 +51,26 @@ export default function StrettoChainView({
     searchReport, masterTransposition, setMasterTransposition,
     subjectNotes
 }: StrettoChainViewProps) {
+    const [searchElapsedMs, setSearchElapsedMs] = React.useState(0);
+
+    React.useEffect(() => {
+        if (!isSearching) {
+            setSearchElapsedMs(0);
+            return;
+        }
+        const startedAt = Date.now();
+        setSearchElapsedMs(0);
+        const intervalId = window.setInterval(() => {
+            setSearchElapsedMs(Date.now() - startedAt);
+        }, 200);
+        return () => window.clearInterval(intervalId);
+    }, [isSearching]);
+
+    const runtimePresentation = React.useMemo(() => {
+        if (!isSearching) return null;
+        const configuredBudgetMs = Math.max(1, searchOptions.maxSearchTimeMs || 30000);
+        return deriveSearchRuntimePresentation(searchElapsedMs, configuredBudgetMs);
+    }, [isSearching, searchElapsedMs, searchOptions.maxSearchTimeMs]);
 
     // Re-implement candidate generation here to use the new Polyphonic Region Logic
     // instead of relying on the parent's potentially outdated logic
@@ -174,6 +194,23 @@ export default function StrettoChainView({
                             <strong>{searchStatus.heading}:</strong> {searchStatus.detail}
                             <div className="mt-1 text-[9px] text-gray-300">
                                 Progress {searchStatus.progressPercent}% · Target {searchOptions.targetChainLength} · Reached {searchReport?.stats.maxDepthReached ?? 0}
+                            </div>
+                        </div>
+                    )}
+                    {runtimePresentation && (
+                        <div className="border-b border-cyan-800/60 bg-cyan-950/20 p-2 text-[10px] text-cyan-100">
+                            <div>
+                                <strong>Live Search Telemetry:</strong> {runtimePresentation.algorithmPhase}
+                            </div>
+                            <div className="text-[9px] text-cyan-200 mt-0.5">{runtimePresentation.phaseDetail}</div>
+                            <div className="mt-1 h-1.5 w-full rounded bg-cyan-900/60">
+                                <div
+                                    className="h-1.5 rounded bg-cyan-400 transition-all"
+                                    style={{ width: `${runtimePresentation.elapsedPercent}%` }}
+                                />
+                            </div>
+                            <div className="mt-1 text-[9px] text-cyan-200">
+                                Time budget usage {runtimePresentation.elapsedPercent}% · Elapsed {runtimePresentation.elapsedMs}ms · Estimated remaining {runtimePresentation.estimatedRemainingMs}ms
                             </div>
                         </div>
                     )}
