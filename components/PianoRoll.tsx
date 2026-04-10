@@ -73,9 +73,8 @@ const PianoRoll: React.FC<PianoRollProps> = ({ trackData, onRegionClick }) => {
     }
   };
 
+  const totalTicks = Math.max(...notes.map(n => n.ticks + n.durationTicks), ppq * 4 * timeSignature.numerator);
   const ticksPerMeasure = ppq * timeSignature.numerator * (4 / timeSignature.denominator);
-  const minimumDisplayTicks = ticksPerMeasure * 4;
-  const totalTicks = Math.max(...notes.map(n => n.ticks + n.durationTicks), minimumDisplayTicks);
   const totalMeasures = Math.ceil(totalTicks / ticksPerMeasure) + 1; 
   
   const BASE_TICK_WIDTH = 0.15; 

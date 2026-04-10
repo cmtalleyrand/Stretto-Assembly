@@ -2,7 +2,6 @@ import { useCallback, Dispatch, SetStateAction } from 'react';
 import { AppState, ConversionOptions, TrackInfo, MidiEventCounts, MidiEventType, TrackAnalysisData } from '../types';
 import { parseMidiFromFile, generateGeminiScore, createPreviewMidi, getTransformedTrackDataForPianoRoll, analyzeTrack, playTrack, stopPlayback } from '../components/services/midiService';
 import { Midi } from '@tonejs/midi';
-import { resolveMidiTimeSignatureAtTick } from '../components/services/midiTimeSignature';
 
 interface UseMidiActionsProps {
     midiData: Midi | null;
@@ -66,7 +65,7 @@ export const useMidiActions = ({
             setFileName(file.name);
 
             const tempo = midi.header.tempos[0]?.bpm || 120;
-            const tsData = resolveMidiTimeSignatureAtTick(midi.header.timeSignatures, 0);
+            const tsData = midi.header.timeSignatures[0]?.timeSignature || [4, 4];
             const ts = { numerator: tsData[0], denominator: tsData[1] };
 
             setOriginalTempo(tempo);

@@ -83,24 +83,7 @@ The current implementation exposes legacy entry fields in `StrettoChainOption` (
 
 `transposition` is already semantically aligned with `t_i` and therefore requires no semantic remapping.
 
-## 5) Transposition notation used by triplet precomputation
-
-The canonical field remains the per-entry absolute transposition `t_i` (in semitones).  
-The generator also uses **edge deltas** inside triplet records for indexing:
-
-- `tAB := t_{i+1} - t_i`
-- `tBC := t_{i+2} - t_{i+1}`
-
-These are not alternative canonical fields; they are derived differences used for transition lookups and compact storage.
-
-Reconstruction identities used in seed construction:
-
-- given absolute `t_i`, recover `t_{i+1} = t_i + tAB`
-- then recover `t_{i+2} = t_{i+1} + tBC`
-
-Equivalent rearrangement (`tAB = t_{i+1} - t_i`) is mathematically identical and may be preferred when reasoning from absolutes back to deltas.
-
-## 6) Migration status (canonical vs compatibility mode)
+## 5) Migration status (canonical vs compatibility mode)
 
 Status labels:
 

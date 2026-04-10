@@ -18,7 +18,7 @@ export interface VoiceEvent {
 
 // --- Shared Inversion Logic ---
 
-function getScaleDegree(pitch: number, root: number, intervals: number[]): { octave: number, degree: number, chromaticOffset: number } | null {
+function getScaleDegree(pitch: number, root: number, intervals: number[]): { octave: number, degree: number } | null {
     const semitone = (pitch - root + 1200) % 12; 
     let bestDegree = -1;
     let minErr = 99;
@@ -30,9 +30,7 @@ function getScaleDegree(pitch: number, root: number, intervals: number[]): { oct
     
     const relPitch = pitch - root;
     const oct = Math.floor(relPitch / 12);
-    const basePitch = root + oct * 12 + intervals[bestDegree];
-    const chromaticOffset = pitch - basePitch;
-    return { octave: oct, degree: bestDegree, chromaticOffset };
+    return { octave: oct, degree: bestDegree };
 }
 
 function getPitchFromDegree(octave: number, degree: number, root: number, intervals: number[]): number {
@@ -77,9 +75,7 @@ export function getInvertedPitch(pitch: number, pivot: number, scaleRoot: number
     const invOct = Math.floor(invertedGlobalIndex / 7);
     const invDeg = (invertedGlobalIndex % 7 + 7) % 7;
     
-    const invertedBasePitch = getPitchFromDegree(invOct, invDeg, scaleRoot, intervals);
-    const mirroredChromaticOffset = 2 * pivotInfo.chromaticOffset - info.chromaticOffset;
-    return invertedBasePitch + mirroredChromaticOffset;
+    return getPitchFromDegree(invOct, invDeg, scaleRoot, intervals);
 }
 
 // Determines if any dissonance exists in a set of pitches
