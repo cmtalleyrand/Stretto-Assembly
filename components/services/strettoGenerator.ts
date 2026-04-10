@@ -151,6 +151,13 @@ export interface StrettoSearchProgressUpdate {
     stage: StrettoSearchProgressStage;
     completedUnits: number;
     totalUnits: number;
+    telemetry: {
+        validPairs: number;
+        validTriplets: number;
+        chainsFound: number;
+        maxDepthReached: number;
+        targetChainLength: number;
+    };
 }
 
 export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targetChainLength: number): boolean {
@@ -1264,6 +1271,7 @@ export async function searchStrettoChains(
     let maxDepth = 0;
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
+    let fullChainsFound = 0;
     const configuredTimeLimitMs = Number.isFinite(options.maxSearchTimeMs) ? Math.max(1, Math.floor(options.maxSearchTimeMs as number)) : DEFAULT_TIME_LIMIT_MS;
     let activeTimeLimitMs = configuredTimeLimitMs;
     let timeoutExtensionAppliedMs = 0;
@@ -1275,7 +1283,18 @@ export async function searchStrettoChains(
         const now = Date.now();
         if (!force && (now - lastProgressEmitMs) < 100) return;
         lastProgressEmitMs = now;
-        onProgress({ stage, completedUnits: boundedCompleted, totalUnits: boundedTotal });
+        onProgress({
+            stage,
+            completedUnits: boundedCompleted,
+            totalUnits: boundedTotal,
+            telemetry: {
+                validPairs: stageStats.pairwiseCompatible,
+                validTriplets: stageStats.harmonicallyValidTriples,
+                chainsFound: fullChainsFound,
+                maxDepthReached: maxDepth,
+                targetChainLength: options.targetChainLength
+            }
+        });
     };
     
     const { notes: baseNotes, offsetTicks } = normalizeSubject(rawSubject, ppq);
@@ -2419,6 +2438,7 @@ export async function searchStrettoChains(
             seenSignatures.add(sig);
             const assigned = assignVoices([...chain], [...variantIndices]);
             if (assigned !== null) {
+                fullChainsFound++;
                 unscoredResults.push({ entries: assigned, variantIndices: [...variantIndices] });
             }
         }
@@ -2823,15 +2843,18 @@ export async function searchStrettoChains(
 
                                     recordDeferredPartial(seedState.chain, seedState.variantIndices);
 
-                                    const extensionStack: TripletJoinState[] = [seedState];
-                                    while (extensionStack.length > 0) {
+                                    // Breadth-oriented scheduling avoids fully exhausting one start
+                                    // pattern before exploring siblings, improving search diversity.
+                                    const extensionQueue: TripletJoinState[] = [seedState];
+                                    let queueIndex = 0;
+                                    while (queueIndex < extensionQueue.length) {
                                         if (terminationReason) break;
                                         operationCounter++;
                                         if (shouldYieldToEventLoop(operationCounter)) {
                                             await new Promise<void>((resolve) => setTimeout(resolve, 0));
                                         }
                                         if (checkLimits()) break;
-                                        const current = extensionStack.pop()!;
+                                        const current = extensionQueue[queueIndex++];
                                         const currentDepth = current.chain.length;
 
                                         if (currentDepth >= 7) {
@@ -2873,7 +2896,7 @@ export async function searchStrettoChains(
                                             if (succ.chain.length >= 3) {
                                                 recordDeferredPartial(succ.chain, succ.variantIndices);
                                             }
-                                            extensionStack.push(succ);
+                                            extensionQueue.push(succ);
                                         }
                                     }
                                 }

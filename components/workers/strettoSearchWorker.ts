@@ -14,6 +14,13 @@ interface StrettoSearchWorkerProgress {
   stage: StrettoSearchProgressStage;
   completedUnits: number;
   totalUnits: number;
+  telemetry: {
+    validPairs: number;
+    validTriplets: number;
+    chainsFound: number;
+    maxDepthReached: number;
+    targetChainLength: number;
+  };
   heartbeat: boolean;
   progressPercent: number;
   stars: string;
@@ -64,7 +71,9 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
         }
         completedWeight += STAGE_WEIGHTS[s];
       }
-      return Math.max(0, Math.min(99, Math.round(completedWeight * 100)));
+      const rawPercent = Math.round(completedWeight * 100);
+      const isComplete = stage === 'dag' && boundedCompleted >= boundedTotal;
+      return isComplete ? 100 : Math.max(0, Math.min(99, rawPercent));
     };
     let hasConcreteProgress = false;
 
@@ -79,6 +88,13 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
         stage: 'pairwise',
         completedUnits: 0,
         totalUnits: 1,
+        telemetry: {
+          validPairs: 0,
+          validTriplets: 0,
+          chainsFound: 0,
+          maxDepthReached: 0,
+          targetChainLength: options.targetChainLength
+        },
         heartbeat: true,
         progressPercent: boundedPercent,
         stars: renderStars(boundedPercent),
@@ -100,6 +116,7 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
         stage: progress.stage,
         completedUnits: progress.completedUnits,
         totalUnits: progress.totalUnits,
+        telemetry: progress.telemetry,
         heartbeat: false,
         progressPercent: weightedPercent,
         stars: renderStars(weightedPercent),

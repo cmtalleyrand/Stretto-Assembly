@@ -50,6 +50,13 @@ interface StrettoSearchProgressState {
     stage: 'pairwise' | 'triplet' | 'dag';
     completedUnits: number;
     totalUnits: number;
+    telemetry: {
+        validPairs: number;
+        validTriplets: number;
+        chainsFound: number;
+        maxDepthReached: number;
+        targetChainLength: number;
+    };
     heartbeat: boolean;
 }
 
@@ -60,6 +67,13 @@ interface StrettoSearchWorkerProgress {
     stage: 'pairwise' | 'triplet' | 'dag';
     completedUnits: number;
     totalUnits: number;
+    telemetry: {
+        validPairs: number;
+        validTriplets: number;
+        chainsFound: number;
+        maxDepthReached: number;
+        targetChainLength: number;
+    };
     heartbeat: boolean;
     progressPercent: number;
     stars: string;
@@ -367,6 +381,7 @@ export default function StrettoView({
                         stage: payload.stage,
                         completedUnits: payload.completedUnits,
                         totalUnits: payload.totalUnits,
+                        telemetry: payload.telemetry,
                         heartbeat: payload.heartbeat
                     });
                     return;
@@ -395,6 +410,13 @@ export default function StrettoView({
             stage: 'pairwise',
             completedUnits: 0,
             totalUnits: 1,
+            telemetry: {
+                validPairs: 0,
+                validTriplets: 0,
+                chainsFound: 0,
+                maxDepthReached: 0,
+                targetChainLength: searchOptions.targetChainLength
+            },
             heartbeat: true
         });
         setTimeout(async () => {
