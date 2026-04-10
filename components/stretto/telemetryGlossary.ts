@@ -170,6 +170,20 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
     incrementSite: 'Incremented when traversal reaches target depth with a valid chain.',
     estimateClass: 'exact'
   },
+  pairwiseOperationsProcessed: {
+    label: 'Pairwise operations processed',
+    formalDefinition: 'Number of pairwise candidate operations processed by the pairwise stage, including accepted and rejected operations.',
+    unit: 'count (operations)',
+    incrementSite: 'Incremented per pairwise-stage candidate operation processed in the precompute/filter loop.',
+    estimateClass: 'exact'
+  },
+  tripletOperationsProcessed: {
+    label: 'Triplet operations processed',
+    formalDefinition: 'Number of triplet candidate operations processed by the triplet stage, including accepted and rejected operations.',
+    unit: 'count (operations)',
+    incrementSite: 'Incremented per triplet-stage candidate operation processed in triplet gate evaluation.',
+    estimateClass: 'exact'
+  },
   dagNodesExpanded: {
     label: 'DAG nodes expanded',
     formalDefinition: 'Number of deterministic DAG states removed from the frontier and expanded during traversal.',

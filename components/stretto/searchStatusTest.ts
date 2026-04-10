@@ -114,5 +114,11 @@ if (STRETTO_TELEMETRY_GLOSSARY.dagNodesExpanded.estimateClass !== 'exact') {
 if (!metricHelpText('dagEdgesEvaluated').includes('transition edges evaluated')) {
   throw new Error('DAG edge metric glossary text must remain explicit about transition-edge counting semantics.');
 }
+if (STRETTO_TELEMETRY_GLOSSARY.pairwiseOperationsProcessed.estimateClass !== 'exact') {
+  throw new Error('Pairwise operations processed metric must remain classified as exact.');
+}
+if (!metricHelpText('tripletOperationsProcessed').includes('triplet candidate operations processed')) {
+  throw new Error('Triplet operations metric glossary text must remain explicit about candidate-operation counting semantics.');
+}
 
 console.log('searchStatusTest passed');

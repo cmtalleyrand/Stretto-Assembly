@@ -27,6 +27,8 @@ interface StrettoSearchPanelProps {
             chainsFound: number;
             maxDepthReached: number;
             targetChainLength: number;
+            pairwiseOperationsProcessed?: number;
+            tripletOperationsProcessed?: number;
             dagNodesExpanded?: number;
             dagEdgesEvaluated?: number;
         };
@@ -429,6 +431,11 @@ export default function StrettoSearchPanel({
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()}<MetricHelp metricKey="validPairs" /> · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()}<MetricHelp metricKey="validTriplets" /> · chains {searchProgress.telemetry.chainsFound.toLocaleString()}<MetricHelp metricKey="chainsFound" />
                     </div>
+                    {(typeof searchProgress.telemetry.pairwiseOperationsProcessed === 'number' || typeof searchProgress.telemetry.tripletOperationsProcessed === 'number') && (
+                        <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                            Pairwise ops {Math.max(0, searchProgress.telemetry.pairwiseOperationsProcessed ?? 0).toLocaleString()}<MetricHelp metricKey="pairwiseOperationsProcessed" /> · Triplet ops {Math.max(0, searchProgress.telemetry.tripletOperationsProcessed ?? 0).toLocaleString()}<MetricHelp metricKey="tripletOperationsProcessed" />
+                        </div>
+                    )}
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Max depth {searchProgress.telemetry.maxDepthReached}<MetricHelp metricKey="maxDepthReached" /> / target {searchProgress.telemetry.targetChainLength}<MetricHelp metricKey="targetChainLength" />
                     </div>
