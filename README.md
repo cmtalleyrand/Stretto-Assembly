@@ -1,11 +1,5 @@
 # Stretto Assembly — Algorithm Architecture
 
-## AI Assembly API Security
-
-- The browser must call `POST /api/assembly` for AI stretto assembly generation.
-- Provider credentials are server-only; set `GEMINI_API_KEY` in the server runtime environment.
-- Do not expose provider credentials through client-side environment variables (`process.env.*` or `import.meta.env.VITE_*`) in production builds.
-
 Counterpoint rules (including the P4/P5/P8 policy) are defined in `STRETTO_RULES.md`. This file covers the mandatory search architecture only.
 
 ## ⚠️ CRITICAL: DO NOT REVERT THE SEARCH ARCHITECTURE

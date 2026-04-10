@@ -2,19 +2,12 @@
 import { StrettoCandidate } from '../../types';
 import { Midi } from '@tonejs/midi';
 import { getVoiceLabel } from './midiVoices';
-import { resolveTimeSignature, TimeSignatureValue } from './timeSignatureResolver';
 
 /**
  * Generates and downloads a multi-track MIDI file representing the Stretto result.
  * Fixes "Cannot set property ppq" error by scaling ticks instead of modifying read-only header.
  */
-export function downloadStrettoCandidate(
-    candidate: StrettoCandidate,
-    sourcePpq: number,
-    voiceNames?: Record<number, string>,
-    subjectName: string = "Untitled",
-    timeSignature?: TimeSignatureValue
-) {
+export function downloadStrettoCandidate(candidate: StrettoCandidate, sourcePpq: number, voiceNames?: Record<number, string>, subjectName: string = "Untitled") {
     const midi = new Midi();
     
     // Tone.js MIDI instances default to 480 PPQ. 
@@ -24,9 +17,8 @@ export function downloadStrettoCandidate(
     
     // Set basic metadata
     midi.header.setTempo(120);
-    const [numerator, denominator] = resolveTimeSignature(timeSignature);
     midi.header.timeSignatures.push({
-        timeSignature: [numerator, denominator],
+        timeSignature: [4, 4],
         ticks: 0,
     });
     
@@ -100,13 +92,7 @@ export function downloadStrettoCandidate(
 /**
  * Bundles multiple candidates into a single multi-track MIDI file.
  */
-export function downloadStrettoSelection(
-    candidates: StrettoCandidate[],
-    sourcePpq: number,
-    voiceNames?: Record<number, string>,
-    subjectName: string = "Untitled",
-    timeSignature?: TimeSignatureValue
-) {
+export function downloadStrettoSelection(candidates: StrettoCandidate[], sourcePpq: number, voiceNames?: Record<number, string>, subjectName: string = "Untitled") {
     if (candidates.length === 0) return;
 
     const midi = new Midi();
@@ -114,8 +100,7 @@ export function downloadStrettoSelection(
     const scaleFactor = TARGET_PPQ / sourcePpq;
     
     midi.header.setTempo(120);
-    const [numerator, denominator] = resolveTimeSignature(timeSignature);
-    midi.header.timeSignatures.push({ timeSignature: [numerator, denominator], ticks: 0 });
+    midi.header.timeSignatures.push({ timeSignature: [4, 4], ticks: 0 });
 
     candidates.forEach((candidate, cIdx) => {
         // Group notes by voice index

@@ -4,7 +4,6 @@ import { useMidiController } from './hooks/useMidiController';
 import Header from './components/Header';
 import Notification from './components/Notification';
 import StrettoView from './components/StrettoView';
-import { resolveMidiTimeSignatureAtTick } from './components/services/midiTimeSignature';
 
 export default function App() {
   const { state, settings, setters, actions } = useMidiController();
@@ -47,17 +46,7 @@ export default function App() {
   };
 
   const ppq = midiData?.header.ppq || 480;
-  const selectedTrackFirstTick = useMemo(() => {
-    if (!midiData || selectedMidiTrackId === null) return 0;
-    const trackNotes = midiData.tracks[selectedMidiTrackId]?.notes || [];
-    if (trackNotes.length === 0) return 0;
-    return Math.min(...trackNotes.map((note) => note.ticks));
-  }, [midiData, selectedMidiTrackId]);
-
-  const ts = useMemo(
-    () => resolveMidiTimeSignatureAtTick(midiData?.header.timeSignatures, selectedTrackFirstTick),
-    [midiData?.header.timeSignatures, selectedTrackFirstTick]
-  );
+  const ts = midiData?.header.timeSignatures[0]?.timeSignature || [4, 4];
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-darker via-[#111a2d] to-[#0c1424] text-gray-light flex flex-col items-center p-4 sm:p-6 lg:p-8 font-sans">

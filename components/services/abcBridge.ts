@@ -92,46 +92,17 @@ export function extractKeyFromAbc(abc: string): { root: number, mode: string } |
 }
 
 
-function parseMeterToken(token: string): { num: number, den: number } | null {
-    const cleaned = token.trim();
-
-    const numeric = cleaned.match(/^([0-9]+)\s*\/\s*([0-9]+)$/);
-    if (numeric) {
-        const num = parseInt(numeric[1], 10);
-        const den = parseInt(numeric[2], 10);
+export function extractMeterFromAbc(abc: string): { num: number, den: number } | null {
+    const lines = abc.split(/\r?\n/);
+    for (const line of lines) {
+        const m = line.trim().match(/^M\s*:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
+        if (!m) continue;
+        const num = parseInt(m[1], 10);
+        const den = parseInt(m[2], 10);
         if (Number.isFinite(num) && Number.isFinite(den) && num > 0 && den > 0) {
             return { num, den };
         }
-        return null;
     }
-
-    const symbolic = cleaned.match(/^(C\|?|c\|?)$/);
-    if (symbolic) {
-        const normalized = symbolic[1].toUpperCase();
-        if (normalized === 'C|') return { num: 2, den: 2 };
-        if (normalized === 'C') return { num: 4, den: 4 };
-    }
-
-    return null;
-}
-
-function getAbcDefaultNoteLengthFromMeter(num: number, den: number): number {
-    const meterValue = num / den;
-    return meterValue < 0.75 ? 1 / 16 : 1 / 8;
-}
-
-export function extractMeterFromAbc(abc: string): { num: number, den: number } | null {
-    const withoutComments = abc.replace(/%.*/g, ' ');
-    const meterFieldPattern = /(^|[\s\[])M\s*:\s*([^\]\s]+)/gi;
-    let match: RegExpExecArray | null = null;
-
-    while ((match = meterFieldPattern.exec(withoutComments)) !== null) {
-        const parsed = parseMeterToken(match[2]);
-        if (parsed) {
-            return parsed;
-        }
-    }
-
     return null;
 }
 
@@ -140,8 +111,7 @@ export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] 
     
     // Default Context
     let keyAccidentals: Record<string, number> = {};
-    let defaultNoteLength = 1/8;
-    let hasExplicitDefaultNoteLength = false;
+    let defaultNoteLength = 1/8; 
     let tempo = 120;
     
     const notes: RawNote[] = [];
@@ -186,15 +156,7 @@ export function parseSimpleAbc(abcString: string, ppq: number = 480): RawNote[] 
                 if (parts.length === 2) {
                     const num = parseFloat(parts[0]);
                     const den = parseFloat(parts[1]);
-                    if (!isNaN(num) && !isNaN(den) && den !== 0) {
-                        defaultNoteLength = num / den;
-                        hasExplicitDefaultNoteLength = true;
-                    }
-                }
-            } else if (field === 'M' && !hasExplicitDefaultNoteLength) {
-                const parsedMeter = parseMeterToken(value.replace(/%.*/, '').trim());
-                if (parsedMeter) {
-                    defaultNoteLength = getAbcDefaultNoteLengthFromMeter(parsedMeter.num, parsedMeter.den);
+                    if (!isNaN(num) && !isNaN(den) && den !== 0) defaultNoteLength = num / den;
                 }
             } else if (field === 'Q') {
                 if (value.includes('=')) tempo = parseFloat(value.split('=')[1]);
