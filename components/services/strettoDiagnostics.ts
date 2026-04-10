@@ -102,7 +102,9 @@ async function runDiagnostics() {
       console.log(`  compatible pairs=${stats.stageStats.pairwiseCompatible}/${stats.stageStats.pairwiseTotal} harmonicTriples=${stats.stageStats.harmonicallyValidTriples}/${stats.stageStats.tripleCandidates} scans=${stats.stageStats.structuralScanInvocations}`);
     }
     if (stats.coverage) {
-      console.log(`  coverage(nodeBudget/completionLowerBound/maxFrontier/classes)=${stats.coverage.nodeBudgetUsedPercent}%/${stats.coverage.completionRatioLowerBound}%/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
+      const nodeBudget = typeof stats.coverage.nodeBudgetUsedPercent === 'number' ? `${stats.coverage.nodeBudgetUsedPercent}%` : 'null';
+      const completionLowerBound = typeof stats.coverage.completionRatioLowerBound === 'number' ? `${stats.coverage.completionRatioLowerBound}%` : 'null';
+      console.log(`  coverage(nodeBudget/completionLowerBound/maxFrontier/classes)=${nodeBudget}/${completionLowerBound}/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
     }
   }
 

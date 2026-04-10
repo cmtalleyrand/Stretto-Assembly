@@ -20,6 +20,13 @@ interface StrettoChainViewProps {
         stage: 'pairwise' | 'triplet' | 'dag';
         completedUnits: number;
         totalUnits: number;
+        telemetry: {
+            validPairs: number;
+            validTriplets: number;
+            chainsFound: number;
+            maxDepthReached: number;
+            targetChainLength: number;
+        };
         heartbeat: boolean;
     } | null;
     chainResults: StrettoChainResult[];
@@ -151,6 +158,60 @@ export default function StrettoChainView({
             transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated
         };
     }, [searchReport]);
+    const coverageMetrics = React.useMemo(() => {
+        if (!diagnostics?.coverage) return [];
+        const coverage = diagnostics.coverage;
+        const metrics: Array<{ key: string; label: string; value: string; help: string }> = [];
+        if (typeof coverage.nodeBudgetUsedPercent === 'number') {
+            metrics.push({
+                key: 'node-budget',
+                label: 'Node budget',
+                value: `${coverage.nodeBudgetUsedPercent}%`,
+                help: 'Portion of an explicit node-expansion budget consumed before termination. Null when no node budget is configured.'
+            });
+        }
+        if (typeof coverage.completionRatioLowerBound === 'number') {
+            metrics.push({
+                key: 'completion-lower-bound',
+                label: 'Completion lower bound',
+                value: `${coverage.completionRatioLowerBound}%`,
+                help: 'Guaranteed minimum completion percentage for the explored state space. Reported only when mathematically exhaustive.'
+            });
+        }
+        if (typeof coverage.maxFrontierSize === 'number') {
+            metrics.push({
+                key: 'max-frontier',
+                label: 'Max frontier',
+                value: `${coverage.maxFrontierSize.toLocaleString()}`,
+                help: 'Maximum number of DAG states resident in a BFS frontier layer.'
+            });
+        }
+        if (typeof coverage.maxFrontierClassCount === 'number') {
+            metrics.push({
+                key: 'max-frontier-classes',
+                label: 'Max frontier classes',
+                value: `${coverage.maxFrontierClassCount.toLocaleString()}`,
+                help: 'Maximum number of distinct frontier equivalence classes (merged DAG keys), not raw frontier cardinality.'
+            });
+        }
+        if (typeof coverage.frontierSizeAtTermination === 'number') {
+            metrics.push({
+                key: 'termination-frontier',
+                label: 'Termination frontier',
+                value: `${coverage.frontierSizeAtTermination.toLocaleString()}`,
+                help: 'Unexpanded frontier-state count remaining when traversal terminated.'
+            });
+        }
+        if (typeof coverage.frontierClassesAtTermination === 'number') {
+            metrics.push({
+                key: 'termination-frontier-classes',
+                label: 'Termination classes',
+                value: `${coverage.frontierClassesAtTermination.toLocaleString()}`,
+                help: 'Distinct frontier equivalence classes remaining at termination.'
+            });
+        }
+        return metrics;
+    }, [diagnostics]);
 
     const maxConsecutiveDissonanceRegions = React.useMemo(() => {
         if (!chainCandidate) return 0;
@@ -226,8 +287,16 @@ export default function StrettoChainView({
                                     {diagnostics.transitionAccountingHolds ? 'holds' : 'violated'}
                                 </span>
                             </div>
-                            {diagnostics.coverage && (
-                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent}% · completion lower bound: {diagnostics.coverage.completionRatioLowerBound}% · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()} ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
+                            {coverageMetrics.length > 0 && (
+                                <div>
+                                    Coverage →
+                                    {coverageMetrics.map((metric, index) => (
+                                        <span key={metric.key} className="ml-1" title={metric.help}>
+                                            {index > 0 ? ' · ' : ' '}
+                                            <span className="text-gray-200">{metric.label}:</span> {metric.value}
+                                        </span>
+                                    ))}
+                                </div>
                             )}
                             {diagnostics.timeoutExtensionAppliedMs > 0 && (
                                 <div>Timeout extension applied: +{diagnostics.timeoutExtensionAppliedMs}ms near completion.</div>

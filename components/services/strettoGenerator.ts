@@ -164,10 +164,6 @@ export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targe
     return maxDepthReached >= Math.max(1, targetChainLength - 1);
 }
 
-function roundToWholePercent(value: number): number {
-    return Math.round(value * 100);
-}
-
 export function toCanonicalTripletKey(parts: TripletKeyParts): string {
     return `${parts.variantA}|${parts.variantB}|${parts.variantC}|${parts.delayAB}|${parts.delayBC}|${parts.transpositionAB}|${parts.transpositionBC}`;
 }
@@ -2412,7 +2408,7 @@ export async function searchStrettoChains(
     }];
 
     let maxFrontierSize = frontier.length;
-    let maxFrontierClassCount = 0;
+    let maxFrontierClassCount = frontier.length;
     let frontierSizeAtTermination = 0;
     let frontierClassesAtTermination = 0;
 
@@ -2915,6 +2911,7 @@ export async function searchStrettoChains(
         // Uses DAG merging to prune equivalent frontier nodes at each layer.
         while (frontier.length > 0) {
             maxFrontierSize = Math.max(maxFrontierSize, frontier.length);
+            maxFrontierClassCount = Math.max(maxFrontierClassCount, frontier.length);
             const nextLayer = new Map<string, DagNode>();
             let stopTraversal = false;
 
@@ -2979,7 +2976,7 @@ export async function searchStrettoChains(
             if (frontier.length === 0 || stopTraversal) {
                 const termFrontier = stopTraversal ? Array.from(nextLayer.values()) : [];
                 frontierSizeAtTermination = termFrontier.length;
-                maxFrontierClassCount = maxFrontierSize;
+                maxFrontierClassCount = Math.max(maxFrontierClassCount, termFrontier.length);
                 frontierClassesAtTermination = termFrontier.length;
             }
         }
@@ -3038,6 +3035,9 @@ export async function searchStrettoChains(
         finalResults.push(leader);
     });
 
+    const isExhaustivelyComplete = stopReason === 'Exhausted' && frontierSizeAtTermination === 0;
+    const completionRatioLowerBound = isExhaustivelyComplete ? 100 : null;
+
     return {
         results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),
         stats: {
@@ -3049,17 +3049,14 @@ export async function searchStrettoChains(
             metricOffsetTicks: offsetTicks,
             timeoutExtensionAppliedMs,
             coverage: {
-                nodeBudgetUsedPercent: 0, // No node budget — time-only gating
+                nodeBudgetUsedPercent: null, // No node budget — time-only gating
                 maxFrontierSize,
                 maxFrontierClassCount,
                 edgesTraversed,
                 frontierSizeAtTermination,
                 frontierClassesAtTermination,
-                // Lower-bound completion ratio: if frontier is empty, we exhausted the space.
-                // Otherwise estimate from node budget usage.
-                completionRatioLowerBound: frontierSizeAtTermination === 0
-                    ? 100
-                    : roundToWholePercent(Math.min(1, nodesVisited / (nodesVisited + frontierSizeAtTermination)))
+                // Completion lower bound is only mathematically valid when the traversal is proven exhaustive.
+                completionRatioLowerBound
             },
             stageStats
         }
