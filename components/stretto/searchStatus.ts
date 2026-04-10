@@ -34,24 +34,24 @@ function pickSearchPhase(elapsedPercent: number): Pick<SearchRuntimePresentation
   if (elapsedPercent < 20) {
     return {
       algorithmPhase: 'Pairwise Compatibility Precompute',
-      phaseDetail: 'Enumerating admissible delay/transposition pair relations.'
+      phaseDetail: 'Wall-clock budget segment aligned with early pairwise relation enumeration.'
     };
   }
   if (elapsedPercent < 45) {
     return {
       algorithmPhase: 'Triplet Gate Construction',
-      phaseDetail: 'Filtering triads with pairwise, lower-bound, and contrapuntal constraints.'
+      phaseDetail: 'Wall-clock budget segment aligned with triad filtering under pairwise/lower-bound/contrapuntal constraints.'
     };
   }
   if (elapsedPercent < 85) {
     return {
       algorithmPhase: 'Deterministic DAG Expansion',
-      phaseDetail: 'Traversing chain-state frontier under lineage and interval policies.'
+      phaseDetail: 'Wall-clock budget segment aligned with frontier traversal under lineage and interval policies.'
     };
   }
   return {
     algorithmPhase: 'Terminal Scoring & Selection',
-    phaseDetail: 'Ranking surviving chains and emitting top-K candidates.'
+    phaseDetail: 'Wall-clock budget segment aligned with late-stage ranking and top-K emission.'
   };
 }
 

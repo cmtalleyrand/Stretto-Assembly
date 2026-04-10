@@ -9,6 +9,7 @@ import {
     nextSearchProgressAccumulator,
     SearchProgressAccumulator
 } from './searchProgressModel';
+import { metricHelpText } from './telemetryGlossary';
 
 interface StrettoSearchPanelProps {
     options: StrettoSearchOptions;
@@ -41,6 +42,11 @@ export default function StrettoSearchPanel({
     options, setOptions, onSearch, isSearching, searchProgress,
     voiceNames, setVoiceNames, subjectNotes, ppq 
 }: StrettoSearchPanelProps) {
+    const MetricHelp = ({ metricKey }: { metricKey: Parameters<typeof metricHelpText>[0] }) => (
+        <span className="ml-1 cursor-help text-[9px] text-cyan-300/80" title={metricHelpText(metricKey)} aria-label={metricHelpText(metricKey)}>
+            ⓘ
+        </span>
+    );
     
     const [showVoiceConfig, setShowVoiceConfig] = useState(false);
     const progressAccumulatorRef = useRef<SearchProgressAccumulator | null>(null);
@@ -409,22 +415,23 @@ export default function StrettoSearchPanel({
                         <span className="font-semibold text-brand-primary">
                             {progressDisplay.stageLabel}
                             {progressDisplay.isHeartbeat ? ' · liveness heartbeat' : ''}
+                            <MetricHelp metricKey="runtimePhaseHeuristic" />
                         </span>
                         <span className="font-mono">
-                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est · {(searchProgress.elapsedMs / 1000).toFixed(1)}s
+                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est<MetricHelp metricKey="overallEstimatePercent" /> · {(searchProgress.elapsedMs / 1000).toFixed(1)}s<MetricHelp metricKey="elapsedProgressMs" />
                         </span>
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Stage progress: {progressDisplay.stagePercent}% · units {progressDisplay.unitLabel}
+                        Stage progress: {progressDisplay.stagePercent}%<MetricHelp metricKey="stagePercent" /> · units {progressDisplay.unitLabel}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()} · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()} · chains {searchProgress.telemetry.chainsFound.toLocaleString()}
+                        Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()}<MetricHelp metricKey="validPairs" /> · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()}<MetricHelp metricKey="validTriplets" /> · chains {searchProgress.telemetry.chainsFound.toLocaleString()}<MetricHelp metricKey="chainsFound" />
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Max depth {searchProgress.telemetry.maxDepthReached} / target {searchProgress.telemetry.targetChainLength}
+                        Max depth {searchProgress.telemetry.maxDepthReached}<MetricHelp metricKey="maxDepthReached" /> / target {searchProgress.telemetry.targetChainLength}<MetricHelp metricKey="targetChainLength" />
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        {progressDisplay.throughputLabel} · {progressDisplay.etaLabel}
+                        {progressDisplay.throughputLabel} · {progressDisplay.etaLabel} (Throughput/ETA are wall-clock derived and do not assert algorithmic stage completion.)
                     </div>
                     <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                         <div

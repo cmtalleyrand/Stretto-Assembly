@@ -9,6 +9,7 @@ import { generatePolyphonicHarmonicRegions, getInvertedPitch } from '../services
 import { getStrictPitchName } from '../services/midiSpelling';
 import { deriveSearchRuntimePresentation, deriveSearchStatusPresentation } from './searchStatus';
 import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRegions } from './harmonicRegionDiagnostics';
+import { metricHelpText } from './telemetryGlossary';
 
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
@@ -51,6 +52,12 @@ export default function StrettoChainView({
     searchReport, masterTransposition, setMasterTransposition,
     subjectNotes
 }: StrettoChainViewProps) {
+    const MetricHelp = ({ metricKey }: { metricKey: Parameters<typeof metricHelpText>[0] }) => (
+        <span className="ml-1 cursor-help text-[9px] text-cyan-300/80" title={metricHelpText(metricKey)} aria-label={metricHelpText(metricKey)}>
+            ⓘ
+        </span>
+    );
+
     const [searchElapsedMs, setSearchElapsedMs] = React.useState(0);
 
     React.useEffect(() => {
@@ -185,7 +192,9 @@ export default function StrettoChainView({
                         <h3 className="text-xs font-bold text-gray-400">FOUND CHAINS ({chainResults.length})</h3>
                         {searchReport && (
                             <div className="text-[9px] text-gray-500 text-right">
-                                {searchReport.stats.nodesVisited.toLocaleString()} nodes in {searchReport.stats.timeMs}ms
+                                {searchReport.stats.nodesVisited.toLocaleString()} nodes
+                                <MetricHelp metricKey="nodesVisited" /> in {searchReport.stats.timeMs}ms
+                                <MetricHelp metricKey="runTimeMs" />
                             </div>
                         )}
                     </div>
@@ -193,16 +202,17 @@ export default function StrettoChainView({
                         <div className={`border-b p-2 text-[10px] ${searchStatus.toneClass}`}>
                             <strong>{searchStatus.heading}:</strong> {searchStatus.detail}
                             <div className="mt-1 text-[9px] text-gray-300">
-                                Progress {searchStatus.progressPercent}% · Target {searchOptions.targetChainLength} · Reached {searchReport?.stats.maxDepthReached ?? 0}
+                                Progress {searchStatus.progressPercent}%<MetricHelp metricKey="progressPercent" /> · Target {searchOptions.targetChainLength}<MetricHelp metricKey="targetChainLength" /> · Reached {searchReport?.stats.maxDepthReached ?? 0}<MetricHelp metricKey="maxDepthReached" />
                             </div>
                         </div>
                     )}
                     {runtimePresentation && (
                         <div className="border-b border-cyan-800/60 bg-cyan-950/20 p-2 text-[10px] text-cyan-100">
                             <div>
-                                <strong>Live Search Telemetry:</strong> {runtimePresentation.algorithmPhase}
+                                <strong>Live Search Telemetry:</strong> Budget-phase heuristic: {runtimePresentation.algorithmPhase}
+                                <MetricHelp metricKey="runtimePhaseHeuristic" />
                             </div>
-                            <div className="text-[9px] text-cyan-200 mt-0.5">{runtimePresentation.phaseDetail}</div>
+                            <div className="text-[9px] text-cyan-200 mt-0.5">{runtimePresentation.phaseDetail} This label tracks wall-clock budget segments, not guaranteed algorithmic completion milestones.</div>
                             <div className="mt-1 h-1.5 w-full rounded bg-cyan-900/60">
                                 <div
                                     className="h-1.5 rounded bg-cyan-400 transition-all"
@@ -210,24 +220,24 @@ export default function StrettoChainView({
                                 />
                             </div>
                             <div className="mt-1 text-[9px] text-cyan-200">
-                                Time budget usage {runtimePresentation.elapsedPercent}% · Elapsed {runtimePresentation.elapsedMs}ms · Estimated remaining {runtimePresentation.estimatedRemainingMs}ms
+                                Time budget usage {runtimePresentation.elapsedPercent}%<MetricHelp metricKey="elapsedBudgetPercent" /> · Elapsed {runtimePresentation.elapsedMs}ms<MetricHelp metricKey="elapsedWallClockMs" /> · Estimated remaining {runtimePresentation.estimatedRemainingMs}ms<MetricHelp metricKey="estimatedRemainingMs" />
                             </div>
                         </div>
                     )}
                     {diagnostics && (
                         <div className="border-b border-gray-700 p-2 text-[9px] text-gray-300 bg-gray-850">
                             <div className="font-semibold text-gray-200 mb-1">Search diagnostics</div>
-                            <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}</div>
-                            <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()} · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()} · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}</div>
+                            <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}<MetricHelp metricKey="structuralScanInvocations" /></div>
+                            <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()}<MetricHelp metricKey="pairStageRejected" /> · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()}<MetricHelp metricKey="tripletStageRejected" /> · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}<MetricHelp metricKey="globalLineageStageRejected" /></div>
                             <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
                             <div>
-                                Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()} · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()} · invariant:
+                                Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()}<MetricHelp metricKey="transitionRowsReturned" /> · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()}<MetricHelp metricKey="transitionCandidatesEnumerated" /> · invariant:
                                 <span className={diagnostics.transitionAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
                                     {diagnostics.transitionAccountingHolds ? 'holds' : 'violated'}
                                 </span>
                             </div>
                             {diagnostics.coverage && (
-                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent}% · completion lower bound: {diagnostics.coverage.completionRatioLowerBound}% · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()} ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
+                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent}%<MetricHelp metricKey="nodeBudgetUsedPercent" /> · completion lower bound: {diagnostics.coverage.completionRatioLowerBound}%<MetricHelp metricKey="completionRatioLowerBound" /> · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()}<MetricHelp metricKey="maxFrontierSize" /> ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
                             )}
                             {diagnostics.timeoutExtensionAppliedMs > 0 && (
                                 <div>Timeout extension applied: +{diagnostics.timeoutExtensionAppliedMs}ms near completion.</div>
