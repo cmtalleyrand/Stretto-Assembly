@@ -151,6 +151,7 @@ export interface StrettoSearchProgressUpdate {
     stage: StrettoSearchProgressStage;
     completedUnits: number;
     totalUnits: number;
+    terminal: boolean;
     telemetry: {
         validPairs: number;
         validTriplets: number;
@@ -1276,7 +1277,13 @@ export async function searchStrettoChains(
     let activeTimeLimitMs = configuredTimeLimitMs;
     let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
-    const emitStageProgress = (stage: StrettoSearchProgressStage, completedUnits: number, totalUnits: number, force: boolean = false): void => {
+    const emitStageProgress = (
+        stage: StrettoSearchProgressStage,
+        completedUnits: number,
+        totalUnits: number,
+        force: boolean = false,
+        terminal: boolean = false
+    ): void => {
         if (!onProgress) return;
         const boundedTotal = Math.max(1, Math.floor(totalUnits));
         const boundedCompleted = Math.max(0, Math.min(Math.floor(completedUnits), boundedTotal));
@@ -1287,6 +1294,7 @@ export async function searchStrettoChains(
             stage,
             completedUnits: boundedCompleted,
             totalUnits: boundedTotal,
+            terminal,
             telemetry: {
                 validPairs: stageStats.pairwiseCompatible,
                 validTriplets: stageStats.harmonicallyValidTriples,
@@ -2385,12 +2393,32 @@ export async function searchStrettoChains(
     const deferredPartials: DeferredPartial[] = [];
     emitStageProgress('triplet', tripletTotalUnits, tripletTotalUnits, true);
     const dagTotalUnits = Math.max(1, options.targetChainLength);
-    let dagCompletedUnits = 1;
-    const emitDagProgress = (force: boolean = false): void => {
-        const nextCompletedUnits = Math.min(dagTotalUnits, Math.max(1, maxDepth));
+    let dagCompletedUnits = 0;
+    let dagExploredWorkItems = 0;
+    let dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
+    const queueDagWorkItems = (count: number): void => {
+        if (count <= 0) return;
+        dagLiveFrontierWorkItems += count;
+    };
+    const startDagWorkItem = (): void => {
+        dagExploredWorkItems++;
+        dagLiveFrontierWorkItems = Math.max(0, dagLiveFrontierWorkItems - 1);
+    };
+    const emitDagProgress = (force: boolean = false, terminal: boolean = false): void => {
+        // Monotone heuristic completion: explored / (explored + live frontier).
+        // The ratio is traversal-state based and does not rely on chain-depth upper bounds.
+        const denom = Math.max(1, dagExploredWorkItems + dagLiveFrontierWorkItems);
+        const heuristicRatio = dagExploredWorkItems / denom;
+        const boundedNonTerminalCeiling = Math.max(0, dagTotalUnits - 1);
+        const nextCompletedUnits = terminal
+            ? dagTotalUnits
+            : Math.min(
+                boundedNonTerminalCeiling,
+                Math.max(dagCompletedUnits, Math.floor(heuristicRatio * dagTotalUnits))
+            );
         if (!force && nextCompletedUnits === dagCompletedUnits) return;
         dagCompletedUnits = nextCompletedUnits;
-        emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force);
+        emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force, terminal);
     };
     emitDagProgress(true);
 
@@ -2460,6 +2488,7 @@ export async function searchStrettoChains(
     // Long-range pair checks are sparse: cumulative delay typically exceeds Sb,
     // so entries 3+ apart rarely overlap.
     function dfsExtend(node: DagNode): void {
+        startDagWorkItem();
         nodesVisited++;
         operationCounter++;
         maxDepth = Math.max(maxDepth, node.chain.length);
@@ -2477,6 +2506,7 @@ export async function searchStrettoChains(
         if (checkLimits()) return;
 
         const successors = expandNode(node);
+        queueDagWorkItems(successors.length);
         for (const successor of successors) {
             dfsExtend(successor);
             if (terminationReason) return;
@@ -2846,9 +2876,11 @@ export async function searchStrettoChains(
                                     // Breadth-oriented scheduling avoids fully exhausting one start
                                     // pattern before exploring siblings, improving search diversity.
                                     const extensionQueue: TripletJoinState[] = [seedState];
+                                    queueDagWorkItems(1);
                                     let queueIndex = 0;
                                     while (queueIndex < extensionQueue.length) {
                                         if (terminationReason) break;
+                                        startDagWorkItem();
                                         operationCounter++;
                                         if (shouldYieldToEventLoop(operationCounter)) {
                                             await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -2874,6 +2906,7 @@ export async function searchStrettoChains(
                                                 recordCompletedChain(dagNode.chain, dagNode.variantIndices);
                                             } else {
                                                 recordDeferredPartial(dagNode.chain, dagNode.variantIndices);
+                                                queueDagWorkItems(1);
                                                 dfsExtend(dagNode);
                                             }
                                             maxDepth = Math.max(maxDepth, currentDepth);
@@ -2897,6 +2930,7 @@ export async function searchStrettoChains(
                                                 recordDeferredPartial(succ.chain, succ.variantIndices);
                                             }
                                             extensionQueue.push(succ);
+                                            queueDagWorkItems(1);
                                         }
                                     }
                                 }
@@ -2919,6 +2953,7 @@ export async function searchStrettoChains(
             let stopTraversal = false;
 
             for (const node of frontier) {
+                startDagWorkItem();
                 nodesVisited++;
                 operationCounter++;
                 maxDepth = Math.max(maxDepth, node.chain.length);
@@ -2946,6 +2981,7 @@ export async function searchStrettoChains(
                     }
                     // Launch DFS from this node
                     const successors = expandNode(node);
+                    queueDagWorkItems(successors.length);
                     for (const successor of successors) {
                         dfsExtend(successor);
                         if (terminationReason) {
@@ -2970,6 +3006,7 @@ export async function searchStrettoChains(
                         continue;
                     }
                     nextLayer.set(nodeKey, successor);
+                    queueDagWorkItems(1);
                 }
             }
 
@@ -3037,6 +3074,8 @@ export async function searchStrettoChains(
         }
         finalResults.push(leader);
     });
+
+    emitDagProgress(true, true);
 
     return {
         results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),

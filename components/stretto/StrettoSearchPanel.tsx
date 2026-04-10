@@ -20,6 +20,7 @@ interface StrettoSearchPanelProps {
         stage: 'pairwise' | 'triplet' | 'dag';
         completedUnits: number;
         totalUnits: number;
+        terminal: boolean;
         telemetry: {
             validPairs: number;
             validTriplets: number;
@@ -411,11 +412,11 @@ export default function StrettoSearchPanel({
                             {progressDisplay.isHeartbeat ? ' · liveness heartbeat' : ''}
                         </span>
                         <span className="font-mono">
-                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est · {(searchProgress.elapsedMs / 1000).toFixed(1)}s
+                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est (heuristic) · {(searchProgress.elapsedMs / 1000).toFixed(1)}s
                         </span>
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Stage progress: {progressDisplay.stagePercent}% · units {progressDisplay.unitLabel}
+                        Stage estimate (heuristic): {progressDisplay.stageEstimatePercent}% · units {progressDisplay.unitLabel}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()} · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()} · chains {searchProgress.telemetry.chainsFound.toLocaleString()}
@@ -429,7 +430,7 @@ export default function StrettoSearchPanel({
                     <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                         <div
                             className="h-full bg-brand-primary transition-all duration-200"
-                            style={{ width: `${Math.max(2, progressDisplay.stagePercent)}%` }}
+                            style={{ width: `${Math.max(2, progressDisplay.stageEstimatePercent)}%` }}
                         />
                     </div>
                 </div>

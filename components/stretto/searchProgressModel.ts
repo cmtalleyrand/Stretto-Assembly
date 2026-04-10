@@ -5,6 +5,7 @@ export interface SearchProgressState {
     stage: SearchProgressStage;
     completedUnits: number;
     totalUnits: number;
+    terminal: boolean;
     telemetry: {
         validPairs: number;
         validTriplets: number;
@@ -23,7 +24,7 @@ export interface SearchProgressAccumulator {
 
 export interface SearchProgressDisplay {
     stageLabel: string;
-    stagePercent: number;
+    stageEstimatePercent: number;
     overallEstimatePercent: number;
     unitLabel: string;
     phaseLabel: string;
@@ -31,6 +32,7 @@ export interface SearchProgressDisplay {
     etaLabel: string;
     stars: string;
     isHeartbeat: boolean;
+    isHeuristic: boolean;
 }
 
 const STAGE_ORDER: SearchProgressStage[] = ['pairwise', 'triplet', 'dag'];
@@ -71,24 +73,27 @@ export function computeSearchProgressDisplay(
     if (!progress) {
         return {
             stageLabel: 'Initializing search worker',
-            stagePercent: 0,
+            stageEstimatePercent: 0,
             overallEstimatePercent: 0,
             unitLabel: '0 / 1',
             phaseLabel: 'Phase 0 / 3',
             throughputLabel: 'Rate n/a',
             etaLabel: 'ETA n/a',
             stars: '☆☆☆☆☆☆☆☆☆☆',
-            isHeartbeat: false
+            isHeartbeat: false,
+            isHeuristic: true
         };
     }
 
     const boundedTotal = Math.max(1, progress.totalUnits);
     const boundedCompleted = Math.max(0, Math.min(progress.completedUnits, boundedTotal));
-    const stagePercent = Math.round((boundedCompleted / boundedTotal) * 100);
+    const stageEstimatePercent = Math.round((boundedCompleted / boundedTotal) * 100);
     const phaseIndex = STAGE_ORDER.indexOf(progress.stage);
     const safePhaseIndex = phaseIndex < 0 ? 0 : phaseIndex;
-    const rawOverallPercent = Math.round((safePhaseIndex * STAGE_SPAN_PERCENT) + ((stagePercent / 100) * STAGE_SPAN_PERCENT));
-    const isComplete = progress.stage === 'dag' && boundedCompleted >= boundedTotal;
+    const rawOverallPercent = Math.round((safePhaseIndex * STAGE_SPAN_PERCENT) + ((stageEstimatePercent / 100) * STAGE_SPAN_PERCENT));
+    const isComplete = progress.stage === 'dag'
+        && boundedCompleted >= boundedTotal
+        && progress.terminal;
     const overallEstimatePercent = isComplete ? 100 : Math.max(0, Math.min(99, rawOverallPercent));
 
     const activeAccumulator = accumulator ?? {
@@ -106,13 +111,14 @@ export function computeSearchProgressDisplay(
 
     return {
         stageLabel: progress.heartbeat ? 'Search active (collecting stage metrics)' : STAGE_LABELS[progress.stage],
-        stagePercent,
+        stageEstimatePercent,
         overallEstimatePercent,
         unitLabel: `${boundedCompleted.toLocaleString()} / ${boundedTotal.toLocaleString()}`,
         phaseLabel: `Phase ${safePhaseIndex + 1} / ${STAGE_ORDER.length}`,
         throughputLabel: stageRateUnitsPerSecond > 0 ? `Rate ${stageRateUnitsPerSecond.toFixed(1)} units/s` : 'Rate warming up',
         etaLabel: `ETA ${formatSeconds(etaSeconds)}`,
         stars: '★'.repeat(filledStars).padEnd(10, '☆'),
-        isHeartbeat: progress.heartbeat
+        isHeartbeat: progress.heartbeat,
+        isHeuristic: true
     };
 }
