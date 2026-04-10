@@ -489,23 +489,6 @@ function isForbiddenParallelPerfectMotion(
         && deltaVoice1 === deltaVoice2;
 }
 
-export function violatesTripletParallelPolicy(
-    pairAB: PairwiseCompatibilityRecord,
-    pairBC: PairwiseCompatibilityRecord,
-    delayABTicks: number,
-    delayBCTicks: number,
-    subjectLengthTicks: number
-): boolean {
-    // Rule 3A: Consecutive pair boundaries carrying perfect 5th/8ve parallels are invalid.
-    if (pairAB.hasParallelPerfect58 && pairBC.hasParallelPerfect58) return true;
-
-    // Rule 3B: If both delays are long (>= Sb/3), any perfect 5th/8ve parallel is invalid.
-    const oneThirdSubject = subjectLengthTicks / 3;
-    const neitherDelayUnderThird = delayABTicks >= oneThirdSubject && delayBCTicks >= oneThirdSubject;
-    if (neitherDelayUnderThird && (pairAB.hasParallelPerfect58 || pairBC.hasParallelPerfect58)) return true;
-
-    return false;
-}
 
 /**
  * PHASE 1 CHECK: Structural Validity (Pairwise)
@@ -567,6 +550,7 @@ export function checkCounterpointStructureWithBassRole(
 
     let prevP1: number | null = null;
     let prevP2: number | null = null;
+    let prevWasParallel = false;
 
     let dissRunLength = 0;
     let dissRunTicks = 0;
@@ -609,11 +593,12 @@ export function checkCounterpointStructureWithBassRole(
         const activeB = (ptrB < notesB.length && notesB[ptrB].start <= start && notesB[ptrB].end > start) ? notesB[ptrB] : null;
 
         if (!activeA || !activeB) {
-            if (lastIsDiss) dissonanceRunSpans.push({ startTick: runStartTick, endTick: runEndTick });
+            // Monophony: consecutive parallel tracking is broken by a rest; tick-duration clock restarts.
+            // The dissonance event counter (dissRunLength) and lastIsDiss are preserved —
+            // only a consonant interval resets the event count.
             prevP1 = null; prevP2 = null;
-            dissRunLength = 0;
+            prevWasParallel = false;
             dissRunTicks = 0;
-            lastIsDiss = false;
             continue;
         }
 
@@ -635,24 +620,31 @@ export function checkCounterpointStructureWithBassRole(
             if (!skipSpans) p4Spans.push({ startTick: start, endTick: end });
         }
 
-        // Rule 5: Parallel Perfects — flag by beat strength, don't hard-reject
+        // Rule 5: Parallel Perfects — delay-conditional consecutive rule.
+        // At d > Sb/3: any single parallel motion to P5/P8 is forbidden.
+        // At d ≤ Sb/3: only two back-to-back parallel motions are forbidden.
+        // Monophony (handled above) resets prevWasParallel, so consecutive tracking
+        // cannot span a rest in either voice.
         if (prevP1 !== null && prevP2 !== null) {
-            const p1Moved = p1 !== prevP1;
-            const p2Moved = p2 !== prevP2;
-
             const prevLo = Math.min(prevP1, prevP2);
             const prevHi = Math.max(prevP1, prevP2);
             const prevInt = (prevHi - prevLo) % 12;
             const deltaVoice1 = p1 - prevP1;
             const deltaVoice2 = p2 - prevP2;
             if (isForbiddenParallelPerfectMotion(prevInt, deltaVoice1, deltaVoice2)) {
-                hasParallelPerfect58 = true;
+                const oneThird = variantA.lengthTicks / 3;
+                if (prevWasParallel || delayTicks > oneThird) {
+                    hasParallelPerfect58 = true;
+                }
+                prevWasParallel = true;
                 if (!skipSpans) parallelPerfectStartTicks.push(start);
                 if (isStrongBeat(start, ppqParam, tsNum, tsDenom)) {
                     strongBeatParallels++;
                 } else {
                     weakBeatParallels++;
                 }
+            } else {
+                prevWasParallel = false;
             }
         }
         
