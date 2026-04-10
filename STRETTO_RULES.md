@@ -16,9 +16,16 @@ Notation: $n$ is entry index, $d_n$ is delay between entries $(n-1)\rightarrow n
 ## 🚨 Critical P4/P5/P8 Policy Clarification
 1. **Parallel perfect 4ths are permitted unconditionally.**
 2. **P4 dissonance is contextual only:** a perfect fourth is dissonant exclusively when its lower note is the bass in the active sonority.
-3. **Parallel perfect 5ths/octaves are invalid if either condition holds:**
-   - consecutive pair boundaries each contain a P5/P8 parallel event;
-   - a P5/P8 parallel event occurs and both adjacent delays satisfy `d >= Sb/3`.
+3. **Parallel perfect 5ths/octaves — pairwise, delay-conditional rule:**
+   This rule is applied within each pairwise voice-pair overlap independently. Parallels in different voice pairs do not compound; there is no triplet-level or chain-level parallel rule.
+   - If the pair's delay `d > Sb/3`: **any single parallel motion** from one P5/P8 to another P5/P8 (both voices moving by equal signed delta) makes the pair invalid.
+   - If the pair's delay `d ≤ Sb/3`: only **two consecutive parallel motions** at back-to-back timepoint transitions make the pair invalid. An isolated single parallel is permitted.
+   - A monophonic gap (one voice resting) **breaks** consecutive parallel tracking; the next transition after a gap is never counted as consecutive with one before it.
+
+## 🚨 Consecutive Dissonance / Monophony Rule
+The consecutive dissonance **event counter** is reset only by a consonant simultaneous interval. Monophony (fewer than 2 voices active at a timepoint) is **transparent** to the event counter — neither incrementing nor resetting it. The tick-duration accumulator (max 1 beat of continuous sounding dissonance) resets on monophony.
+
+Example: dissonance → monophonic → dissonance → dissonance = **3 consecutive dissonances** → invalid.
 
 ## 1. Hard Constraints (The "Gatekeepers")
 Any chain candidate that violates *any* of these rules is immediately discarded (pruned) during the search process.

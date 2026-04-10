@@ -251,7 +251,7 @@ export function generatePolyphonicHarmonicRegions(notes: RawNote[], keyRoot: num
         // Active notes in this slice
         const active = notes.filter(n => n.ticks <= mid && (n.ticks + n.durationTicks) > mid);
         if (active.length < 2) {
-            consecutiveDissonanceCount = 0; // Reset on rest/monophony
+            // Monophony: event counter is transparent — only consonance resets it.
             continue;
         }
 

@@ -268,7 +268,7 @@ export function calculateStrettoScore(
 
         const voices = placedNotes.filter(n => n.start <= start && n.end > start);
         if (voices.length < 2) {
-            dissonanceRunEvents = 0;
+            // Monophony: event counter is transparent — only consonance resets it.
             continue;
         }
 

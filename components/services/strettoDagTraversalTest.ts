@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isStrongBeat, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound, violatesTripletParallelPolicy } from './strettoGenerator';
+import { buildAllowedVoicePairs, checkCounterpointStructure, checkCounterpointStructureWithBassRole, isStrongBeat, isVoicePairAllowedForTransposition, passesGlobalLineageStage, passesPairStage, passesTripletStage, resolveNextFrontierLayer, searchStrettoChains, shouldPruneLowestVoicePair, shouldYieldToEventLoop, toBoundaryPairKey, toCanonicalTripletKey, toOrderedBoundarySignature, violatesPairwiseLowerBound } from './strettoGenerator';
 import { INTERVALS } from './strettoConstants';
 import type { RawNote, StrettoChainOption, StrettoSearchOptions } from '../../types';
 
@@ -112,8 +112,49 @@ const perfectParallelB = {
     { relTick: 480, durationTicks: 480, pitch: 69 }
   ]
 };
+// delay=0 ≤ Sb/3 (960/3=320 ticks): a single parallel transition is allowed at short delays.
 const perfectParallelScan = checkCounterpointStructure(perfectParallelA, perfectParallelB, 0, 0, 1.0, ppq);
-assert.equal(perfectParallelScan.hasParallelPerfect58, true, 'pairwise scan must flag strict parallel perfect motion when both voices move simultaneously by equal signed delta from a perfect interval');
+assert.equal(perfectParallelScan.hasParallelPerfect58, false, 'pairwise scan must NOT flag a single isolated parallel at delay <= Sb/3 — only consecutive parallels are forbidden at short delays');
+
+// Three-note fixture: two consecutive P5→P5 transitions → must be flagged regardless of delay.
+const consecutiveParallelA = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0,   durationTicks: 320, pitch: 60 }, // C4
+    { relTick: 320, durationTicks: 320, pitch: 62 }, // D4
+    { relTick: 640, durationTicks: 320, pitch: 64 }  // E4
+  ]
+};
+const consecutiveParallelB = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0,   durationTicks: 320, pitch: 67 }, // G4 (P5 above C4)
+    { relTick: 320, durationTicks: 320, pitch: 69 }, // A4 (P5 above D4)
+    { relTick: 640, durationTicks: 320, pitch: 71 }  // B4 (P5 above E4)
+  ]
+};
+const consecutiveParallelScan = checkCounterpointStructure(consecutiveParallelA, consecutiveParallelB, 0, 0, 1.0, ppq);
+assert.equal(consecutiveParallelScan.hasParallelPerfect58, true, 'pairwise scan must flag two consecutive P5→P5 parallel transitions as forbidden even at delay <= Sb/3');
+
+// Single parallel at large delay (delay=400 > Sb/3=320): any parallel is forbidden.
+// Voice B is staggered so that its note boundary coincides with voice A's at absolute tick 480,
+// producing a single parallel P5→P5 transition within the overlap.
+const largeDelayParallelB = {
+  type: 'N' as const,
+  truncationBeats: 0,
+  lengthTicks: 960,
+  notes: [
+    { relTick: 0,  durationTicks: 80,  pitch: 67 }, // G4 (0→80 rel, 400→480 abs)
+    { relTick: 80, durationTicks: 880, pitch: 69 }  // A4 (80→960 rel, 480→1360 abs)
+  ]
+};
+// At absolute tick 480: A moves C4→D4 (+2) and B moves G4→A4 (+2) simultaneously from P5 → P5.
+const largeDelayParallelScan = checkCounterpointStructure(perfectParallelA, largeDelayParallelB, 400, 0, 1.0, ppq);
+assert.equal(largeDelayParallelScan.hasParallelPerfect58, true, 'pairwise scan must flag a single parallel when delay > Sb/3');
 
 const contraryMotionB = {
   type: 'N' as const,
@@ -159,41 +200,6 @@ assert.equal(p4WithAAsBass.compatible, false, 'pairwise scan must reject P4 when
 const p4WithBAsBass = checkCounterpointStructureWithBassRole(p4UpperVoiceA, p4UpperVoiceB, 0, -10, 0.01, 'b', ppq);
 assert.equal(p4WithBAsBass.compatible, false, 'pairwise scan must reject P4 when variant B is known bass and forms the lower note');
 
-assert.equal(
-  violatesTripletParallelPolicy(
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), allowedVoiceMaskRows: [], p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, bassRoleDissonanceRunSpans: { none: [], a: [], b: [] }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), allowedVoiceMaskRows: [], p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, bassRoleDissonanceRunSpans: { none: [], a: [], b: [] }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
-    120,
-    120,
-    960
-  ),
-  true,
-  'triplet policy must reject consecutive boundaries that both carry P5/P8 parallel motion'
-);
-
-assert.equal(
-  violatesTripletParallelPolicy(
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), allowedVoiceMaskRows: [], p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, bassRoleDissonanceRunSpans: { none: [], a: [], b: [] }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), allowedVoiceMaskRows: [], p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, bassRoleDissonanceRunSpans: { none: [], a: [], b: [] }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
-    360,
-    420,
-    960
-  ),
-  true,
-  'triplet policy must reject any P5/P8 parallel motion when neither adjacent delay is below Sb/3'
-);
-
-assert.equal(
-  violatesTripletParallelPolicy(
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: true, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), allowedVoiceMaskRows: [], p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, bassRoleDissonanceRunSpans: { none: [], a: [], b: [] }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
-    { dissonanceRatio: 0, hasFourth: false, hasVoiceCrossing: false, maxDissonanceRunEvents: 0, hasParallelPerfect58: false, disallowLowestPair: false, allowedVoicePairs: new Set<string>(), allowedVoiceMaskRows: [], p4SimultaneityCount: 0, bassRoleCompatible: { none: true, a: true, b: true }, bassRoleDissonanceRatio: { none: 0, a: 0, b: 0 }, bassRoleMaxRunEvents: { none: 0, a: 0, b: 0 }, bassRoleDissonanceRunSpans: { none: [], a: [], b: [] }, intervalClass: 0, isRestrictedInterval: false, isFreeInterval: true, meetsAdjacentTranspositionSeparation: true },
-    240,
-    420,
-    960
-  ),
-  false,
-  'triplet policy must preserve admissibility when at least one adjacent delay is below Sb/3'
-);
 
 const nextLayer = new Map<string, number>([['a', 1], ['b', 2]]);
 assert.deepEqual(
