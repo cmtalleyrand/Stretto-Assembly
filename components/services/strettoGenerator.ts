@@ -1706,9 +1706,21 @@ export async function searchStrettoChains(
     // Numeric window-transition index is precomputed once so expandNode never rebuilds it.
     const validPairsList = precomputeIndex.getValidPairs();
 
+    // Extended-delay pairs (d > 2/3 Sb, added by validPairwiseDelays) are needed for the A→C
+    // pairwise lookup (getPairRecord) but must NOT drive p1/p2 triplet enumeration — they
+    // represent cumulative offsets, not individual chain delays, and would violate A.6.
+    // Pre-filter to adjacent-only for the O(N²) triplet loops; this restores pre-extension perf.
+    const adjacentValidPairsList = validPairsList.filter(p => p.d <= maxAdjacentDelayTicks);
+    const adjacentNextPairsByVariant = new Map<number, PairTuple[]>();
+    for (const p of adjacentValidPairsList) {
+        let list = adjacentNextPairsByVariant.get(p.vA);
+        if (!list) { list = []; adjacentNextPairsByVariant.set(p.vA, list); }
+        list.push(p);
+    }
+
     let tripletEnumerationTotalUnits = 0;
-    for (const p1 of validPairsList) {
-        tripletEnumerationTotalUnits += precomputeIndex.getPairsByFirstVariant(p1.vB).length;
+    for (const p1 of adjacentValidPairsList) {
+        tripletEnumerationTotalUnits += (adjacentNextPairsByVariant.get(p1.vB) ?? []).length;
     }
     const tripletRecordIndexingTotalUnits = tripletEnumerationTotalUnits;
     const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
@@ -1717,12 +1729,12 @@ export async function searchStrettoChains(
 
     const validTripletDelayAs = [0, ...validAdjacentDelays];
 
-    for (const p1 of validPairsList) {
+    for (const p1 of adjacentValidPairsList) {
         if (terminationReason) break;
         const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
 
-        const nextPairs = precomputeIndex.getPairsByFirstVariant(p1.vB);
+        const nextPairs = adjacentNextPairsByVariant.get(p1.vB) ?? [];
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
             tripletCompletedUnits++;
@@ -1878,11 +1890,11 @@ export async function searchStrettoChains(
 
     const allTripletRecords: TripletRecord[] = [];
 
-    for (const p1 of validPairsList) {
+    for (const p1 of adjacentValidPairsList) {
         if (terminationReason) break;
         const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
-        const nextPairsForIdx = precomputeIndex.getPairsByFirstVariant(p1.vB);
+        const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
         for (const p2 of nextPairsForIdx) {
             tripletCompletedUnits++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
