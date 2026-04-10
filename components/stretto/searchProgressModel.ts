@@ -5,6 +5,13 @@ export interface SearchProgressState {
     stage: SearchProgressStage;
     completedUnits: number;
     totalUnits: number;
+    telemetry: {
+        validPairs: number;
+        validTriplets: number;
+        chainsFound: number;
+        maxDepthReached: number;
+        targetChainLength: number;
+    };
     heartbeat: boolean;
 }
 
@@ -80,10 +87,9 @@ export function computeSearchProgressDisplay(
     const stagePercent = Math.round((boundedCompleted / boundedTotal) * 100);
     const phaseIndex = STAGE_ORDER.indexOf(progress.stage);
     const safePhaseIndex = phaseIndex < 0 ? 0 : phaseIndex;
-    const overallEstimatePercent = Math.max(
-        0,
-        Math.min(99, Math.round((safePhaseIndex * STAGE_SPAN_PERCENT) + ((stagePercent / 100) * STAGE_SPAN_PERCENT)))
-    );
+    const rawOverallPercent = Math.round((safePhaseIndex * STAGE_SPAN_PERCENT) + ((stagePercent / 100) * STAGE_SPAN_PERCENT));
+    const isComplete = progress.stage === 'dag' && boundedCompleted >= boundedTotal;
+    const overallEstimatePercent = isComplete ? 100 : Math.max(0, Math.min(99, rawOverallPercent));
 
     const activeAccumulator = accumulator ?? {
         stage: progress.stage,

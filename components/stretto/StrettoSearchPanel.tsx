@@ -20,6 +20,13 @@ interface StrettoSearchPanelProps {
         stage: 'pairwise' | 'triplet' | 'dag';
         completedUnits: number;
         totalUnits: number;
+        telemetry: {
+            validPairs: number;
+            validTriplets: number;
+            chainsFound: number;
+            maxDepthReached: number;
+            targetChainLength: number;
+        };
         heartbeat: boolean;
     } | null;
     voiceNames?: Record<number, string>;
@@ -409,6 +416,12 @@ export default function StrettoSearchPanel({
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Stage progress: {progressDisplay.stagePercent}% · units {progressDisplay.unitLabel}
+                    </div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()} · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()} · chains {searchProgress.telemetry.chainsFound.toLocaleString()}
+                    </div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        Max depth {searchProgress.telemetry.maxDepthReached} / target {searchProgress.telemetry.targetChainLength}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {progressDisplay.throughputLabel} · {progressDisplay.etaLabel}

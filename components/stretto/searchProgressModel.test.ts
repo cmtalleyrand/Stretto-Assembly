@@ -10,6 +10,7 @@ const pairwiseStart: SearchProgressState = {
     stage: 'pairwise',
     completedUnits: 100,
     totalUnits: 1000,
+    telemetry: { validPairs: 0, validTriplets: 0, chainsFound: 0, maxDepthReached: 1, targetChainLength: 8 },
     heartbeat: false
 };
 
@@ -35,6 +36,7 @@ const tripletStart: SearchProgressState = {
     stage: 'triplet',
     completedUnits: 0,
     totalUnits: 500,
+    telemetry: { validPairs: 600, validTriplets: 0, chainsFound: 0, maxDepthReached: 3, targetChainLength: 8 },
     heartbeat: false
 };
 const accumulatorAfterTripletTransition = nextSearchProgressAccumulator(tripletStart, accumulatorAfterPairwiseAdvance);

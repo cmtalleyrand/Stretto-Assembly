@@ -47,6 +47,8 @@ for (const event of progressEvents) {
     assert(event.totalUnits >= 1, `Stage ${event.stage} reported invalid totalUnits=${event.totalUnits}.`);
     assert(event.completedUnits >= 0, `Stage ${event.stage} reported invalid completedUnits=${event.completedUnits}.`);
     assert(event.completedUnits <= event.totalUnits, `Stage ${event.stage} exceeded totalUnits.`);
+    assert(event.telemetry.maxDepthReached >= 0, `Stage ${event.stage} reported invalid maxDepthReached.`);
+    assert(event.telemetry.targetChainLength === OPTIONS.targetChainLength, 'Target chain length telemetry mismatch.');
 }
 
 console.log(`Stretto progress callback test passed (${progressEvents.length} events).`);
