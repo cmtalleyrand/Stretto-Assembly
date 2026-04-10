@@ -1718,6 +1718,7 @@ export async function searchStrettoChains(
     const validTripletDelayAs = [0, ...validAdjacentDelays];
 
     for (const p1 of validPairsList) {
+        if (terminationReason) break;
         const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
 
@@ -1727,6 +1728,7 @@ export async function searchStrettoChains(
             tripletCompletedUnits++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
+                if (checkLimits()) break;
             }
             const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
             if (!pairBC) continue;
@@ -1878,6 +1880,7 @@ export async function searchStrettoChains(
     const allTripletRecords: TripletRecord[] = [];
 
     for (const p1 of validPairsList) {
+        if (terminationReason) break;
         const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
         if (!pairAB) continue;
         const nextPairsForIdx = precomputeIndex.getPairsByFirstVariant(p1.vB);
@@ -1885,6 +1888,7 @@ export async function searchStrettoChains(
             tripletCompletedUnits++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
+                if (checkLimits()) break;
             }
             const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
             const dAC = p1.d + p2.d;
