@@ -27,6 +27,8 @@ interface StrettoSearchPanelProps {
             chainsFound: number;
             maxDepthReached: number;
             targetChainLength: number;
+            dagNodesExpanded?: number;
+            dagEdgesEvaluated?: number;
         };
         heartbeat: boolean;
     } | null;
@@ -430,6 +432,11 @@ export default function StrettoSearchPanel({
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Max depth {searchProgress.telemetry.maxDepthReached}<MetricHelp metricKey="maxDepthReached" /> / target {searchProgress.telemetry.targetChainLength}<MetricHelp metricKey="targetChainLength" />
                     </div>
+                    {(typeof searchProgress.telemetry.dagNodesExpanded === 'number' || typeof searchProgress.telemetry.dagEdgesEvaluated === 'number') && (
+                        <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                            DAG nodes {Math.max(0, searchProgress.telemetry.dagNodesExpanded ?? 0).toLocaleString()}<MetricHelp metricKey="dagNodesExpanded" /> · DAG edges {Math.max(0, searchProgress.telemetry.dagEdgesEvaluated ?? 0).toLocaleString()}<MetricHelp metricKey="dagEdgesEvaluated" />
+                        </div>
+                    )}
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {progressDisplay.throughputLabel} · {progressDisplay.etaLabel} (Throughput/ETA are wall-clock derived and do not assert algorithmic stage completion.)
                     </div>

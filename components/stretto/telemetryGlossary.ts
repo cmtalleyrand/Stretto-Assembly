@@ -170,6 +170,20 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
     incrementSite: 'Incremented when traversal reaches target depth with a valid chain.',
     estimateClass: 'exact'
   },
+  dagNodesExpanded: {
+    label: 'DAG nodes expanded',
+    formalDefinition: 'Number of deterministic DAG states removed from the frontier and expanded during traversal.',
+    unit: 'count (nodes)',
+    incrementSite: 'Incremented once per frontier-pop operation that performs successor generation.',
+    estimateClass: 'exact'
+  },
+  dagEdgesEvaluated: {
+    label: 'DAG edges evaluated',
+    formalDefinition: 'Number of transition edges evaluated while expanding DAG frontier states.',
+    unit: 'count (edges)',
+    incrementSite: 'Incremented for each candidate transition tested during successor enumeration.',
+    estimateClass: 'exact'
+  },
   targetChainLength: {
     label: 'Target chain length',
     formalDefinition: 'Configured required chain length used as termination criterion for successful candidates.',

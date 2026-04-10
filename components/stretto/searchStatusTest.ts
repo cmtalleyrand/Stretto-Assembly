@@ -108,5 +108,11 @@ if (STRETTO_TELEMETRY_GLOSSARY.elapsedBudgetPercent.estimateClass !== 'exact') {
 if (!metricHelpText('runtimePhaseHeuristic').includes('not a proof of algorithmic completion')) {
   throw new Error('Glossary help text must disambiguate heuristic budget phases from completion.');
 }
+if (STRETTO_TELEMETRY_GLOSSARY.dagNodesExpanded.estimateClass !== 'exact') {
+  throw new Error('DAG node expansion metric must remain classified as exact.');
+}
+if (!metricHelpText('dagEdgesEvaluated').includes('transition edges evaluated')) {
+  throw new Error('DAG edge metric glossary text must remain explicit about transition-edge counting semantics.');
+}
 
 console.log('searchStatusTest passed');
