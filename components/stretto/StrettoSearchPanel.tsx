@@ -26,6 +26,10 @@ interface StrettoSearchPanelProps {
             chainsFound: number;
             maxDepthReached: number;
             targetChainLength: number;
+            pairwiseOperationsProcessed: number;
+            tripletOperationsProcessed: number;
+            dagNodesExpanded: number;
+            dagEdgesEvaluated: number;
         };
         heartbeat: boolean;
     } | null;
@@ -415,13 +419,16 @@ export default function StrettoSearchPanel({
                         </span>
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Stage progress: {progressDisplay.stagePercent}% · units {progressDisplay.unitLabel}
+                        Stage progress: {progressDisplay.stagePercent}% · {searchProgress.stage === 'dag' ? 'depth levels' : 'combinations'} {progressDisplay.unitLabel}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()} · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()} · chains {searchProgress.telemetry.chainsFound.toLocaleString()}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Max depth {searchProgress.telemetry.maxDepthReached} / target {searchProgress.telemetry.targetChainLength}
+                    </div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        DAG nodes {searchProgress.telemetry.dagNodesExpanded.toLocaleString()} · DAG edges {searchProgress.telemetry.dagEdgesEvaluated.toLocaleString()}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {progressDisplay.throughputLabel} · {progressDisplay.etaLabel}

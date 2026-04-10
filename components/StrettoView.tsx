@@ -56,6 +56,10 @@ interface StrettoSearchProgressState {
         chainsFound: number;
         maxDepthReached: number;
         targetChainLength: number;
+        pairwiseOperationsProcessed: number;
+        tripletOperationsProcessed: number;
+        dagNodesExpanded: number;
+        dagEdgesEvaluated: number;
     };
     heartbeat: boolean;
 }
@@ -73,6 +77,10 @@ interface StrettoSearchWorkerProgress {
         chainsFound: number;
         maxDepthReached: number;
         targetChainLength: number;
+        pairwiseOperationsProcessed: number;
+        tripletOperationsProcessed: number;
+        dagNodesExpanded: number;
+        dagEdgesEvaluated: number;
     };
     heartbeat: boolean;
     progressPercent: number;
@@ -415,7 +423,11 @@ export default function StrettoView({
                 validTriplets: 0,
                 chainsFound: 0,
                 maxDepthReached: 0,
-                targetChainLength: searchOptions.targetChainLength
+                targetChainLength: searchOptions.targetChainLength,
+                pairwiseOperationsProcessed: 0,
+                tripletOperationsProcessed: 0,
+                dagNodesExpanded: 0,
+                dagEdgesEvaluated: 0
             },
             heartbeat: true
         });
