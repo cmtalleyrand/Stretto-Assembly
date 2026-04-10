@@ -11,6 +11,10 @@ export interface SearchProgressState {
         chainsFound: number;
         maxDepthReached: number;
         targetChainLength: number;
+        pairwiseOperationsProcessed: number;
+        tripletOperationsProcessed: number;
+        dagNodesExpanded: number;
+        dagEdgesEvaluated: number;
     };
     heartbeat: boolean;
 }
@@ -19,6 +23,7 @@ export interface SearchProgressAccumulator {
     stage: SearchProgressStage;
     stageStartElapsedMs: number;
     stageStartCompletedUnits: number;
+    stageStartOperationCounter: number;
 }
 
 export interface SearchProgressDisplay {
@@ -29,6 +34,7 @@ export interface SearchProgressDisplay {
     phaseLabel: string;
     throughputLabel: string;
     etaLabel: string;
+    rateUnitLabel: string;
     stars: string;
     isHeartbeat: boolean;
 }
@@ -54,11 +60,17 @@ export function nextSearchProgressAccumulator(
     progress: SearchProgressState,
     previous: SearchProgressAccumulator | null
 ): SearchProgressAccumulator {
+    const stageOperationCounter = progress.stage === 'pairwise'
+        ? progress.telemetry.pairwiseOperationsProcessed
+        : progress.stage === 'triplet'
+            ? progress.telemetry.tripletOperationsProcessed
+            : progress.telemetry.dagEdgesEvaluated + progress.telemetry.dagNodesExpanded;
     if (!previous || previous.stage !== progress.stage) {
         return {
             stage: progress.stage,
             stageStartElapsedMs: progress.elapsedMs,
-            stageStartCompletedUnits: progress.completedUnits
+            stageStartCompletedUnits: progress.completedUnits,
+            stageStartOperationCounter: stageOperationCounter
         };
     }
     return previous;
@@ -77,6 +89,7 @@ export function computeSearchProgressDisplay(
             phaseLabel: 'Phase 0 / 3',
             throughputLabel: 'Rate n/a',
             etaLabel: 'ETA n/a',
+            rateUnitLabel: 'units/s',
             stars: '☆☆☆☆☆☆☆☆☆☆',
             isHeartbeat: false
         };
@@ -91,16 +104,37 @@ export function computeSearchProgressDisplay(
     const isComplete = progress.stage === 'dag' && boundedCompleted >= boundedTotal;
     const overallEstimatePercent = isComplete ? 100 : Math.max(0, Math.min(99, rawOverallPercent));
 
+    const stageOperationCounter = progress.stage === 'pairwise'
+        ? progress.telemetry.pairwiseOperationsProcessed
+        : progress.stage === 'triplet'
+            ? progress.telemetry.tripletOperationsProcessed
+            : progress.telemetry.dagEdgesEvaluated + progress.telemetry.dagNodesExpanded;
     const activeAccumulator = accumulator ?? {
         stage: progress.stage,
         stageStartElapsedMs: progress.elapsedMs,
-        stageStartCompletedUnits: progress.completedUnits
+        stageStartCompletedUnits: progress.completedUnits,
+        stageStartOperationCounter: stageOperationCounter
     };
     const stageElapsedMs = Math.max(1, progress.elapsedMs - activeAccumulator.stageStartElapsedMs);
     const stageProcessedUnits = Math.max(0, boundedCompleted - activeAccumulator.stageStartCompletedUnits);
-    const stageRateUnitsPerSecond = stageProcessedUnits / (stageElapsedMs / 1000);
-    const remainingUnits = Math.max(0, boundedTotal - boundedCompleted);
-    const etaSeconds = stageRateUnitsPerSecond > 0 ? remainingUnits / stageRateUnitsPerSecond : Number.POSITIVE_INFINITY;
+    const depthBasedRateUnitsPerSecond = stageProcessedUnits / (stageElapsedMs / 1000);
+    const remainingDepthUnits = Math.max(0, boundedTotal - boundedCompleted);
+    const depthBasedEtaSeconds = depthBasedRateUnitsPerSecond > 0 ? remainingDepthUnits / depthBasedRateUnitsPerSecond : Number.POSITIVE_INFINITY;
+    const dagOperationCounter = progress.telemetry.dagEdgesEvaluated + progress.telemetry.dagNodesExpanded;
+    const stageStartOperationCounter = activeAccumulator.stage === progress.stage
+        ? activeAccumulator.stageStartOperationCounter
+        : stageOperationCounter;
+    const stageProcessedOperations = Math.max(0, stageOperationCounter - stageStartOperationCounter);
+    const operationRatePerSecond = stageProcessedOperations / (stageElapsedMs / 1000);
+    const dagProgressRatio = boundedCompleted / boundedTotal;
+    const dagEstimatedRemainingOperations = (progress.stage === 'dag' && dagOperationCounter > 0 && dagProgressRatio > 0)
+        ? dagOperationCounter * ((1 / dagProgressRatio) - 1)
+        : Number.POSITIVE_INFINITY;
+    const rateUnitLabel = progress.stage === 'dag' ? 'nodes/s' : 'combinations/s';
+    const throughputRate = progress.stage === 'dag' ? operationRatePerSecond : depthBasedRateUnitsPerSecond;
+    const etaSeconds = progress.stage === 'dag'
+        ? (operationRatePerSecond > 0 ? dagEstimatedRemainingOperations / operationRatePerSecond : Number.POSITIVE_INFINITY)
+        : depthBasedEtaSeconds;
 
     const filledStars = Math.max(1, Math.min(10, Math.round(overallEstimatePercent / 10)));
 
@@ -110,8 +144,9 @@ export function computeSearchProgressDisplay(
         overallEstimatePercent,
         unitLabel: `${boundedCompleted.toLocaleString()} / ${boundedTotal.toLocaleString()}`,
         phaseLabel: `Phase ${safePhaseIndex + 1} / ${STAGE_ORDER.length}`,
-        throughputLabel: stageRateUnitsPerSecond > 0 ? `Rate ${stageRateUnitsPerSecond.toFixed(1)} units/s` : 'Rate warming up',
+        throughputLabel: throughputRate > 0 ? `Rate ${throughputRate.toFixed(1)} ${rateUnitLabel}` : 'Rate warming up',
         etaLabel: `ETA ${formatSeconds(etaSeconds)}`,
+        rateUnitLabel,
         stars: '★'.repeat(filledStars).padEnd(10, '☆'),
         isHeartbeat: progress.heartbeat
     };

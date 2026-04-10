@@ -157,6 +157,10 @@ export interface StrettoSearchProgressUpdate {
         chainsFound: number;
         maxDepthReached: number;
         targetChainLength: number;
+        pairwiseOperationsProcessed: number;
+        tripletOperationsProcessed: number;
+        dagNodesExpanded: number;
+        dagEdgesEvaluated: number;
     };
 }
 
@@ -1269,6 +1273,10 @@ export async function searchStrettoChains(
     let nodesVisited = 0;
     let edgesTraversed = 0;
     let maxDepth = 0;
+    let pairwiseOperationsProcessed = 0;
+    let tripletOperationsProcessed = 0;
+    let dagNodesExpanded = 0;
+    let dagEdgesEvaluated = 0;
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
     let fullChainsFound = 0;
@@ -1292,7 +1300,11 @@ export async function searchStrettoChains(
                 validTriplets: stageStats.harmonicallyValidTriples,
                 chainsFound: fullChainsFound,
                 maxDepthReached: maxDepth,
-                targetChainLength: options.targetChainLength
+                targetChainLength: options.targetChainLength,
+                pairwiseOperationsProcessed,
+                tripletOperationsProcessed,
+                dagNodesExpanded,
+                dagEdgesEvaluated
             }
         });
     };
@@ -1587,6 +1599,7 @@ export async function searchStrettoChains(
                     }
                     stageStats.pairwiseTotal++;
                     pairwiseCompletedUnits++;
+                    pairwiseOperationsProcessed++;
                     if (pairwiseCompletedUnits % 128 === 0 || pairwiseCompletedUnits === pairwiseTotalUnits) {
                         emitStageProgress('pairwise', pairwiseCompletedUnits, pairwiseTotalUnits);
                     }
@@ -1759,6 +1772,7 @@ export async function searchStrettoChains(
         for (const p2 of nextPairs) {
             stageStats.tripleCandidates++;
             tripletCompletedUnits++;
+            tripletOperationsProcessed++;
             operationCounter++;
             if (shouldYieldToEventLoop(operationCounter)) {
                 await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -1909,6 +1923,7 @@ export async function searchStrettoChains(
         const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
         for (const p2 of nextPairsForIdx) {
             tripletCompletedUnits++;
+            tripletOperationsProcessed++;
             if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
                 emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
                 if (checkLimits()) break;
@@ -2265,6 +2280,7 @@ export async function searchStrettoChains(
             }
 
             for (const { varIdx, t, immPair, isRestricted, isFree } of candidateTransitions) {
+                dagEdgesEvaluated++;
                 const variant = variants[varIdx];
                 const isInv = variant.type === 'I';
                 const isTrunc = variant.truncationBeats > 0;
@@ -2461,6 +2477,7 @@ export async function searchStrettoChains(
     // so entries 3+ apart rarely overlap.
     function dfsExtend(node: DagNode): void {
         nodesVisited++;
+        dagNodesExpanded++;
         operationCounter++;
         maxDepth = Math.max(maxDepth, node.chain.length);
         emitDagProgress();
@@ -2884,6 +2901,7 @@ export async function searchStrettoChains(
                                         const successors = tripletJoinExtend(current);
                                         for (const succ of successors) {
                                             nodesVisited++;
+                                            dagNodesExpanded++;
                                             maxDepth = Math.max(maxDepth, succ.chain.length);
                                             emitDagProgress();
                                             if (succ.chain.length === options.targetChainLength) {
@@ -2920,6 +2938,7 @@ export async function searchStrettoChains(
 
             for (const node of frontier) {
                 nodesVisited++;
+                dagNodesExpanded++;
                 operationCounter++;
                 maxDepth = Math.max(maxDepth, node.chain.length);
                 emitDagProgress();
