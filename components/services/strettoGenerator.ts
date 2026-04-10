@@ -2944,15 +2944,15 @@ export async function searchStrettoChains(
                     await new Promise<void>((resolve) => setTimeout(resolve, 0));
                 }
 
-                if (checkLimits()) {
-                    stopTraversal = true;
-                    break;
-                }
-
                 // If target reached during Phase A (target <= PHASE_A_DEPTH)
                 if (node.chain.length === options.targetChainLength) {
                     recordCompletedChain(node.chain, node.variantIndices);
                     continue;
+                }
+
+                if (checkLimits()) {
+                    stopTraversal = true;
+                    break;
                 }
 
                 // At Phase A boundary: switch to DFS for remaining depth
