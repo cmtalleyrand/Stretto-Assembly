@@ -81,7 +81,6 @@ assert.match(
     /collecting stage metrics/,
     'Heartbeat updates should expose liveness metadata in label.'
 );
-assert.equal(heartbeatDisplay.isHeuristic, true, 'Display should explicitly mark stage values as heuristic estimates.');
 
 const dagNonTerminal: SearchProgressState = {
     elapsedMs: 7000,

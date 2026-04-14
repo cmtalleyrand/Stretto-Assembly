@@ -420,38 +420,38 @@ export default function StrettoSearchPanel({
                         <span className="font-semibold text-brand-primary">
                             {progressDisplay.stageLabel}
                             {progressDisplay.isHeartbeat ? ' · liveness heartbeat' : ''}
-                            <MetricHelp metricKey="runtimePhaseHeuristic" />
                         </span>
                         <span className="font-mono">
-                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est (heuristic)<MetricHelp metricKey="overallEstimatePercent" /> · {(searchProgress.elapsedMs / 1000).toFixed(1)}s<MetricHelp metricKey="elapsedProgressMs" />
+                            {progressDisplay.phaseLabel} · {progressDisplay.overallEstimatePercent}% est · {(searchProgress.elapsedMs / 1000).toFixed(1)}s<MetricHelp metricKey="elapsedProgressMs" />
                         </span>
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Stage estimate (heuristic): {progressDisplay.stageEstimatePercent}%<MetricHelp metricKey="stagePercent" /> · units {progressDisplay.unitLabel}
+                        {searchProgress.stage === 'dag'
+                            ? `Depth: ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength}`
+                            : `Stage progress: ${progressDisplay.stageEstimatePercent}% · units ${progressDisplay.unitLabel}`}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()}<MetricHelp metricKey="validPairs" /> · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()}<MetricHelp metricKey="validTriplets" /> · chains {searchProgress.telemetry.chainsFound.toLocaleString()}<MetricHelp metricKey="chainsFound" />
                     </div>
-                    {(typeof searchProgress.telemetry.pairwiseOperationsProcessed === 'number' || typeof searchProgress.telemetry.tripletOperationsProcessed === 'number') && (
-                        <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                            Pairwise ops {Math.max(0, searchProgress.telemetry.pairwiseOperationsProcessed ?? 0).toLocaleString()}<MetricHelp metricKey="pairwiseOperationsProcessed" /> · Triplet ops {Math.max(0, searchProgress.telemetry.tripletOperationsProcessed ?? 0).toLocaleString()}<MetricHelp metricKey="tripletOperationsProcessed" />
-                        </div>
-                    )}
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        Pairwise ops {searchProgress.telemetry.pairwiseOperationsProcessed.toLocaleString()}<MetricHelp metricKey="pairwiseOperationsProcessed" /> · Triplet ops {searchProgress.telemetry.tripletOperationsProcessed.toLocaleString()}<MetricHelp metricKey="tripletOperationsProcessed" />
+                    </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Max depth {searchProgress.telemetry.maxDepthReached}<MetricHelp metricKey="maxDepthReached" /> / target {searchProgress.telemetry.targetChainLength}<MetricHelp metricKey="targetChainLength" />
                     </div>
-                    {(typeof searchProgress.telemetry.dagNodesExpanded === 'number' || typeof searchProgress.telemetry.dagEdgesEvaluated === 'number') && (
-                        <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                            DAG nodes {Math.max(0, searchProgress.telemetry.dagNodesExpanded ?? 0).toLocaleString()}<MetricHelp metricKey="dagNodesExpanded" /> · DAG edges {Math.max(0, searchProgress.telemetry.dagEdgesEvaluated ?? 0).toLocaleString()}<MetricHelp metricKey="dagEdgesEvaluated" />
-                        </div>
-                    )}
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        {progressDisplay.throughputLabel} · {progressDisplay.etaLabel} (Throughput/ETA are wall-clock derived and do not assert algorithmic stage completion.)
+                        DAG nodes {searchProgress.telemetry.dagNodesExpanded.toLocaleString()}<MetricHelp metricKey="dagNodesExpanded" /> · DAG edges {searchProgress.telemetry.dagEdgesEvaluated.toLocaleString()}<MetricHelp metricKey="dagEdgesEvaluated" />
+                    </div>
+                    <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                        {progressDisplay.throughputLabel} · {progressDisplay.etaLabel}
                     </div>
                     <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                         <div
                             className="h-full bg-brand-primary transition-all duration-200"
-                            style={{ width: `${Math.max(2, progressDisplay.stageEstimatePercent)}%` }}
+                            style={{ width: searchProgress.stage === 'dag'
+                                ? `${Math.max(2, Math.round((searchProgress.telemetry.maxDepthReached / Math.max(1, searchProgress.telemetry.targetChainLength)) * 100))}%`
+                                : `${Math.max(2, progressDisplay.stageEstimatePercent)}%`
+                            }}
                         />
                     </div>
                 </div>

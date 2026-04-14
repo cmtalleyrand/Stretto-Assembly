@@ -37,13 +37,6 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
     incrementSite: 'Updated when traversal emits a deeper admissible chain prefix.',
     estimateClass: 'exact'
   },
-  runtimePhaseHeuristic: {
-    label: 'Budget phase label',
-    formalDefinition: 'Heuristic partition of wall-clock budget consumption used as a rough narrative phase indicator; not a proof of algorithmic completion.',
-    unit: 'categorical label',
-    incrementSite: 'Derived from elapsedBudgetPercent buckets in deriveSearchRuntimePresentation.',
-    estimateClass: 'heuristic'
-  },
   elapsedBudgetPercent: {
     label: 'Time budget usage',
     formalDefinition: 'Ratio of elapsed wall-clock milliseconds to configured maxSearchTimeMs, clamped to [0, 100].',
@@ -127,20 +120,6 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
     unit: 'count (nodes)',
     incrementSite: 'Updated when a frontier snapshot exceeds prior peak size.',
     estimateClass: 'exact'
-  },
-  stagePercent: {
-    label: 'Stage progress',
-    formalDefinition: 'Displayed completion percentage within the current progress stage, using stage units and heartbeat reconciliation.',
-    unit: 'percent (%)',
-    incrementSite: 'Derived by computeSearchProgressDisplay from current telemetry and accumulator state.',
-    estimateClass: 'heuristic'
-  },
-  overallEstimatePercent: {
-    label: 'Overall estimate',
-    formalDefinition: 'Cross-stage completion estimator combining phase priors and current stage progress.',
-    unit: 'percent (%)',
-    incrementSite: 'Derived by computeSearchProgressDisplay from stage priors and observed units.',
-    estimateClass: 'heuristic'
   },
   elapsedProgressMs: {
     label: 'Elapsed progress timer',

@@ -8,8 +8,6 @@ export interface SearchStatusPresentation {
 }
 
 export interface SearchRuntimePresentation {
-  algorithmPhase: string;
-  phaseDetail: string;
   elapsedMs: number;
   budgetMs: number;
   elapsedPercent: number;
@@ -30,40 +28,12 @@ function asPercent(numerator: number, denominator: number): number {
   return clampPercent((numerator / denominator) * 100);
 }
 
-function pickSearchPhase(elapsedPercent: number): Pick<SearchRuntimePresentation, 'algorithmPhase' | 'phaseDetail'> {
-  if (elapsedPercent < 20) {
-    return {
-      algorithmPhase: 'Pairwise Compatibility Precompute',
-      phaseDetail: 'Wall-clock budget segment aligned with early pairwise relation enumeration.'
-    };
-  }
-  if (elapsedPercent < 45) {
-    return {
-      algorithmPhase: 'Triplet Gate Construction',
-      phaseDetail: 'Wall-clock budget segment aligned with triad filtering under pairwise/lower-bound/contrapuntal constraints.'
-    };
-  }
-  if (elapsedPercent < 85) {
-    return {
-      algorithmPhase: 'Deterministic DAG Expansion',
-      phaseDetail: 'Wall-clock budget segment aligned with frontier traversal under lineage and interval policies.'
-    };
-  }
-  return {
-    algorithmPhase: 'Terminal Scoring & Selection',
-    phaseDetail: 'Wall-clock budget segment aligned with late-stage ranking and top-K emission.'
-  };
-}
-
 export function deriveSearchRuntimePresentation(elapsedMs: number, budgetMs: number): SearchRuntimePresentation {
   const safeBudgetMs = Math.max(1, Math.floor(budgetMs));
   const safeElapsedMs = Math.max(0, Math.floor(elapsedMs));
   const elapsedPercent = clampPercent((safeElapsedMs / safeBudgetMs) * 100);
   const estimatedRemainingMs = Math.max(0, safeBudgetMs - safeElapsedMs);
-  const phase = pickSearchPhase(elapsedPercent);
   return {
-    algorithmPhase: phase.algorithmPhase,
-    phaseDetail: phase.phaseDetail,
     elapsedMs: safeElapsedMs,
     budgetMs: safeBudgetMs,
     elapsedPercent,
