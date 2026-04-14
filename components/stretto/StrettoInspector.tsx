@@ -5,6 +5,7 @@ import { PlayIcon, StopIcon, DocumentTextIcon, DownloadIcon } from '../Icons';
 import PianoRoll from '../PianoRoll';
 import { playSpecificNotes } from '../midiPlaybackService';
 import { getFormattedTime } from '../services/midiHarmony';
+import { formatQuarterNoteUnits } from './quarterNoteUnits';
 
 interface StrettoInspectorProps {
     candidate: StrettoCandidate | null;
@@ -59,7 +60,7 @@ export default function StrettoInspector({
 
     const handleExportAnalysis = () => {
         if (!candidate) return;
-        let text = `STRETTO ANALYSIS REPORT\nCandidate ID: ${candidate.id}\nInterval: ${candidate.intervalLabel}\nDelay: ${candidate.delayBeats} Beats\n`;
+        let text = `STRETTO ANALYSIS REPORT\nCandidate ID: ${candidate.id}\nInterval: ${candidate.intervalLabel}\nDelay: ${formatQuarterNoteUnits(candidate.delayBeats)}\n`;
         text += `\nMETRICS\n`;
         text += `Dissonant Time: ${Math.round(candidate.dissonanceRatio * 100)}%\n`;
         text += `NCT Ratio: ${Math.round((candidate.nctRatio || 0) * 100)}%\n`;
@@ -158,7 +159,7 @@ export default function StrettoInspector({
                     <div className="flex justify-between items-start mb-4">
                         <div>
                             <h3 className="text-xl font-bold text-white">
-                                Stretto: {candidate.intervalLabel} @ {candidate.delayBeats}B
+                                Stretto: {candidate.intervalLabel} @ {formatQuarterNoteUnits(candidate.delayBeats)}
                             </h3>
                             
                             {/* HARMONIC VITALS BAR */}

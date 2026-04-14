@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { StrettoChainResult, StrettoChainOption, ScoreLog } from '../../types';
 import { getIntervalLabel } from '../services/midiSpelling';
 import { getVoiceLabel } from '../services/midiVoices';
+import { formatQuarterNoteUnits } from './quarterNoteUnits';
 
 interface StrettoResultsListProps {
     results: StrettoChainResult[];
@@ -148,9 +149,9 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                         {e.type === 'I' && <span className="text-[8px] text-blue-300">INVERT</span>}
                     </div>
 
-                    <div className="flex gap-1 text-[9px] font-mono" title={`Delay: +${relDist} / Start: @${absDist}`}>
-                        <span className="text-gray-400 w-1/2 text-center border-r border-gray-700">+{relDist.toFixed(1)}</span>
-                        <span className="text-white w-1/2 text-center">@{absDist.toFixed(1)}</span>
+                    <div className="flex gap-1 text-[9px] font-mono" title={`Delay: +${formatQuarterNoteUnits(relDist)} / Start: @${formatQuarterNoteUnits(absDist)}`}>
+                        <span className="text-gray-400 w-1/2 text-center border-r border-gray-700">+{formatQuarterNoteUnits(relDist)}</span>
+                        <span className="text-white w-1/2 text-center">@{formatQuarterNoteUnits(absDist)}</span>
                     </div>
                 </div>
             );
