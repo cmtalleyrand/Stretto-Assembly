@@ -10,6 +10,7 @@ import { getStrictPitchName } from '../services/midiSpelling';
 import { deriveSearchRuntimePresentation, deriveSearchStatusPresentation } from './searchStatus';
 import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRegions } from './harmonicRegionDiagnostics';
 import { metricHelpText } from './telemetryGlossary';
+import { STAGE_LABELS } from './searchProgressModel';
 
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
@@ -218,13 +219,11 @@ export default function StrettoChainView({
                             </div>
                         </div>
                     )}
-                    {runtimePresentation && (
+                    {runtimePresentation && searchProgress && (
                         <div className="border-b border-cyan-800/60 bg-cyan-950/20 p-2 text-[10px] text-cyan-100">
                             <div>
-                                <strong>Live Search Telemetry:</strong> Budget-phase heuristic: {runtimePresentation.algorithmPhase}
-                                <MetricHelp metricKey="runtimePhaseHeuristic" />
+                                <strong>Live Search Telemetry:</strong> {STAGE_LABELS[searchProgress.stage]}
                             </div>
-                            <div className="text-[9px] text-cyan-200 mt-0.5">{runtimePresentation.phaseDetail} This label tracks wall-clock budget segments, not guaranteed algorithmic completion milestones.</div>
                             <div className="mt-1 h-1.5 w-full rounded bg-cyan-900/60">
                                 <div
                                     className="h-1.5 rounded bg-cyan-400 transition-all"

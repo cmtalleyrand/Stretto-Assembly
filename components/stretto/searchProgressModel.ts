@@ -39,15 +39,14 @@ export interface SearchProgressDisplay {
     rateUnitLabel: string;
     stars: string;
     isHeartbeat: boolean;
-    isHeuristic: boolean;
 }
 
 const STAGE_ORDER: SearchProgressStage[] = ['pairwise', 'triplet', 'dag'];
 
-const STAGE_LABELS: Record<SearchProgressStage, string> = {
-    pairwise: 'Pairwise compatibility scan',
-    triplet: 'Triplet compatibility indexing',
-    dag: 'Chain expansion and scoring'
+export const STAGE_LABELS: Record<SearchProgressStage, string> = {
+    pairwise: 'Stage 1/3 — Pairwise compatibility',
+    triplet:  'Stage 2/3 — Triplet harmonic check',
+    dag:      'Stage 3/3 — Chain assembly',
 };
 
 const STAGE_SPAN_PERCENT = 100 / STAGE_ORDER.length;
@@ -96,7 +95,6 @@ export function computeSearchProgressDisplay(
             rateUnitLabel: 'units/s',
             stars: '☆☆☆☆☆☆☆☆☆☆',
             isHeartbeat: false,
-            isHeuristic: true
         };
     }
 
@@ -157,6 +155,5 @@ export function computeSearchProgressDisplay(
         rateUnitLabel,
         stars: '★'.repeat(filledStars).padEnd(10, '☆'),
         isHeartbeat: progress.heartbeat,
-        isHeuristic: true
     };
 }
