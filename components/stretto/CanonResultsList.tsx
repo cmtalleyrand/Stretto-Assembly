@@ -2,6 +2,7 @@
 import React, { useMemo, useState } from 'react';
 import { CanonChainResult, ScoreLog, CanonInversionPattern } from '../../types';
 import { getIntervalLabel } from '../services/midiSpelling';
+import { getVoiceLabel } from '../services/midiVoices';
 
 interface CanonResultsListProps {
     results: CanonChainResult[];
@@ -220,7 +221,7 @@ export default function CanonResultsList({ results, selectedId, onSelect }: Cano
                                             key={ei}
                                             className={`flex flex-col items-center bg-gray-800 px-1.5 py-0.5 rounded border text-[9px] min-w-[44px] ${e.type === 'I' ? 'border-brand-primary' : 'border-gray-600'}`}
                                         >
-                                            <span className="font-bold text-gray-300">V{e.voiceIndex}</span>
+                                            <span className="font-bold text-gray-300">{getVoiceLabel(e.voiceIndex, Math.max(...res.entries.map(en => en.voiceIndex + 1)))}</span>
                                             {ei > 0 && (
                                                 <span className="text-gray-500 font-mono">+{delay.toFixed(1)}b</span>
                                             )}
