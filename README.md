@@ -181,3 +181,26 @@ The canonical tuple `(d_i, t_i, v_i, inv_i, trunc_i)` is now documented as the n
 | Type surface (`types.ts::StrettoChainOption`) | Compatibility mode (legacy fields) |
 | Search/generation (`components/services/strettoGenerator.ts`) | Compatibility mode (legacy fields + `variantIndices`) |
 | UI rendering (`components/stretto/StrettoChainView.tsx`, `components/stretto/StrettoResultsList.tsx`) | Compatibility mode |
+
+## Test Tiering and Change-Type Mapping
+
+The test scripts are partitioned by deterministic cost and failure-surface breadth to minimize unnecessary runtime while preserving regression guarantees.
+
+### Script tiers
+
+| Script | Purpose | Included checks |
+|---|---|---|
+| `npm run test` | Default lightweight deterministic suite (target `< 2` minutes) for high-frequency local and CI execution. | `components/services/stretto-opt/compatMatrix.test.ts`, `components/stretto/selectionPolicy.test.ts`, `components/stretto/searchProgressModel.test.ts`, `components/services/midiSpelling.test.ts`, `server/assemblyProxyCore.test.ts`, `components/services/strettoScoringRegression.ts` |
+| `npm run test:integration` | Cross-module and parity verification where multiple subsystems interact. | `components/services/strettoIntegrationTest.ts`, `components/services/strettoPairwiseLogicCheck.ts`, `components/services/strettoPrecomputeBackendRegression.test.ts` |
+| `npm run test:heavy` | High-cost traversal and performance regression checks. | `components/services/strettoDagTraversalTest.ts`, `components/services/strettoPerformanceRegression.test.ts` |
+| `npm run test:all` | Strict superset gate for full validation. | `npm run test && npm run test:integration && npm run test:heavy` |
+
+### Change-type to test command mapping
+
+| Change type | Minimum required command | Rationale |
+|---|---|---|
+| UI-only (rendering/layout/state wiring with unchanged search/scoring semantics) | `npm run test` | Verifies deterministic utility and proxy behavior that can be transitively affected by UI data-flow refactors. |
+| Scoring logic (weights, penalties, ranking, compatibility scoring policy) | `npm run test && npm run test:integration` | Requires deterministic scoring regression plus integration-level validation of policy composition. |
+| Traversal logic (DAG expansion, frontier pruning, chain assembly invariants) | `npm run test && npm run test:heavy` | Requires baseline deterministic checks plus heavy traversal and performance regression. |
+| Precompute backend (parity tables, staged precompute, backend regression parity) | `npm run test:integration` | Integration tier includes backend regression parity and pairwise logic consistency checks. |
+| API/server contract (`/api/assembly`, proxy translation/validation paths) | `npm run test && npm run test:integration` | Combines core deterministic proxy checks with integration pathways that exercise end-to-end orchestration. |
