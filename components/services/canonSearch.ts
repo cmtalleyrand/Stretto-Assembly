@@ -30,8 +30,22 @@ import { SCALE_INTERVALS } from './strettoConstants';
 // Transposition sets
 // ---------------------------------------------------------------------------
 
-/** Traditional canon intervals (unison, 4th, 5th, octave, double-octave). */
-const TRADITIONAL_STEPS: number[] = [0, 5, -5, 7, -7, 12, -12, 24, -24];
+/**
+ * Traditional canon intervals.
+ * Includes unison, 4th/5th, octave, and compound intervals:
+ *   m10 (15), M10 (16), P11 (17), P12 (19), double-octave (24).
+ */
+const TRADITIONAL_STEPS: number[] = [
+    0,
+    5, -5,   // P4
+    7, -7,   // P5
+    12, -12, // P8
+    15, -15, // m10 (compound minor 3rd)
+    16, -16, // M10 (compound major 3rd)
+    17, -17, // P11 (compound 4th)
+    19, -19, // P12 (compound 5th)
+    24, -24, // P15 (double octave)
+];
 /** 3rds and 6ths added when allowThirdSixth is true. */
 const THIRD_SIXTH_STEPS: number[] = [3, -3, 4, -4, 8, -8, 9, -9];
 
@@ -321,9 +335,14 @@ export function runCanonSearch(
                         // Voice cycles through ensembleTotal
                         const voiceIndex = i % options.ensembleTotal;
 
-                        // Absolute transposition: each voice uses cycled slot's T offset
-                        // Slot = voiceIndex (position in cycle)
-                        const absoluteTransposition = voiceIndex * T;
+                        // Transposition mode:
+                        //   'absolute'   — entry 0 is at T=0, all subsequent entries use the
+                        //                 same T regardless of voice slot.
+                        //   'cumulative' — each voice slot adds one more T: voiceIndex * T
+                        const entryTransposition: number =
+                            (options.transpositionMode ?? 'absolute') === 'cumulative'
+                                ? voiceIndex * T
+                                : (voiceIndex === 0 ? 0 : T);
 
                         // Inversion: determined by pattern and entry index
                         const isInverted = (() => {
@@ -345,7 +364,7 @@ export function runCanonSearch(
 
                         const nextEntry: StrettoChainOption = {
                             startBeat: i * delayBeats,
-                            transposition: absoluteTransposition,
+                            transposition: entryTransposition,
                             type: isInverted ? 'I' : 'N',
                             length: variant.lengthTicks,
                             voiceIndex,

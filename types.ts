@@ -637,6 +637,8 @@ export interface StrettoSearchOptions {
 
 export type CanonInversionPattern = 'none' | 'alternating' | 'all-inverted';
 
+export type CanonTranspositionMode = 'absolute' | 'cumulative';
+
 export interface CanonSearchOptions {
     ensembleTotal: number;
     delayMinBeats: number;
@@ -650,6 +652,7 @@ export interface CanonSearchOptions {
     scaleRoot: number;
     scaleMode: string;
     subjectVoiceIndex: number;
+    transpositionMode: CanonTranspositionMode;
     voiceNames?: Record<number, string>;
 }
 
