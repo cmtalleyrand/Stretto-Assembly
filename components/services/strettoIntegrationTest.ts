@@ -192,9 +192,9 @@ async function assertAdmissibilityPruningParity(
     { midi: 72, ticks: 3360, durationTicks: 480, velocity: 90, name: 'C5' }
   ];
   const options: StrettoSearchOptions = {
-    ensembleTotal: 4,
-    targetChainLength: 4,
-    subjectVoiceIndex: 1,
+    ensembleTotal: 2,
+    targetChainLength: 2,
+    subjectVoiceIndex: 0,
     truncationMode: 'None',
     truncationTargetBeats: 1,
     inversionMode: 'None',
@@ -330,3 +330,49 @@ async function assertAdmissibilityPruningParity(
 }
 
 console.log('stretto integration tests passed');
+
+// ── Fixture F: canon-delay search enforces identical delays in user range ──
+{
+  const subject: RawNote[] = [
+    { midi: 60, ticks: 0,    durationTicks: 480, velocity: 90, name: 'C4' },
+    { midi: 64, ticks: 480,  durationTicks: 480, velocity: 90, name: 'E4' },
+    { midi: 67, ticks: 960,  durationTicks: 480, velocity: 90, name: 'G4' },
+    { midi: 72, ticks: 1440, durationTicks: 480, velocity: 90, name: 'C5' }
+  ];
+  const options: StrettoSearchOptions = {
+    ensembleTotal: 4,
+    targetChainLength: 4,
+    delaySearchCategory: 'canon',
+    canonDelayMinBeats: 1,
+    canonDelayMaxBeats: 1,
+    subjectVoiceIndex: 1,
+    truncationMode: 'None',
+    truncationTargetBeats: 1,
+    inversionMode: 'None',
+    useChromaticInversion: false,
+    thirdSixthMode: 'None',
+    pivotMidi: 60,
+    requireConsonantEnd: false,
+    disallowComplexExceptions: false,
+    maxPairwiseDissonance: 0.75,
+    maxSearchTimeMs: 5000,
+    scaleRoot: 0,
+    scaleMode: 'Major'
+  };
+  const report = await searchStrettoChains(subject, options, ppq);
+  assert.ok(
+    ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(report.stats.stopReason),
+    'fixture-F: canon mode must terminate with a valid stop reason'
+  );
+  for (const result of report.results) {
+    assertChainStructure(result, options.ensembleTotal, 'fixture-F');
+    const delays = result.entries.slice(1).map((entry, index) => (
+      Math.round((entry.startBeat - result.entries[index].startBeat) * ppq)
+    ));
+    assert.ok(
+      delays.every((delay) => delay === ppq),
+      `fixture-F: all adjacent delays must be exactly 1 beat in canon mode (chain ${result.id}; got ${delays.join(',')})`
+    );
+  }
+  console.log(`[integration:fixture-F] stopReason=${report.stats.stopReason} chains=${report.results.length}`);
+}

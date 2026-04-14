@@ -335,6 +335,17 @@ async function buildEntryStateAdmissibilityModel(
     targetChainLength: number,
     options: StrettoSearchOptions
 ): Promise<EntryStateAdmissibilityModel> {
+    const isCanonDelaySearch = options.delaySearchCategory === 'canon';
+    const ppq = delayStep * 2;
+    const canonDelayMinTicksRaw = Math.round((options.canonDelayMinBeats ?? 1) * ppq);
+    const canonDelayMaxTicksRaw = Math.round((options.canonDelayMaxBeats ?? 4) * ppq);
+    const canonDelayLowerTicks = Math.max(delayStep, Math.min(canonDelayMinTicksRaw, canonDelayMaxTicksRaw));
+    const canonDelayUpperTicks = Math.max(delayStep, Math.max(canonDelayMinTicksRaw, canonDelayMaxTicksRaw));
+    const canonDelayMinTicks = Math.ceil(canonDelayLowerTicks / delayStep) * delayStep;
+    const canonDelayMaxTicks = Math.floor(canonDelayUpperTicks / delayStep) * delayStep;
+    const isCanonicalDelayAllowed = (delayTicks: number): boolean => (
+        !isCanonDelaySearch || (delayTicks >= canonDelayMinTicks && delayTicks <= canonDelayMaxTicks)
+    );
     const allowedAbsoluteTranspositionSet = new Set(allowedAbsoluteTranspositions);
     const admissiblePairKeys: AdmissiblePairIndex = new Map();
     const addAdmissiblePair = (vA: number, vB: number, d: number, t: number): void => {
@@ -370,17 +381,26 @@ async function buildEntryStateAdmissibilityModel(
         let minD = delayStep;
         let maxD = Math.floor(state.prevEntryLengthTicks * (2 / 3));
         if (state.depth === 1) {
-            minD = Math.floor(state.prevEntryLengthTicks * 0.5);
+            if (isCanonDelaySearch) {
+                minD = canonDelayMinTicks;
+                maxD = canonDelayMaxTicks;
+            } else {
+                minD = Math.floor(state.prevEntryLengthTicks * 0.5);
+            }
         } else {
             const prevDelayTicks = state.prevDelayTicks!;
             const prevSubjectLengthTicks = state.prevEntryLengthTicks;
+            if (isCanonDelaySearch) {
+                minD = prevDelayTicks;
+                maxD = prevDelayTicks;
+            } else {
+                minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
 
-            minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
-
-            if (state.prevPrevDelayTicks !== null) {
-                const prevPrevDelayTicks = state.prevPrevDelayTicks;
-                if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
-                    maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
+                if (state.prevPrevDelayTicks !== null) {
+                    const prevPrevDelayTicks = state.prevPrevDelayTicks;
+                    if (prevDelayTicks > prevPrevDelayTicks && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
+                        maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
+                    }
                 }
             }
 
@@ -391,10 +411,11 @@ async function buildEntryStateAdmissibilityModel(
         if (minD > maxD) continue;
 
         for (let delayTicks = minD; delayTicks <= maxD; delayTicks += delayStep) {
+            if (!isCanonicalDelayAllowed(delayTicks)) continue;
             if (state.depth >= 2) {
                 const prevDelayTicks = state.prevDelayTicks!;
                 const halfSubjectTicks = state.prevEntryLengthTicks / 2;
-                if ((prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
+                if (!isCanonDelaySearch && (prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
             }
 
             for (const relTransposition of relativeTranspositionDeltas) {
@@ -1400,17 +1421,34 @@ export async function searchStrettoChains(
 
     // Delays happen in half-beat intervals (8th notes)
     const delayStep = ppq / 2;
+    const isCanonDelaySearch = options.delaySearchCategory === 'canon';
 
     // Adjacent delays: used for triplet enumeration (rule A.6 cap at 2/3 Sb)
     const validAdjacentDelays: number[] = [];
     const maxAdjacentDelayTicks = Math.floor(subjectLengthTicks * (2/3));
-    for (let d = delayStep; d <= maxAdjacentDelayTicks; d += delayStep) validAdjacentDelays.push(d);
+    const canonDelayMinTicksRaw = Math.round((options.canonDelayMinBeats ?? 1) * ppq);
+    const canonDelayMaxTicksRaw = Math.round((options.canonDelayMaxBeats ?? 4) * ppq);
+    const canonDelayLowerTicks = Math.max(delayStep, Math.min(canonDelayMinTicksRaw, canonDelayMaxTicksRaw));
+    const canonDelayUpperTicks = Math.max(delayStep, Math.max(canonDelayMinTicksRaw, canonDelayMaxTicksRaw));
+    const maxPairwiseDelayTicks = subjectLengthTicks - delayStep;
+    const normalizedCanonDelayMinTicks = Math.ceil(canonDelayLowerTicks / delayStep) * delayStep;
+    const normalizedCanonDelayMaxTicks = Math.floor(Math.min(canonDelayUpperTicks, maxPairwiseDelayTicks) / delayStep) * delayStep;
+    const canonDelayTicks = new Set<number>();
+    if (isCanonDelaySearch && normalizedCanonDelayMinTicks <= normalizedCanonDelayMaxTicks) {
+        for (let d = normalizedCanonDelayMinTicks; d <= normalizedCanonDelayMaxTicks; d += delayStep) {
+            canonDelayTicks.add(d);
+        }
+    }
+    for (let d = delayStep; d <= maxAdjacentDelayTicks; d += delayStep) {
+        if (!isCanonDelaySearch || canonDelayTicks.has(d)) validAdjacentDelays.push(d);
+    }
 
     // Pairwise delays: extends to Sb - delayStep for long-range pair lookups.
     // Entries i and j overlap whenever cumulative delay < Sb, which can exceed 2/3 Sb.
     const validPairwiseDelays: number[] = [];
-    const maxPairwiseDelayTicks = subjectLengthTicks - delayStep;
-    for (let d = delayStep; d <= maxPairwiseDelayTicks; d += delayStep) validPairwiseDelays.push(d);
+    for (let d = delayStep; d <= maxPairwiseDelayTicks; d += delayStep) {
+        if (!isCanonDelaySearch || canonDelayTicks.has(d)) validPairwiseDelays.push(d);
+    }
 
     // Legacy alias used by stageStats and admissibility model
     const validDelays = validAdjacentDelays;
@@ -1738,7 +1776,9 @@ export async function searchStrettoChains(
     // pairwise lookup (getPairRecord) but must NOT drive p1/p2 triplet enumeration — they
     // represent cumulative offsets, not individual chain delays, and would violate A.6.
     // Pre-filter to adjacent-only for the O(N²) triplet loops; this restores pre-extension perf.
-    const adjacentValidPairsList = validPairsList.filter(p => p.d <= maxAdjacentDelayTicks);
+    const adjacentValidPairsList = validPairsList.filter((p) => (
+        isCanonDelaySearch ? canonDelayTicks.has(p.d) : p.d <= maxAdjacentDelayTicks
+    ));
     const adjacentNextPairsByVariant = new Map<number, PairTuple[]>();
     for (const p of adjacentValidPairsList) {
         let list = adjacentNextPairsByVariant.get(p.vA);
@@ -1791,9 +1831,11 @@ export async function searchStrettoChains(
             const vC = p2.vB;
             const vCVariant = variants[vC];
 
-            // A.10: no truncated entries at delay >= 0.5*Sb
-            if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) continue;
-            if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) continue;
+            // A.10: no truncated entries at delay >= 0.5*Sb (disabled in canon-delay mode)
+            if (!isCanonDelaySearch) {
+                if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) continue;
+                if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) continue;
+            }
 
             // A.8: Transform-following — transformed entry must be followed by normal
             const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
@@ -1802,13 +1844,17 @@ export async function searchStrettoChains(
             if (aTransformed && bTransformed) continue;
             if (bTransformed && cTransformed) continue;
 
-            // Max expansion
-            if (!passesTripletStage(stageStats, d2 <= d1 + delayStep)) continue;
+            // Delay progression constraints:
+            // - Stretto mode: bounded expansion (A.x local shape guard)
+            // - Canon mode: all delays must be identical
+            if (!passesTripletStage(stageStats, isCanonDelaySearch ? d2 === d1 : d2 <= d1 + delayStep)) continue;
 
-            // A.2, A.5, A.4 on the d1→d2 edge — independent of dCtx
-            if (!satisfiesHalfLengthTrigger(d1, d2)) continue;
-            if (!satisfiesMaximumContractionBound(d1, d2)) continue;
-            if (!satisfiesPostTruncationContraction(vB, d1, d2)) continue;
+            // A.2, A.5, A.4 on the d1→d2 edge — disabled in canon-delay mode
+            if (!isCanonDelaySearch) {
+                if (!satisfiesHalfLengthTrigger(d1, d2)) continue;
+                if (!satisfiesMaximumContractionBound(d1, d2)) continue;
+                if (!satisfiesPostTruncationContraction(vB, d1, d2)) continue;
+            }
 
             // Fetch pairBC only after all cheap checks have passed
             const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
@@ -1873,12 +1919,16 @@ export async function searchStrettoChains(
 
             let tripletHasValidDelayContext = false;
             for (const dCtx of validTripletDelayAs) {
-                // A.1 local: pairwise high-delay uniqueness across (dCtx, d1, d2)
-                if (!hasPairwiseHighDelayUniqueness(dCtx, d1, d2)) continue;
+                if (isCanonDelaySearch) {
+                    if (dCtx !== 0 && dCtx !== d1) continue;
+                } else {
+                    // A.1 local: pairwise high-delay uniqueness across (dCtx, d1, d2)
+                    if (!hasPairwiseHighDelayUniqueness(dCtx, d1, d2)) continue;
+                }
 
                 // dCtx = 0 is the sentinel for the chain start (no real predecessor before e0).
                 // Apply A.3 with dCtx = 0, but skip A.2/A.4/A.5 on the synthetic 0→d_1 edge.
-                if (dCtx !== 0) {
+                if (!isCanonDelaySearch && dCtx !== 0) {
                     if (!satisfiesHalfLengthTrigger(dCtx, d1)) continue;
                     if (!satisfiesMaximumContractionBound(dCtx, d1)) continue;
                     if (!satisfiesPostTruncationContraction(vA, dCtx, d1)) continue;
@@ -2131,34 +2181,43 @@ export async function searchStrettoChains(
         let maxD = Math.floor(prevEntryLengthTicks * (2 / 3));
 
         if (depth === 1) {
-            minD = Math.floor(prevEntryLengthTicks * 0.5);
+            if (isCanonDelaySearch) {
+                minD = normalizedCanonDelayMinTicks;
+                maxD = normalizedCanonDelayMaxTicks;
+            } else {
+                minD = Math.floor(prevEntryLengthTicks * 0.5);
+            }
         } else if (depth > 1) {
             const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
             const prevSubjectLengthTicks = chain[depth - 1].length;
+            if (isCanonDelaySearch) {
+                minD = prevDelayTicks;
+                maxD = prevDelayTicks;
+            } else {
+                // Long-delay contraction (OR form):
+                // if d_i >= 0.5*Sl OR d_{i+1} >= 0.5*Sl, then d_{i+1} < d_i.
+                // Candidate-side (d_{i+1}) portion is applied below during per-candidate filtering.
+                if (prevDelayTicks >= (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
+                else maxD = Math.min(maxD, prevDelayTicks + delayStep);
 
-            // Long-delay contraction (OR form):
-            // if d_i >= 0.5*Sl OR d_{i+1} >= 0.5*Sl, then d_{i+1} < d_i.
-            // Candidate-side (d_{i+1}) portion is applied below during per-candidate filtering.
-            if (prevDelayTicks >= (prevSubjectLengthTicks / 2)) maxD = Math.min(maxD, prevDelayTicks - delayStep);
-            else maxD = Math.min(maxD, prevDelayTicks + delayStep);
+                // Maximum contraction bound:
+                // d_i - d_{i+1} <= 0.25*Sl  =>  d_{i+1} >= d_i - 0.25*Sl.
+                minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
 
-            // Maximum contraction bound:
-            // d_i - d_{i+1} <= 0.25*Sl  =>  d_{i+1} >= d_i - 0.25*Sl.
-            minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
-
-            if (depth >= 3) {
-                const prevPrevDelayTicks = Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq);
-                // A.3 Expansion recoil: if d_{n-1} > d_{n-2} and d_{n-1} > Sb/3, then d_n < d_{n-2} - 0.5.
-                // Under strict gate (depth < 7), the Sb/3 threshold is bypassed — recoil always applies.
-                const recoilThresholdMet = !isFinalThird || prevDelayTicks > (prevSubjectLengthTicks / 3);
-                if (prevDelayTicks > prevPrevDelayTicks && recoilThresholdMet) {
-                    maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
+                if (depth >= 3) {
+                    const prevPrevDelayTicks = Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq);
+                    // A.3 Expansion recoil: if d_{n-1} > d_{n-2} and d_{n-1} > Sb/3, then d_n < d_{n-2} - 0.5.
+                    // Under strict gate (depth < 7), the Sb/3 threshold is bypassed — recoil always applies.
+                    const recoilThresholdMet = !isFinalThird || prevDelayTicks > (prevSubjectLengthTicks / 3);
+                    if (prevDelayTicks > prevPrevDelayTicks && recoilThresholdMet) {
+                        maxD = Math.min(maxD, prevPrevDelayTicks - delayStep);
+                    }
                 }
-            }
 
-            const prevIsTruncated = chain[depth - 1].length < chain[0].length;
-            if (prevIsTruncated && prevDelayTicks >= (prevSubjectLengthTicks / 3)) {
-                maxD = Math.min(maxD, prevDelayTicks - (2 * delayStep));
+                const prevIsTruncated = chain[depth - 1].length < chain[0].length;
+                if (prevIsTruncated && prevDelayTicks >= (prevSubjectLengthTicks / 3)) {
+                    maxD = Math.min(maxD, prevDelayTicks - (2 * delayStep));
+                }
             }
         }
 
@@ -2195,18 +2254,21 @@ export async function searchStrettoChains(
         }
 
         for (const delayTicks of possibleDelaysTicks) {
+            if (isCanonDelaySearch && !canonDelayTicks.has(delayTicks)) continue;
             // A.1 Global Uniqueness: delays > Sb/3 must be unique across the chain.
             // Under the strict rule gate (depth < 7), ALL delays are treated as long
             // so uniqueness is always required. This simplifies triplet precomputation.
             const delayIsLong = delayTicks > oneThirdSubjectTicks || !isFinalThird;
-            if (delayIsLong && usedLongDelays.has(delayTicks)) {
-                stageStats.globalLineageStageRejected++;
-                continue;
+            if (!isCanonDelaySearch) {
+                if (delayIsLong && usedLongDelays.has(delayTicks)) {
+                    stageStats.globalLineageStageRejected++;
+                    continue;
+                }
             }
 
             if (depth >= 2) {
                 const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-                if (Math.abs(delayTicks - prevDelayTicks) < 1) {
+                if (!isCanonDelaySearch && Math.abs(delayTicks - prevDelayTicks) < 1) {
                     const isDelayShort = prevDelayTicks <= (prevEntryLengthTicks / 3);
                     if (!(isFinalThird && isDelayShort)) continue;
                 }
@@ -2264,8 +2326,8 @@ export async function searchStrettoChains(
                     for (let varIdx = 0; varIdx < variants.length; varIdx++) {
                         // A.9: e1 must not be inverted
                         if (depth === 1 && variants[varIdx].type === 'I') continue;
-                        // A.10: no truncated entries at delay >= 0.5*Sb
-                        if (delayTicks >= subjectLengthTicks / 2 && variants[varIdx].truncationBeats > 0) continue;
+                        // A.10: no truncated entries at delay >= 0.5*Sb (disabled in canon-delay mode)
+                        if (!isCanonDelaySearch && delayTicks >= subjectLengthTicks / 2 && variants[varIdx].truncationBeats > 0) continue;
                         const immPrevVarIdx = variantIndices[depth - 1];
                         const immRelTrans = t - chain[depth - 1].transposition;
                         const immPair = precomputeIndex.getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
@@ -2373,7 +2435,7 @@ export async function searchStrettoChains(
 
                     edgesTraversed++;
                     // Propagate A.1 delay-set: under strict gate (depth < 7), all delays are tracked.
-                    const needsNewLongDelaySet = delayIsLong && !usedLongDelays.has(delayTicks);
+                    const needsNewLongDelaySet = !isCanonDelaySearch && delayIsLong && !usedLongDelays.has(delayTicks);
                     const newUsedLongDelays = needsNewLongDelaySet
                         ? new Set(usedLongDelays).add(delayTicks)
                         : usedLongDelays;
@@ -2532,7 +2594,7 @@ export async function searchStrettoChains(
     // transition window index. This avoids re-deriving constraints already
     // established during triplet precomputation.
 
-    if (options.targetChainLength >= 7 && allTripletRecords.length > 0) {
+    if (!isCanonDelaySearch && options.targetChainLength >= 7 && allTripletRecords.length > 0) {
         // --- Triplet-Join Phase A: build 7-entry prefixes (e0–e6) ---
         const e0Entry: StrettoChainOption = {
             startBeat: 0, transposition: 0, type: 'N',
