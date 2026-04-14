@@ -4,6 +4,7 @@ import { StrettoCandidate, StrettoGrade, StrettoListFilterContext, StrettoListSo
 import { getStrictPitchName } from '../services/midiSpelling';
 import { DocumentTextIcon } from '../Icons';
 import { normalizeLexical, normalizeNumericStrings } from './filterContextNormalization';
+import { formatQuarterNoteUnits } from './quarterNoteUnits';
 
 interface StrettoListProps {
     candidates: StrettoCandidate[];
@@ -175,10 +176,10 @@ export default function StrettoList({
 
             if (isTriplet) {
                 const nct = `${Math.round((r.nctRatio || 0) * 100)}%`;
-                const d2 = r.delayBeats2 != null ? `${r.delayBeats2}B` : '?';
-                md += `| ${r.intervalLabel} | ${r.delayBeats}B | ${d2} | ${entryNote} | ${diss} | ${nct} | ${intent} | ${errs} |\n`;
+                const d2 = r.delayBeats2 != null ? formatQuarterNoteUnits(r.delayBeats2) : '?';
+                md += `| ${r.intervalLabel} | ${formatQuarterNoteUnits(r.delayBeats)} | ${d2} | ${entryNote} | ${diss} | ${nct} | ${intent} | ${errs} |\n`;
             } else {
-                md += `| ${r.intervalLabel} | ${r.delayBeats}B | ${entryNote} | ${diss} | ${intent} | ${errs} |\n`;
+                md += `| ${r.intervalLabel} | ${formatQuarterNoteUnits(r.delayBeats)} | ${entryNote} | ${diss} | ${intent} | ${errs} |\n`;
             }
         });
 
@@ -213,7 +214,7 @@ export default function StrettoList({
                         onClick={() => update(toggleFilterSet(current, item))}
                         className={`px-1.5 py-0.5 text-[9px] font-bold rounded transition-all border ${current.has(item) ? 'bg-brand-primary border-brand-primary text-white shadow-sm' : 'bg-gray-800 border-gray-600 text-gray-500 hover:border-gray-400'}`}
                     >
-                        {item}
+                        {label === 'Delays' ? formatQuarterNoteUnits(parseFloat(item)) : item}
                     </button>
                 ))}
             </div>
@@ -349,10 +350,10 @@ export default function StrettoList({
                                 {/* Delay: triplet shows "e1 delay | e2 delay" (both from e0), pairwise shows single delay */}
                                 {isTriplet ? (
                                     <span className="col-span-2 text-gray-300 text-[10px] font-mono">
-                                        {r.delayBeats}B&nbsp;|&nbsp;{r.delayBeats2 != null ? `${r.delayBeats2}B` : '?'}
+                                        {formatQuarterNoteUnits(r.delayBeats)}&nbsp;|&nbsp;{r.delayBeats2 != null ? formatQuarterNoteUnits(r.delayBeats2) : '?'}
                                     </span>
                                 ) : (
-                                    <span className="col-span-1 text-gray-300 text-[10px]">{r.delayBeats}B</span>
+                                    <span className="col-span-1 text-gray-300 text-[10px]">{formatQuarterNoteUnits(r.delayBeats)}</span>
                                 )}
                                 <span className="col-span-1 text-gray-500 text-[10px] font-mono">{entryNote}</span>
 

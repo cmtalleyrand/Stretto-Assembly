@@ -278,12 +278,12 @@ export default function StrettoConfig({
                             onClick={() => setSearchRes(res)}
                             className={`px-2 py-2 rounded text-xs font-bold border transition-all ${searchRes === res ? 'bg-brand-primary text-white border-brand-primary shadow-lg' : 'bg-gray-900 border-gray-700 text-gray-500 hover:bg-gray-800'}`}
                         >
-                            {res === 'half' ? '1/2 Beat' : res === 'full' ? 'Beat' : '2 Beats'}
+                            {res === 'half' ? '1/2Q' : res === 'full' ? '1Q' : '2Q'}
                         </button>
                     ))}
                 </div>
                 <p className="text-[10px] text-gray-500 mt-2">
-                    Defines how frequently the algorithm checks for entry points.
+                    Defines how frequently the algorithm checks for entry points (in quarter-note units).
                 </p>
             </div>
         </div>

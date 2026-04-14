@@ -112,7 +112,7 @@ export default function StrettoSearchPanel({
         return (
             <div className="w-full h-16 bg-gray-900 border border-gray-700 rounded mt-2 relative overflow-hidden select-none">
                 <svg className="w-full h-full" preserveAspectRatio="none" viewBox={`0 0 ${totalDuration} ${range}`}>
-                    {/* Background Grid (Beats) */}
+                    {/* Background Grid (Quarter notes) */}
                     {Array.from({ length: Math.ceil(totalDuration / effectivePpq) }).map((_, i) => (
                         <line 
                             key={i} 
@@ -171,7 +171,7 @@ export default function StrettoSearchPanel({
                     />
                 </svg>
                 <div className="absolute top-1 right-1 text-[9px] bg-black/50 px-1 rounded text-gray-400">
-                    {options.truncationTargetBeats} Beats / {(totalDuration/ppq).toFixed(1)} Total
+                    {options.truncationTargetBeats}Q / {(totalDuration/ppq).toFixed(1)}Q total
                 </div>
             </div>
         );
@@ -280,7 +280,7 @@ export default function StrettoSearchPanel({
                         {(options.delaySearchCategory ?? 'stretto') === 'canon' && (
                             <div className="mt-2 grid grid-cols-2 gap-2">
                                 <label className="text-[9px] text-gray-500 flex flex-col gap-1">
-                                    Min Delay (beats)
+                                    Min Delay (Q)
                                     <input
                                         type="number"
                                         min="0.5"
@@ -291,7 +291,7 @@ export default function StrettoSearchPanel({
                                     />
                                 </label>
                                 <label className="text-[9px] text-gray-500 flex flex-col gap-1">
-                                    Max Delay (beats)
+                                    Max Delay (Q)
                                     <input
                                         type="number"
                                         min="0.5"
@@ -322,7 +322,7 @@ export default function StrettoSearchPanel({
                     />
                     <div className={`flex flex-col gap-2 px-1 transition-opacity ${options.truncationMode === 'None' ? 'opacity-30 pointer-events-none' : ''}`}>
                         <div className="flex items-center gap-2">
-                            <label className="text-[9px] text-gray-500 block">Cut Length (Beats)</label>
+                            <label className="text-[9px] text-gray-500 block">Cut Length (Q)</label>
                             <input 
                                 type="number" 
                                 min="0.5" step="0.5"
