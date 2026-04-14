@@ -400,7 +400,8 @@ export function analyzeStrettoCandidate(
     pivotMidi: number = 60,
     useChromaticInversion: boolean = false,
     keyRoot: number = 0, // New param for spelling
-    maxPairwiseDissonance: number = 1
+    maxPairwiseDissonance: number = 1,
+    scaleMode: string = 'Major'
 ): StrettoCandidate {
     
     if (subject.length === 0) {
@@ -417,8 +418,8 @@ export function analyzeStrettoCandidate(
         let newMidi: number;
         
         if (isInverted) {
-            const rawInverted = getInvertedPitch(n.midi, pivotMidi, keyRoot, 'Major', useChromaticInversion);
-            const invertedStart = getInvertedPitch(subjectEntryPitch, pivotMidi, keyRoot, 'Major', useChromaticInversion);
+            const rawInverted = getInvertedPitch(n.midi, pivotMidi, keyRoot, scaleMode, useChromaticInversion);
+            const invertedStart = getInvertedPitch(subjectEntryPitch, pivotMidi, keyRoot, scaleMode, useChromaticInversion);
             const targetStart = subjectEntryPitch + intervalSemis;
             const shift = targetStart - invertedStart;
             newMidi = rawInverted + shift;
@@ -598,7 +599,8 @@ export function analyzeStrettoTripletCandidate(
     pivotMidi: number = 60,
     useChromaticInversion: boolean = false,
     keyRoot: number = 0,
-    maxPairwiseDissonance: number = 1
+    maxPairwiseDissonance: number = 1,
+    scaleMode: string = 'Major'
 ): StrettoCandidate {
     if (subject.length === 0) {
         return {
@@ -613,8 +615,8 @@ export function analyzeStrettoTripletCandidate(
             if (!n) return null as any;
             let newMidi: number;
             if (isInverted) {
-                const rawInverted = getInvertedPitch(n.midi, pivotMidi, keyRoot, 'Major', useChromaticInversion);
-                const invertedStart = getInvertedPitch(subjectEntryPitch, pivotMidi, keyRoot, 'Major', useChromaticInversion);
+                const rawInverted = getInvertedPitch(n.midi, pivotMidi, keyRoot, scaleMode, useChromaticInversion);
+                const invertedStart = getInvertedPitch(subjectEntryPitch, pivotMidi, keyRoot, scaleMode, useChromaticInversion);
                 const targetStart = subjectEntryPitch + intervalSemis;
                 const shift = targetStart - invertedStart;
                 newMidi = rawInverted + shift;

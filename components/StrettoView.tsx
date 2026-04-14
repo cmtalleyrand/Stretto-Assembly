@@ -402,9 +402,9 @@ export default function StrettoView({
             if (discoveryArity === 'pairwise') {
                 intervalsToCheck.forEach(interval => {
                     for (let d = effectiveMinDelay; d <= effectiveMaxDelay; d += stepTicks) {
-                        candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                        candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance, searchOptions.scaleMode));
                         if (includeInversions) {
-                            candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                            candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance, searchOptions.scaleMode));
                         }
                     }
                 });
@@ -433,7 +433,8 @@ export default function StrettoView({
                                             searchOptions.pivotMidi,
                                             searchOptions.useChromaticInversion,
                                             searchOptions.scaleRoot,
-                                            searchOptions.maxPairwiseDissonance
+                                            searchOptions.maxPairwiseDissonance,
+                                            searchOptions.scaleMode
                                         )
                                     );
                                 }
@@ -686,7 +687,8 @@ export default function StrettoView({
                             pivotMidi,
                             searchOptions.useChromaticInversion,
                             searchOptions.scaleRoot,
-                            searchOptions.maxPairwiseDissonance
+                            searchOptions.maxPairwiseDissonance,
+                            searchOptions.scaleMode
                         );
                         observations.push({
                             delayTicks: candidate.delayTicks,
