@@ -14,6 +14,7 @@ interface StrettoSearchWorkerProgress {
   stage: StrettoSearchProgressStage;
   completedUnits: number;
   totalUnits: number;
+  terminal: boolean;
   telemetry: {
     validPairs: number;
     validTriplets: number;
@@ -63,7 +64,7 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
       triplet: 'Triplet compatibility indexing',
       dag: 'Chain expansion and scoring'
     };
-    const weightedStagePercent = (stage: StrettoSearchProgressStage, completedUnits: number, totalUnits: number): number => {
+    const weightedStagePercent = (stage: StrettoSearchProgressStage, completedUnits: number, totalUnits: number, terminal: boolean): number => {
       const boundedTotal = Math.max(1, totalUnits);
       const boundedCompleted = Math.max(0, Math.min(completedUnits, boundedTotal));
       const stageRatio = boundedCompleted / boundedTotal;
@@ -76,7 +77,7 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
         completedWeight += STAGE_WEIGHTS[s];
       }
       const rawPercent = Math.round(completedWeight * 100);
-      const isComplete = stage === 'dag' && boundedCompleted >= boundedTotal;
+      const isComplete = stage === 'dag' && boundedCompleted >= boundedTotal && terminal;
       return isComplete ? 100 : Math.max(0, Math.min(99, rawPercent));
     };
     let hasConcreteProgress = false;
@@ -92,6 +93,7 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
         stage: 'pairwise',
         completedUnits: 0,
         totalUnits: 1,
+        terminal: false,
         telemetry: {
           validPairs: 0,
           validTriplets: 0,
@@ -116,7 +118,7 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
     const report = await searchStrettoChains(subject, options, ppq, (progress) => {
       hasConcreteProgress = true;
       const elapsedMs = Date.now() - searchStartedAt;
-      const weightedPercent = weightedStagePercent(progress.stage, progress.completedUnits, progress.totalUnits);
+      const weightedPercent = weightedStagePercent(progress.stage, progress.completedUnits, progress.totalUnits, progress.terminal);
       const progressPayload: StrettoSearchWorkerProgress = {
         ok: true,
         kind: 'progress',
@@ -124,6 +126,7 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
         stage: progress.stage,
         completedUnits: progress.completedUnits,
         totalUnits: progress.totalUnits,
+        terminal: progress.terminal,
         telemetry: progress.telemetry,
         heartbeat: false,
         progressPercent: weightedPercent,
