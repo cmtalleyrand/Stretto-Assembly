@@ -632,3 +632,43 @@ export interface StrettoSearchOptions {
     maxSearchTimeMs?: number;
     collectDiagnosticSpans?: boolean;
 }
+
+// --- Canon Search Types ---
+
+export type CanonInversionPattern = 'none' | 'alternating' | 'all-inverted';
+
+export interface CanonSearchOptions {
+    ensembleTotal: number;
+    delayMinBeats: number;
+    delayMaxBeats: number;
+    chainLengthMin: number;
+    chainLengthMax: number;
+    allowInversions: boolean;
+    allowThirdSixth: boolean;
+    pivotMidi: number;
+    useChromaticInversion: boolean;
+    scaleRoot: number;
+    scaleMode: string;
+    subjectVoiceIndex: number;
+    voiceNames?: Record<number, string>;
+}
+
+export interface CanonChainResult {
+    id: string;
+    entries: StrettoChainOption[];
+    score: number;
+    scoreLog?: ScoreLog;
+    delayBeats: number;
+    transpositionStep: number;
+    chainLength: number;
+    inversionPattern: CanonInversionPattern;
+    detectedChords?: string[];
+    autoTruncatedBeats: number;
+    warnings: string[];
+}
+
+export interface CanonSearchReport {
+    results: CanonChainResult[];
+    totalEvaluated: number;
+    timeMs: number;
+}
