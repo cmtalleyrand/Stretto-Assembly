@@ -118,7 +118,7 @@ export default function StrettoView({
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
     const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain'); 
     const [discoveryArity, setDiscoveryArity] = useState<'pairwise' | 'triplet'>('pairwise');
-    const [tripletDelayOrderingMode, setTripletDelayOrderingMode] = useState<TripletDelayOrderingMode>('allow_equal');
+    const [tripletDelayOrderingMode, setTripletDelayOrderingMode] = useState<TripletDelayOrderingMode>('ordered');
     
     const [gradeFilter, setGradeFilter] = useState<Record<StrettoGrade, boolean>>({
         'STRONG': true,
@@ -687,19 +687,19 @@ export default function StrettoView({
                             <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Delay Ordering:</span>
                             <button
                                 type="button"
-                                onClick={() => setTripletDelayOrderingMode('allow_equal')}
-                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'allow_equal' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                                title="Unconstrained temporal ordering: d2 >= d1"
+                                onClick={() => setTripletDelayOrderingMode('ordered')}
+                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'ordered' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                                title="Constrained temporal ordering: d2 >= d1"
                             >
-                                d2 ≥ d1 (default)
+                                Constrained (d2 ≥ d1)
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setTripletDelayOrderingMode('strict_increasing')}
-                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'strict_increasing' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                                title="Strict temporal ordering: d2 > d1"
+                                onClick={() => setTripletDelayOrderingMode('unconstrained')}
+                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'unconstrained' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                                title="Unconstrained temporal ordering: d2 can be less than, equal to, or greater than d1"
                             >
-                                d2 &gt; d1
+                                Unconstrained (any d1,d2)
                             </button>
                         </div>
                     )}

@@ -3,7 +3,7 @@ export type TripletInversionPair = {
   secondIsInverted: boolean;
 };
 
-export type TripletDelayOrderingMode = 'allow_equal' | 'strict_increasing';
+export type TripletDelayOrderingMode = 'unconstrained' | 'ordered';
 
 export function enumerateTripletInversionPairs(includeInversions: boolean): TripletInversionPair[] {
   if (!includeInversions) {
@@ -23,5 +23,5 @@ export function computeSecondDelayStart(
   stepTicks: number,
   mode: TripletDelayOrderingMode
 ): number {
-  return mode === 'allow_equal' ? firstDelayTicks : firstDelayTicks + stepTicks;
+  return mode === 'ordered' ? firstDelayTicks : stepTicks;
 }
