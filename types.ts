@@ -604,10 +604,14 @@ export interface StrettoSearchReport {
 }
 
 export type StrettoConstraintMode = 'None' | 'Unlimited' | number;
+export type StrettoDelaySearchCategory = 'stretto' | 'canon';
 
 export interface StrettoSearchOptions {
     ensembleTotal: number;
     targetChainLength: number;
+    delaySearchCategory?: StrettoDelaySearchCategory;
+    canonDelayMinBeats?: number;
+    canonDelayMaxBeats?: number;
     subjectVoiceIndex: number;
     truncationMode: StrettoConstraintMode;
     truncationTargetBeats: number; 

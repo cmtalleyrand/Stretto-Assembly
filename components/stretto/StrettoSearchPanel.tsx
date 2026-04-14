@@ -77,6 +77,20 @@ export default function StrettoSearchPanel({
     const handleConstraintChange = (field: keyof StrettoSearchOptions, value: StrettoConstraintMode) => {
         setOptions({ ...options, [field]: value });
     };
+    const handleCanonDelayBoundChange = (field: 'canonDelayMinBeats' | 'canonDelayMaxBeats', value: number) => {
+        const safeValue = Number.isFinite(value) ? Math.max(0.5, value) : 0.5;
+        const next = { ...options, [field]: safeValue };
+        const minBeats = field === 'canonDelayMinBeats' ? safeValue : (next.canonDelayMinBeats ?? 1);
+        const maxBeats = field === 'canonDelayMaxBeats' ? safeValue : (next.canonDelayMaxBeats ?? 4);
+        if (minBeats > maxBeats) {
+            if (field === 'canonDelayMinBeats') {
+                next.canonDelayMaxBeats = safeValue;
+            } else {
+                next.canonDelayMinBeats = safeValue;
+            }
+        }
+        setOptions(next);
+    };
 
     const availableAbove = options.subjectVoiceIndex; 
     const availableBelow = (options.ensembleTotal - 1) - options.subjectVoiceIndex;
@@ -252,6 +266,43 @@ export default function StrettoSearchPanel({
                                 <option key={num} value={num}>{num} Entries</option>
                             ))}
                         </select>
+                    </div>
+                    <div className="mt-1 rounded border border-gray-700 bg-black/20 p-2">
+                        <label className="block text-[9px] text-gray-500 mb-1">Delay Category</label>
+                        <select
+                            value={options.delaySearchCategory ?? 'stretto'}
+                            onChange={(e) => handleChange('delaySearchCategory', e.target.value as 'stretto' | 'canon')}
+                            className="w-full bg-gray-800 border border-gray-600 rounded text-xs text-white px-1 py-1"
+                        >
+                            <option value="stretto">Standard Stretto Rules</option>
+                            <option value="canon">Canon Search (Equal Delays)</option>
+                        </select>
+                        {(options.delaySearchCategory ?? 'stretto') === 'canon' && (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                                <label className="text-[9px] text-gray-500 flex flex-col gap-1">
+                                    Min Delay (beats)
+                                    <input
+                                        type="number"
+                                        min="0.5"
+                                        step="0.5"
+                                        value={options.canonDelayMinBeats ?? 1}
+                                        onChange={(e) => handleCanonDelayBoundChange('canonDelayMinBeats', parseFloat(e.target.value))}
+                                        className="bg-gray-900 border border-gray-600 text-xs rounded px-1 py-1 text-white text-center"
+                                    />
+                                </label>
+                                <label className="text-[9px] text-gray-500 flex flex-col gap-1">
+                                    Max Delay (beats)
+                                    <input
+                                        type="number"
+                                        min="0.5"
+                                        step="0.5"
+                                        value={options.canonDelayMaxBeats ?? 4}
+                                        onChange={(e) => handleCanonDelayBoundChange('canonDelayMaxBeats', parseFloat(e.target.value))}
+                                        className="bg-gray-900 border border-gray-600 text-xs rounded px-1 py-1 text-white text-center"
+                                    />
+                                </label>
+                            </div>
+                        )}
                     </div>
 
                     <div className="text-[10px] text-gray-400 flex justify-between bg-black/20 p-1 rounded mt-1">

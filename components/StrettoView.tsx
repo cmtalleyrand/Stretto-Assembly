@@ -145,6 +145,9 @@ export default function StrettoView({
     const [searchOptions, setSearchOptions] = useState<StrettoSearchOptions>({
         ensembleTotal: 4,
         targetChainLength: 8,
+        delaySearchCategory: 'stretto',
+        canonDelayMinBeats: 1,
+        canonDelayMaxBeats: 4,
         subjectVoiceIndex: 2, 
         truncationMode: 'None', 
         truncationTargetBeats: 4,
