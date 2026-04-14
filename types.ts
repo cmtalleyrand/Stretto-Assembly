@@ -304,6 +304,8 @@ export interface StrettoCandidate {
     intervalLabel: string;
     delayBeats: number;
     delayTicks: number;
+    /** Triplet only: absolute offset of e2 from e0 in beats (= d1 + d2) */
+    delayBeats2?: number;
     grade: StrettoGrade;
     errors: StrettoError[];
     notes: RawNote[]; // The combined notes of Subject + Answer
@@ -312,7 +314,7 @@ export interface StrettoCandidate {
     dissonanceRatio: number; // Ratio of dissonant time to overlapping time
     nctRatio?: number;
     pairDissonanceScore: number; // Duration weighted count of all dissonant pairs
-    endsOnDissonance: boolean; 
+    endsOnDissonance: boolean;
 }
 
 export interface StrettoConfig {

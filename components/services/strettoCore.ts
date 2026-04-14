@@ -631,9 +631,10 @@ export function analyzeStrettoTripletCandidate(
         }).filter(n => !!n)
     );
 
+    // secondDelayTicks is the gap from e1 to e2; e2's absolute position is firstDelayTicks + secondDelayTicks
     const entryA = subject.map(n => ({ ...n, voiceIndex: 0 }));
     const entryB = transformEntry(firstIntervalSemis, firstDelayTicks, firstIsInverted, 1);
-    const entryC = transformEntry(secondIntervalSemis, secondDelayTicks, secondIsInverted, 2);
+    const entryC = transformEntry(secondIntervalSemis, firstDelayTicks + secondDelayTicks, secondIsInverted, 2);
     const allNotes = [...entryA, ...entryB, ...entryC];
     const harmonicRegions = generatePolyphonicHarmonicRegions(allNotes, keyRoot);
 
@@ -701,12 +702,16 @@ export function analyzeStrettoTripletCandidate(
 
     const firstLabel = `${getIntervalLabel(firstIntervalSemis)}${firstIsInverted ? ' (Inv)' : ''}`;
     const secondLabel = `${getIntervalLabel(secondIntervalSemis)}${secondIsInverted ? ' (Inv)' : ''}`;
-    const delayBeats = firstDelayTicks / (ppq * (4 / ts.den));
+    const beatDiv = ppq * (4 / ts.den);
+    const delayBeats = firstDelayTicks / beatDiv;
+    // delayBeats2: absolute position of e2 from e0 in beats
+    const delayBeats2 = (firstDelayTicks + secondDelayTicks) / beatDiv;
     return {
-        id: `triplet:${firstLabel}@${firstDelayTicks}|${secondLabel}@${secondDelayTicks}`,
+        id: `triplet:${firstLabel}@${firstDelayTicks}+${secondDelayTicks}|${secondLabel}`,
         intervalSemis: firstIntervalSemis,
         intervalLabel: `${firstLabel} → ${secondLabel}`,
         delayBeats: parseFloat(delayBeats.toFixed(2)),
+        delayBeats2: parseFloat(delayBeats2.toFixed(2)),
         delayTicks: firstDelayTicks,
         grade,
         errors,

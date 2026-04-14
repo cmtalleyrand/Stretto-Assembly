@@ -7,7 +7,7 @@ import { normalizeLexical, normalizeNumericStrings } from './filterContextNormal
 
 interface StrettoListProps {
     candidates: StrettoCandidate[];
-    processedResults: StrettoCandidate[]; 
+    processedResults: StrettoCandidate[];
     gradeFilter: Record<StrettoGrade, boolean>;
     setGradeFilter: (val: Record<StrettoGrade, boolean>) => void;
     selectedId: string | null;
@@ -15,14 +15,19 @@ interface StrettoListProps {
     checkedIds: Set<string>;
     onToggleCheck: (id: string) => void;
     onFilterContextChange?: (context: StrettoListFilterContext) => void;
+    /** True when showing triplet (3-voice) discovery results */
+    isTriplet?: boolean;
+    /** Whether to show the NCT % column (meaningful only for 3+ voice results) */
+    showNct?: boolean;
 }
 
 
 type SortKey = StrettoListSortKey;
 
-export default function StrettoList({ 
-    candidates, processedResults, gradeFilter, setGradeFilter, 
-    selectedId, onSelect, checkedIds, onToggleCheck, onFilterContextChange
+export default function StrettoList({
+    candidates, processedResults, gradeFilter, setGradeFilter,
+    selectedId, onSelect, checkedIds, onToggleCheck, onFilterContextChange,
+    isTriplet = false, showNct = false
 }: StrettoListProps) {
     const [sortKey, setSortKey] = useState<SortKey>('grade');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -156,18 +161,25 @@ export default function StrettoList({
     const handleExport = () => {
         if (sortedResults.length === 0) return;
 
-        let md = `| Interval | Delay | Entry | Diss Time | NCT % | Intensity | Errors |\n`;
-        md += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+        const headers = isTriplet
+            ? `| Interval | e1 Delay | e2 Delay | Entry | Diss Time | NCT % | Intensity | Errors |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`
+            : `| Interval | Delay | Entry | Diss Time | Intensity | Errors |\n| :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+        let md = headers;
 
         sortedResults.forEach(r => {
             const firstAnswerNote = r.notes.find(n => n.voiceIndex === 1);
             const entryNote = firstAnswerNote ? getStrictPitchName(firstAnswerNote.midi) : '?';
             const diss = `${Math.round(r.dissonanceRatio * 100)}%`;
-            const nct = `${Math.round((r.nctRatio || 0) * 100)}%`;
             const intent = r.pairDissonanceScore.toFixed(1);
             const errs = r.errors.length > 0 ? r.errors.map(e => e.type).join(', ') : '-';
-            
-            md += `| ${r.intervalLabel} | ${r.delayBeats}B | ${entryNote} | ${diss} | ${nct} | ${intent} | ${errs} |\n`;
+
+            if (isTriplet) {
+                const nct = `${Math.round((r.nctRatio || 0) * 100)}%`;
+                const d2 = r.delayBeats2 != null ? `${r.delayBeats2}B` : '?';
+                md += `| ${r.intervalLabel} | ${r.delayBeats}B | ${d2} | ${entryNote} | ${diss} | ${nct} | ${intent} | ${errs} |\n`;
+            } else {
+                md += `| ${r.intervalLabel} | ${r.delayBeats}B | ${entryNote} | ${diss} | ${intent} | ${errs} |\n`;
+            }
         });
 
         const blob = new Blob([md], { type: 'text/markdown' });
@@ -282,22 +294,28 @@ export default function StrettoList({
                     <button onClick={() => handleSort('interval')} className={`col-span-2 text-left hover:text-white transition-colors ${sortKey === 'interval' ? 'text-brand-primary' : ''}`}>
                         Int {sortKey === 'interval' && (sortDir === 'asc' ? '↑' : '↓')}
                     </button>
-                    <button onClick={() => handleSort('delay')} className={`col-span-1 text-left hover:text-white transition-colors ${sortKey === 'delay' ? 'text-brand-primary' : ''}`}>
-                        Del
+                    {/* Delay column: 2 cols for triplet (shows both delays), 1 col for pairwise */}
+                    <button onClick={() => handleSort('delay')} className={`${isTriplet ? 'col-span-2' : 'col-span-1'} text-left hover:text-white transition-colors ${sortKey === 'delay' ? 'text-brand-primary' : ''}`}>
+                        {isTriplet ? 'e1 | e2' : 'Del'}
                     </button>
                     <button onClick={() => handleSort('entry')} className={`col-span-1 text-left hover:text-white transition-colors ${sortKey === 'entry' ? 'text-brand-primary' : ''}`}>
                         Ent
                     </button>
-                    
-                    {/* Updated Prominent Metrics Headers */}
-                    <button onClick={() => handleSort('dissonance')} className={`col-span-2 text-center hover:text-white transition-colors ${sortKey === 'dissonance' ? 'text-brand-primary' : ''}`}>
+
+                    {/* Diss%: 2 cols triplet, 3 cols pairwise */}
+                    <button onClick={() => handleSort('dissonance')} className={`${isTriplet ? 'col-span-2' : 'col-span-3'} text-center hover:text-white transition-colors ${sortKey === 'dissonance' ? 'text-brand-primary' : ''}`}>
                         Diss %
                     </button>
-                    <button onClick={() => handleSort('nct')} className={`col-span-2 text-center hover:text-white transition-colors ${sortKey === 'nct' ? 'text-brand-primary' : ''}`}>
-                        NCT %
-                    </button>
-                    
-                    <button onClick={() => handleSort('intensity')} className={`col-span-2 text-right hover:text-white transition-colors ${sortKey === 'intensity' ? 'text-brand-primary' : ''}`}>
+
+                    {/* NCT%: only shown for triplet */}
+                    {showNct && (
+                        <button onClick={() => handleSort('nct')} className={`col-span-2 text-center hover:text-white transition-colors ${sortKey === 'nct' ? 'text-brand-primary' : ''}`}>
+                            NCT %
+                        </button>
+                    )}
+
+                    {/* Intensity: 1 col triplet, 3 cols pairwise */}
+                    <button onClick={() => handleSort('intensity')} className={`${isTriplet ? 'col-span-1' : 'col-span-3'} text-right hover:text-white transition-colors ${sortKey === 'intensity' ? 'text-brand-primary' : ''}`}>
                         Intens
                     </button>
                     <button onClick={() => handleSort('errors')} className={`col-span-1 text-right hover:text-white transition-colors ${sortKey === 'errors' ? 'text-brand-primary' : ''}`}>
@@ -312,36 +330,45 @@ export default function StrettoList({
                         const firstAnswerNote = r.notes.find(n => n.voiceIndex === 1);
                         const entryNote = firstAnswerNote ? getStrictPitchName(firstAnswerNote.midi) : '?';
                         return (
-                            <div 
-                                key={r.id} 
-                                onClick={() => onSelect(r)} 
+                            <div
+                                key={r.id}
+                                onClick={() => onSelect(r)}
                                 className={`grid grid-cols-12 gap-1 p-2 rounded cursor-pointer border-b border-gray-800 items-center transition-all ${selectedId === r.id ? 'bg-gray-800 ring-1 ring-brand-primary/50' : 'hover:bg-gray-800/50'}`}
                             >
                                 <div className="col-span-1 flex justify-center" onClick={(e) => e.stopPropagation()}>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={checkedIds.has(r.id)} 
-                                        onChange={() => onToggleCheck(r.id)} 
-                                        className="rounded bg-gray-700 border-gray-600 text-brand-primary w-3 h-3" 
+                                    <input
+                                        type="checkbox"
+                                        checked={checkedIds.has(r.id)}
+                                        onChange={() => onToggleCheck(r.id)}
+                                        className="rounded bg-gray-700 border-gray-600 text-brand-primary w-3 h-3"
                                     />
                                 </div>
                                 <span className={`col-span-2 font-bold text-[10px] truncate ${r.intervalLabel.includes('Inv') ? 'text-blue-400' : 'text-brand-primary'}`}>
                                     {r.intervalLabel}
                                 </span>
-                                <span className="col-span-1 text-gray-300 text-[10px]">{r.delayBeats}B</span>
+                                {/* Delay: triplet shows "e1 delay | e2 delay" (both from e0), pairwise shows single delay */}
+                                {isTriplet ? (
+                                    <span className="col-span-2 text-gray-300 text-[10px] font-mono">
+                                        {r.delayBeats}B&nbsp;|&nbsp;{r.delayBeats2 != null ? `${r.delayBeats2}B` : '?'}
+                                    </span>
+                                ) : (
+                                    <span className="col-span-1 text-gray-300 text-[10px]">{r.delayBeats}B</span>
+                                )}
                                 <span className="col-span-1 text-gray-500 text-[10px] font-mono">{entryNote}</span>
-                                
-                                {/* Prominent Dissonance Metric */}
-                                <span className={`col-span-2 text-xs font-mono font-bold text-center ${getMetricColor(r.dissonanceRatio)}`}>
+
+                                {/* Dissonance */}
+                                <span className={`${isTriplet ? 'col-span-2' : 'col-span-3'} text-xs font-mono font-bold text-center ${getMetricColor(r.dissonanceRatio)}`}>
                                     {Math.round(r.dissonanceRatio * 100)}%
                                 </span>
-                                
-                                {/* Prominent NCT Metric */}
-                                <span className={`col-span-2 text-xs font-mono font-bold text-center ${getMetricColor(r.nctRatio || 0)}`}>
-                                    {Math.round((r.nctRatio || 0) * 100)}%
-                                </span>
 
-                                <span className="col-span-2 text-[10px] text-gray-400 font-mono text-right">
+                                {/* NCT: only for triplet */}
+                                {showNct && (
+                                    <span className={`col-span-2 text-xs font-mono font-bold text-center ${getMetricColor(r.nctRatio || 0)}`}>
+                                        {Math.round((r.nctRatio || 0) * 100)}%
+                                    </span>
+                                )}
+
+                                <span className={`${isTriplet ? 'col-span-1' : 'col-span-3'} text-[10px] text-gray-400 font-mono text-right`}>
                                     {r.pairDissonanceScore.toFixed(1)}
                                 </span>
                                 <span className="col-span-1 text-[9px] text-gray-500 text-right">
