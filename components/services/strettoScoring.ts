@@ -44,6 +44,22 @@ interface DelayPenaltyBreakdown {
     items: ScoreLog['penalties'];
 }
 
+interface ScoringEvent {
+    startTick: number;
+    endTick: number;
+    voices: PlacedNote[];
+    isDissonant: boolean;
+    nctCount: number;
+    shortNoteInvolved: boolean;
+}
+
+interface PlacedNote {
+    start: number;
+    end: number;
+    pitch: number;
+    voice: number;
+}
+
 export function computeDelayPenaltyBreakdown(delays: number[], chainLength: number): DelayPenaltyBreakdown {
     let total = 0;
     const items: ScoreLog['penalties'] = [];
@@ -111,6 +127,20 @@ function countNCTs(pitches: number[]): number {
     return Q_len - maxOverlap;
 }
 
+function isDissonantSonority(pitches: number[]): boolean {
+    if (pitches.length < 2) return false;
+    const ordered = [...pitches].sort((a, b) => a - b);
+    const bass = ordered[0];
+    for (let j = 0; j < ordered.length; j++) {
+        for (let k = j + 1; k < ordered.length; k++) {
+            const int = (ordered[k] - ordered[j]) % 12;
+            if (INTERVALS.DISSONANT_SIMPLE.has(int)) return true;
+            if (int === 5 && ordered[j] === bass) return true;
+        }
+    }
+    return false;
+}
+
 /**
  * Calculates the S1-S3 metrics + additive bonuses/penalties for a generated chain.
  * Hybrid scoring: S1-S3 utility + structural bonuses/penalties + polyphony density.
@@ -128,12 +158,6 @@ export function calculateStrettoScore(
     // 1. Collect all unique time points and place notes
     const timePoints = new Set<number>();
 
-    interface PlacedNote {
-        start: number;
-        end: number;
-        pitch: number;
-        voice: number;
-    }
     const placedNotes: PlacedNote[] = [];
 
     chain.forEach((e, i) => {
@@ -156,24 +180,106 @@ export function calculateStrettoScore(
 
     const sortedPoints = Array.from(timePoints).sort((a,b) => a-b);
 
-    // --- 1B. Run Harmony Analysis ---
-    const harmonyTimeline: Record<number, Record<number, { pitch: number, dur16: number }>> = {};
-    const harmonyTicks: number[] = [];
-
     const minTick = sortedPoints[0];
     const maxTick = sortedPoints[sortedPoints.length - 1];
     const tick16 = PPQ / 4;
 
-    for (let t = minTick; t < maxTick; t += tick16) {
-        const active = placedNotes.filter(n => n.start <= t && n.end > t);
-        if (active.length > 0) {
-            const gridIndex = Math.round(t / tick16);
-            harmonyTicks.push(gridIndex);
-            harmonyTimeline[gridIndex] = {};
-            active.forEach(n => {
-                harmonyTimeline[gridIndex][n.voice] = { pitch: n.pitch, dur16: 1 };
+    // --- 1B. Two-pass event construction using an active-set sweep ---
+    const noteStarts = new Map<number, number[]>();
+    const noteEnds = new Map<number, number[]>();
+    for (let i = 0; i < placedNotes.length; i++) {
+        const n = placedNotes[i];
+        const starts = noteStarts.get(n.start) ?? [];
+        starts.push(i);
+        noteStarts.set(n.start, starts);
+        const ends = noteEnds.get(n.end) ?? [];
+        ends.push(i);
+        noteEnds.set(n.end, ends);
+    }
+
+    const activeIds = new Set<number>();
+    const activeSortedIds: number[] = [];
+    const insertSortedId = (id: number): void => {
+        let lo = 0;
+        let hi = activeSortedIds.length;
+        while (lo < hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (activeSortedIds[mid] < id) lo = mid + 1;
+            else hi = mid;
+        }
+        activeSortedIds.splice(lo, 0, id);
+    };
+    const removeSortedId = (id: number): void => {
+        let lo = 0;
+        let hi = activeSortedIds.length - 1;
+        while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            const cur = activeSortedIds[mid];
+            if (cur === id) {
+                activeSortedIds.splice(mid, 1);
+                return;
+            }
+            if (cur < id) lo = mid + 1;
+            else hi = mid - 1;
+        }
+    };
+    const scoringEvents: ScoringEvent[] = [];
+    for (let i = 0; i < sortedPoints.length - 1; i++) {
+        const start = sortedPoints[i];
+        const end = sortedPoints[i + 1];
+        const dur = end - start;
+        if (dur <= 0) continue;
+
+        const endingNow = noteEnds.get(start);
+        if (endingNow) {
+            endingNow.forEach((id) => {
+                if (!activeIds.has(id)) return;
+                activeIds.delete(id);
+                removeSortedId(id);
             });
         }
+        const startingNow = noteStarts.get(start);
+        if (startingNow) {
+            startingNow.forEach((id) => {
+                if (activeIds.has(id)) return;
+                activeIds.add(id);
+                insertSortedId(id);
+            });
+        }
+
+        const voices = activeSortedIds.map((id) => placedNotes[id]);
+
+        const pitches = voices.map(v => v.pitch);
+        scoringEvents.push({
+            startTick: start,
+            endTick: end,
+            voices,
+            isDissonant: isDissonantSonority(pitches),
+            nctCount: voices.length >= 3 ? countNCTs(pitches) : 0,
+            shortNoteInvolved: voices.some(v => (v.end - v.start) < tick16)
+        });
+    }
+
+    // --- 1C. Run Harmony Analysis ---
+    const harmonyTimeline: Record<number, Record<number, { pitch: number, dur16: number }>> = {};
+    const harmonyTicks: number[] = [];
+
+    let eventIndex = 0;
+    for (let t = minTick; t < maxTick; t += tick16) {
+        while (eventIndex < scoringEvents.length && scoringEvents[eventIndex].endTick <= t) {
+            eventIndex++;
+        }
+        if (eventIndex >= scoringEvents.length) continue;
+        const event = scoringEvents[eventIndex];
+        if (event.startTick > t) continue;
+        if (event.voices.length === 0) continue;
+
+        const gridIndex = Math.round(t / tick16);
+        harmonyTicks.push(gridIndex);
+        harmonyTimeline[gridIndex] = {};
+        event.voices.forEach((n) => {
+            harmonyTimeline[gridIndex][n.voice] = { pitch: n.pitch, dur16: 1 };
+        });
     }
 
     const harmonyAnalysis = analyzeStrettoHarmony(harmonyTimeline, harmonyTicks);
@@ -193,13 +299,9 @@ export function calculateStrettoScore(
     let totalDuration = 0;
 
 
-    for (let i = 0; i < sortedPoints.length - 1; i++) {
-        const start = sortedPoints[i];
-        const end = sortedPoints[i+1];
-        const dur = end - start;
-        if (dur <= 0) continue;
-
-        const voices = placedNotes.filter(n => n.start <= start && n.end > start);
+    for (const event of scoringEvents) {
+        const dur = event.endTick - event.startTick;
+        const voices = event.voices;
 
         // Accumulate polyphony density for ALL slices (including mono)
         totalWeightedVoices += voices.length * dur;
@@ -211,26 +313,14 @@ export function calculateStrettoScore(
 
         totalPolyTime += dur;
 
-        const isStrong = (start % (PPQ * 2) === 0);
+        const isStrong = (event.startTick % (PPQ * 2) === 0);
         const weight = isStrong ? 1.5 : 1.0;
         const weightedDur = dur * weight;
 
         weightedTotalPoly += weightedDur;
 
-        const pitches = voices.map(v => v.pitch).sort((a,b)=>a-b);
-        const bass = pitches[0];
-
         // --- S1 & S2: Dissonance ---
-        let isDiss = false;
-        for(let j=0; j<pitches.length; j++) {
-            for(let k=j+1; k<pitches.length; k++) {
-                const int = (pitches[k] - pitches[j]) % 12;
-                if (INTERVALS.DISSONANT_SIMPLE.has(int)) isDiss = true;
-                if (int === 5 && pitches[j] === bass) isDiss = true;
-            }
-        }
-
-        if (isDiss) {
+        if (event.isDissonant) {
             totalDissTime += dur;
             totalWeightedDissTime += weightedDur;
         }
@@ -238,9 +328,9 @@ export function calculateStrettoScore(
         // --- S3: NCT (proportional, 3+ voices only) ---
         if (voices.length >= 3) {
             totalPoly3PlusTime += dur;
-            const nctCount = countNCTs(pitches);
+            const nctCount = event.nctCount;
             if (nctCount > 0) {
-                totalNCTTime += dur * (nctCount / pitches.length);
+                totalNCTTime += dur * (nctCount / voices.length);
             }
         }
     }
@@ -261,31 +351,14 @@ export function calculateStrettoScore(
     // so it catches cases that can evade pair-local precomputation.
     let dissonanceRunEvents = 0;
     let maxDissonanceRunEvents = 0;
-    for (let i = 0; i < sortedPoints.length - 1; i++) {
-        const start = sortedPoints[i];
-        const end = sortedPoints[i + 1];
-        if (end - start <= 0) continue;
-
-        const voices = placedNotes.filter(n => n.start <= start && n.end > start);
+    for (const event of scoringEvents) {
+        const voices = event.voices;
         if (voices.length < 2) {
             // Monophony: event counter is transparent — only consonance resets it.
             continue;
         }
 
-        const pitches = voices.map(v => v.pitch).sort((a, b) => a - b);
-        const bass = pitches[0];
-        let isDiss = false;
-        for (let j = 0; j < pitches.length && !isDiss; j++) {
-            for (let k = j + 1; k < pitches.length; k++) {
-                const int = (pitches[k] - pitches[j]) % 12;
-                if (INTERVALS.DISSONANT_SIMPLE.has(int) || (int === 5 && pitches[j] === bass)) {
-                    isDiss = true;
-                    break;
-                }
-            }
-        }
-
-        if (isDiss) {
+        if (event.isDissonant) {
             dissonanceRunEvents++;
             maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissonanceRunEvents);
         } else {
@@ -412,23 +485,37 @@ export function calculateStrettoScore(
     }
 
     if (options.requireConsonantEnd) {
+        const eventAtTick = (tick: number): ScoringEvent | undefined => {
+            let lo = 0;
+            let hi = scoringEvents.length - 1;
+            while (lo <= hi) {
+                const mid = Math.floor((lo + hi) / 2);
+                const ev = scoringEvents[mid];
+                if (tick < ev.startTick) {
+                    hi = mid - 1;
+                } else if (tick >= ev.endTick) {
+                    lo = mid + 1;
+                } else {
+                    return ev;
+                }
+            }
+            return undefined;
+        };
+
         for (let ei = 0; ei < chain.length; ei++) {
             const entry = chain[ei];
             const variant = variants[variantIndices[ei]];
             const entryStartTick = Math.round(entry.startBeat * PPQ);
             const entryEndTick = entryStartTick + variant.lengthTicks;
+            const endTick = entryEndTick - 1;
+            const event = eventAtTick(endTick);
+            if (!event) continue;
 
-            const activeAtEnd = placedNotes.filter(n =>
-                n.voice !== entry.voiceIndex &&
-                n.start <= entryEndTick - 1 && n.end > entryEndTick - 1
-            );
+            const activeAtEnd = event.voices.filter(n => n.voice !== entry.voiceIndex);
 
             if (activeAtEnd.length === 0) continue;
 
-            const entryNotes = placedNotes.filter(n =>
-                n.voice === entry.voiceIndex &&
-                n.start <= entryEndTick - 1 && n.end > entryEndTick - 1
-            );
+            const entryNotes = event.voices.filter(n => n.voice === entry.voiceIndex);
             if (entryNotes.length === 0) continue;
 
             const endPitch = entryNotes[0].pitch;
