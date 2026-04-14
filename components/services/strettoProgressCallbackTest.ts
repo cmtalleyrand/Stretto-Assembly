@@ -49,6 +49,25 @@ for (const event of progressEvents) {
     assert(event.completedUnits <= event.totalUnits, `Stage ${event.stage} exceeded totalUnits.`);
     assert(event.telemetry.maxDepthReached >= 0, `Stage ${event.stage} reported invalid maxDepthReached.`);
     assert(event.telemetry.targetChainLength === OPTIONS.targetChainLength, 'Target chain length telemetry mismatch.');
+    assert(event.telemetry.pairwiseOperationsProcessed >= 0, 'pairwiseOperationsProcessed must be non-negative.');
+    assert(event.telemetry.tripletOperationsProcessed >= 0, 'tripletOperationsProcessed must be non-negative.');
+    assert(event.telemetry.dagNodesExpanded >= 0, 'dagNodesExpanded must be non-negative.');
+    assert(event.telemetry.dagEdgesEvaluated >= 0, 'dagEdgesEvaluated must be non-negative.');
+    if (event.stage === 'dag' && event.completedUnits === event.totalUnits) {
+        assert(
+            event.terminal,
+            'DAG should only report 100% when traversal is terminal.'
+        );
+    }
 }
+
+const dagEvents = progressEvents.filter((event) => event.stage === 'dag');
+assert(dagEvents.length > 0, 'Expected DAG progress emissions.');
+const nonTerminalDagAtHundred = dagEvents.find((event) =>
+    event.completedUnits === event.totalUnits && !event.terminal
+);
+assert(!nonTerminalDagAtHundred, 'Observed non-terminal DAG event reported as 100%.');
+const terminalDagEvents = dagEvents.filter((event) => event.terminal);
+assert(terminalDagEvents.length >= 1, 'Expected at least one terminal DAG progress emission.');
 
 console.log(`Stretto progress callback test passed (${progressEvents.length} events).`);

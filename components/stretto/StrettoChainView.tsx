@@ -20,12 +20,17 @@ interface StrettoChainViewProps {
         stage: 'pairwise' | 'triplet' | 'dag';
         completedUnits: number;
         totalUnits: number;
+        terminal: boolean;
         telemetry: {
             validPairs: number;
             validTriplets: number;
             chainsFound: number;
             maxDepthReached: number;
             targetChainLength: number;
+            pairwiseOperationsProcessed: number;
+            tripletOperationsProcessed: number;
+            dagNodesExpanded: number;
+            dagEdgesEvaluated: number;
         };
         heartbeat: boolean;
     } | null;
