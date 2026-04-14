@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
-import { analyzeStrettoCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
+import { analyzeStrettoCandidate, analyzeStrettoTripletCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
 import { getStrictPitchName } from './services/midiSpelling';
 import { downloadStrettoCandidate, downloadStrettoSelection } from './services/strettoExport';
 import { Spinner, DocumentTextIcon } from './Icons';
@@ -19,6 +19,7 @@ import StrettoFooter from './stretto/StrettoFooter';
 import StrettoChainView from './stretto/StrettoChainView';
 import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
+import { computeSecondDelayStart, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
 
 interface StrettoViewProps {
     notes: RawNote[]; 
@@ -116,6 +117,8 @@ export default function StrettoView({
     const [mode, setMode] = useState<'midi' | 'abc'>('abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
     const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain'); 
+    const [discoveryArity, setDiscoveryArity] = useState<'pairwise' | 'triplet'>('pairwise');
+    const [tripletDelayOrderingMode, setTripletDelayOrderingMode] = useState<TripletDelayOrderingMode>('ordered');
     
     const [gradeFilter, setGradeFilter] = useState<Record<StrettoGrade, boolean>>({
         'STRONG': true,
@@ -346,17 +349,47 @@ export default function StrettoView({
             exts.forEach(e => { if (!intervalsToCheck.includes(e)) intervalsToCheck.push(e); });
         }
 
-        intervalsToCheck.forEach(interval => {
-            for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
-                // PASS pivotMidi and derived root from searchOptions
-                candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
-                if (includeInversions) {
-                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+        if (discoveryArity === 'pairwise') {
+            intervalsToCheck.forEach(interval => {
+                for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
+                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                    if (includeInversions) {
+                        candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                    }
+                }
+            });
+        } else {
+            const inversionPairs = enumerateTripletInversionPairs(includeInversions);
+            for (let d1 = stepTicks; d1 <= maxDelay; d1 += stepTicks) {
+                for (let d2 = computeSecondDelayStart(d1, stepTicks, tripletDelayOrderingMode); d2 <= maxDelay; d2 += stepTicks) {
+                    for (const i1 of intervalsToCheck) {
+                        for (const i2 of intervalsToCheck) {
+                            for (const inversionPair of inversionPairs) {
+                                    candidates.push(
+                                        analyzeStrettoTripletCandidate(
+                                            validNotes,
+                                            i1,
+                                            i2,
+                                            Math.round(d1),
+                                            Math.round(d2),
+                                            currentPpq,
+                                            activeMeter,
+                                            inversionPair.firstIsInverted,
+                                            inversionPair.secondIsInverted,
+                                            searchOptions.pivotMidi,
+                                            searchOptions.useChromaticInversion,
+                                            searchOptions.scaleRoot,
+                                            searchOptions.maxPairwiseDissonance
+                                        )
+                                    );
+                            }
+                        }
+                    }
                 }
             }
-        });
+        }
         return candidates;
-    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, activeMeter, searchRes, viewMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
+    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, activeMeter, searchRes, viewMode, discoveryArity, tripletDelayOrderingMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const processedDiscoveryResults = useMemo(() => {
         return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
@@ -630,6 +663,48 @@ export default function StrettoView({
                     <button onClick={() => setViewMode('chain')} className={`px-4 py-2 text-sm rounded transition-colors font-bold ${viewMode === 'chain' ? 'bg-brand-secondary text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>Algorithmic Chain</button>
                 </div>
             </div>
+            {viewMode === 'pairwise' && (
+                <div className="mb-4 flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Discovery Arity:</span>
+                        <button
+                            type="button"
+                            onClick={() => setDiscoveryArity('pairwise')}
+                            className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${discoveryArity === 'pairwise' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                        >
+                            Pairwise
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setDiscoveryArity('triplet')}
+                            className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${discoveryArity === 'triplet' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                        >
+                            Triplet
+                        </button>
+                    </div>
+                    {discoveryArity === 'triplet' && (
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Delay Ordering:</span>
+                            <button
+                                type="button"
+                                onClick={() => setTripletDelayOrderingMode('ordered')}
+                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'ordered' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                                title="Constrained temporal ordering: d2 >= d1"
+                            >
+                                Constrained (d2 ≥ d1)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setTripletDelayOrderingMode('unconstrained')}
+                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'unconstrained' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                                title="Unconstrained temporal ordering: d2 can be less than, equal to, or greater than d1"
+                            >
+                                Unconstrained (any d1,d2)
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
 
             {mode === 'abc' && (
                 <div className="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">

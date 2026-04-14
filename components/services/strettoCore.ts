@@ -584,3 +584,137 @@ export function analyzeStrettoCandidate(
         endsOnDissonance
     };
 }
+
+export function analyzeStrettoTripletCandidate(
+    subject: RawNote[],
+    firstIntervalSemis: number,
+    secondIntervalSemis: number,
+    firstDelayTicks: number,
+    secondDelayTicks: number,
+    ppq: number,
+    ts: { num: number, den: number },
+    firstIsInverted: boolean = false,
+    secondIsInverted: boolean = false,
+    pivotMidi: number = 60,
+    useChromaticInversion: boolean = false,
+    keyRoot: number = 0,
+    maxPairwiseDissonance: number = 1
+): StrettoCandidate {
+    if (subject.length === 0) {
+        return {
+            id: 'empty-triplet', intervalSemis: 0, intervalLabel: 'N/A', delayBeats: 0, delayTicks: 0,
+            grade: 'INVALID', errors: [], notes: [], dissonanceRatio: 0, nctRatio: 0, pairDissonanceScore: 0, endsOnDissonance: true
+        };
+    }
+
+    const subjectEntryPitch = subject[0].midi;
+    const transformEntry = (intervalSemis: number, delayTicks: number, isInverted: boolean, voiceIndex: number): RawNote[] => (
+        subject.map(n => {
+            if (!n) return null as any;
+            let newMidi: number;
+            if (isInverted) {
+                const rawInverted = getInvertedPitch(n.midi, pivotMidi, keyRoot, 'Major', useChromaticInversion);
+                const invertedStart = getInvertedPitch(subjectEntryPitch, pivotMidi, keyRoot, 'Major', useChromaticInversion);
+                const targetStart = subjectEntryPitch + intervalSemis;
+                const shift = targetStart - invertedStart;
+                newMidi = rawInverted + shift;
+            } else {
+                newMidi = n.midi + intervalSemis;
+            }
+            return {
+                ...n,
+                ticks: n.ticks + delayTicks,
+                midi: newMidi,
+                name: getPitchName(newMidi, keyRoot),
+                voiceIndex
+            };
+        }).filter(n => !!n)
+    );
+
+    const entryA = subject.map(n => ({ ...n, voiceIndex: 0 }));
+    const entryB = transformEntry(firstIntervalSemis, firstDelayTicks, firstIsInverted, 1);
+    const entryC = transformEntry(secondIntervalSemis, secondDelayTicks, secondIsInverted, 2);
+    const allNotes = [...entryA, ...entryB, ...entryC];
+    const harmonicRegions = generatePolyphonicHarmonicRegions(allNotes, keyRoot);
+
+    let totalOverlapTicks = 0;
+    let dissonantTicks = 0;
+    let nctTicks = 0;
+    let endsOnDissonance = false;
+    let pairDissonanceScore = 0;
+    let maxDissonanceRunEvents = 0;
+    let currentDissonanceRunEvents = 0;
+    let maxDissonanceRunTicks = 0;
+    let currentDissonanceRunTicks = 0;
+    const maxAllowedContinuousDissonanceTicks = ppq;
+
+    harmonicRegions.forEach((r, idx) => {
+        const dur = r.endTick - r.startTick;
+        totalOverlapTicks += dur;
+        if (r.type !== 'consonant_stable') {
+            dissonantTicks += dur;
+            if (idx === harmonicRegions.length - 1) endsOnDissonance = true;
+            currentDissonanceRunEvents += 1;
+            currentDissonanceRunTicks += dur;
+            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, currentDissonanceRunEvents);
+            maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, currentDissonanceRunTicks);
+        } else {
+            currentDissonanceRunEvents = 0;
+            currentDissonanceRunTicks = 0;
+        }
+        if (r.detailedInfo && r.detailedInfo.ncts.length > 0) nctTicks += dur;
+
+        const mid = r.startTick + (dur / 2);
+        const active = allNotes.filter(n => n.ticks <= mid && (n.ticks + n.durationTicks) > mid).map(n => n.midi).sort((a, b) => a - b);
+        if (active.length >= 2) {
+            const bass = active[0];
+            let pairDissCount = 0;
+            for (let i = 0; i < active.length; i++) {
+                for (let j = i + 1; j < active.length; j++) {
+                    const ic = Math.abs(active[i] - active[j]) % 12;
+                    let isDiss = DISSONANT_INTERVALS.includes(ic);
+                    if (ic === 5 && (active[i] === bass || active[j] === bass)) isDiss = true;
+                    if (isDiss) pairDissCount++;
+                }
+            }
+            pairDissonanceScore += ((dur / ppq) * pairDissCount);
+        }
+    });
+
+    const dissonanceRatio = totalOverlapTicks > 0 ? dissonantTicks / totalOverlapTicks : 0;
+    const nctRatio = totalOverlapTicks > 0 ? nctTicks / totalOverlapTicks : 0;
+    const violatesDissonancePolicy = dissonanceRatio > maxPairwiseDissonance || maxDissonanceRunEvents > 2 || maxDissonanceRunTicks > maxAllowedContinuousDissonanceTicks;
+    const errors: StrettoError[] = [];
+    if (violatesDissonancePolicy) {
+        errors.push({
+            tick: firstDelayTicks,
+            timeFormatted: getFormattedTime(firstDelayTicks, ppq, ts.num, ts.den),
+            type: maxDissonanceRunEvents > 2 ? 'Consecutive Dissonance' : 'Unresolved Dissonance',
+            details: `Triplet dissonance policy violation (ratio=${Math.round(dissonanceRatio * 100)}%, cap=${Math.round(maxPairwiseDissonance * 100)}%, maxRunEvents=${maxDissonanceRunEvents}, allowedRunEvents<=2, maxRunTicks=${maxDissonanceRunTicks}, allowedRunTicks<=${maxAllowedContinuousDissonanceTicks}).`,
+            severity: 'fatal'
+        });
+    }
+
+    let grade: StrettoGrade = 'STRONG';
+    if (errors.some(e => e.severity === 'fatal')) grade = 'INVALID';
+    else if (errors.length > 0) grade = 'VIABLE';
+
+    const firstLabel = `${getIntervalLabel(firstIntervalSemis)}${firstIsInverted ? ' (Inv)' : ''}`;
+    const secondLabel = `${getIntervalLabel(secondIntervalSemis)}${secondIsInverted ? ' (Inv)' : ''}`;
+    const delayBeats = firstDelayTicks / (ppq * (4 / ts.den));
+    return {
+        id: `triplet:${firstLabel}@${firstDelayTicks}|${secondLabel}@${secondDelayTicks}`,
+        intervalSemis: firstIntervalSemis,
+        intervalLabel: `${firstLabel} → ${secondLabel}`,
+        delayBeats: parseFloat(delayBeats.toFixed(2)),
+        delayTicks: firstDelayTicks,
+        grade,
+        errors,
+        notes: allNotes,
+        regions: harmonicRegions,
+        dissonanceRatio,
+        nctRatio,
+        pairDissonanceScore: parseFloat(pairDissonanceScore.toFixed(1)),
+        endsOnDissonance
+    };
+}
