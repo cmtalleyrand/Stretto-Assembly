@@ -1,6 +1,6 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext } from '../types';
+import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext, CanonSearchOptions, CanonChainResult, CanonSearchReport } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, analyzeStrettoTripletCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
 import { getStrictPitchName } from './services/midiSpelling';
@@ -18,6 +18,9 @@ import StrettoInspector from './stretto/StrettoInspector';
 import StrettoFooter from './stretto/StrettoFooter';
 import StrettoChainView from './stretto/StrettoChainView';
 import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
+import CanonSearchPanel from './stretto/CanonSearchPanel';
+import CanonResultsList from './stretto/CanonResultsList';
+import { runCanonSearch } from './services/canonSearch';
 import PianoRoll from './PianoRoll';
 import { computeSecondDelayStart, computeSecondDelayEnd, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
 
@@ -116,7 +119,7 @@ export default function StrettoView({
 }: StrettoViewProps) {
     const [mode, setMode] = useState<'midi' | 'abc'>('abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
-    const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain');
+    const [viewMode, setViewMode] = useState<'pairwise' | 'chain' | 'canon'>('chain');
     const [discoveryArity, setDiscoveryArity] = useState<'pairwise' | 'triplet'>('pairwise');
     const [tripletDelayOrderingMode, setTripletDelayOrderingMode] = useState<TripletDelayOrderingMode>('unconstrained');
     const [isDiscovering, setIsDiscovering] = useState(false);
@@ -174,6 +177,25 @@ export default function StrettoView({
     const [searchProgress, setSearchProgress] = useState<StrettoSearchProgressState | null>(null);
     const activeWorkerRef = useRef<Worker | null>(null);
     const [selectedChain, setSelectedChain] = useState<StrettoChainResult | null>(null);
+
+    // --- Canon Search State ---
+    const [canonOptions, setCanonOptions] = useState<CanonSearchOptions>({
+        ensembleTotal: 4,
+        delayMinBeats: 1,
+        delayMaxBeats: 4,
+        chainLengthMin: 4,
+        chainLengthMax: 8,
+        allowInversions: false,
+        allowThirdSixth: false,
+        pivotMidi: 60,
+        useChromaticInversion: false,
+        scaleRoot: 0,
+        scaleMode: 'Major',
+        subjectVoiceIndex: 0,
+    });
+    const [canonReport, setCanonReport] = useState<CanonSearchReport | null>(null);
+    const [isCanonSearching, setIsCanonSearching] = useState(false);
+    const [selectedCanonResult, setSelectedCanonResult] = useState<CanonChainResult | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
 
@@ -521,6 +543,25 @@ export default function StrettoView({
         }, 100);
     };
 
+    const handleCanonSearch = () => {
+        const validNotes = subjectNotes.filter(n => !!n);
+        if (validNotes.length === 0) return;
+        setIsCanonSearching(true);
+        setCanonReport(null);
+        setSelectedCanonResult(null);
+        // Run synchronously in next tick so the UI can update first
+        setTimeout(() => {
+            try {
+                const report = runCanonSearch(validNotes, canonOptions, ppq || 480);
+                setCanonReport(report);
+            } catch (e) {
+                console.error('Canon search failed:', e);
+            } finally {
+                setIsCanonSearching(false);
+            }
+        }, 20);
+    };
+
     const chainToCandidate = useMemo((): StrettoCandidate | null => {
         if (!selectedChain) return null;
         let allNotes: RawNote[] = [];
@@ -696,6 +737,7 @@ export default function StrettoView({
                     <span className="text-xs font-bold text-gray-500 mr-2">MODE:</span>
                     <button onClick={() => setViewMode('pairwise')} className={`px-4 py-2 text-sm rounded transition-colors font-bold ${viewMode === 'pairwise' ? 'bg-brand-secondary text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>Pairwise Discovery</button>
                     <button onClick={() => setViewMode('chain')} className={`px-4 py-2 text-sm rounded transition-colors font-bold ${viewMode === 'chain' ? 'bg-brand-secondary text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>Algorithmic Chain</button>
+                    <button onClick={() => setViewMode('canon')} className={`px-4 py-2 text-sm rounded transition-colors font-bold ${viewMode === 'canon' ? 'bg-brand-secondary text-white' : 'bg-gray-900 text-gray-400 hover:bg-gray-700'}`}>Canon Search</button>
                 </div>
             </div>
             {viewMode === 'pairwise' && (
@@ -877,17 +919,33 @@ export default function StrettoView({
                 </div>
             )}
 
-            {viewMode === 'pairwise' ? (
+            {viewMode === 'canon' ? (
+                <div className="flex flex-col gap-4">
+                    <CanonSearchPanel
+                        options={canonOptions}
+                        setOptions={setCanonOptions}
+                        onSearch={handleCanonSearch}
+                        isSearching={isCanonSearching}
+                        totalEvaluated={canonReport?.totalEvaluated}
+                        timeMs={canonReport?.timeMs}
+                    />
+                    <CanonResultsList
+                        results={canonReport?.results ?? []}
+                        selectedId={selectedCanonResult?.id ?? null}
+                        onSelect={setSelectedCanonResult}
+                    />
+                </div>
+            ) : viewMode === 'pairwise' ? (
                 <>
-                    <StrettoConfig 
-                        selectedIntervals={configIntervals} 
-                        setSelectedIntervals={setConfigIntervals} 
-                        searchRes={searchRes} 
-                        setSearchRes={setSearchRes} 
-                        includeInversions={includeInversions} 
-                        setIncludeInversions={setIncludeInversions} 
-                        includeExtensions={includeExtensions} 
-                        setIncludeExtensions={setIncludeExtensions} 
+                    <StrettoConfig
+                        selectedIntervals={configIntervals}
+                        setSelectedIntervals={setConfigIntervals}
+                        searchRes={searchRes}
+                        setSearchRes={setSearchRes}
+                        includeInversions={includeInversions}
+                        setIncludeInversions={setIncludeInversions}
+                        includeExtensions={includeExtensions}
+                        setIncludeExtensions={setIncludeExtensions}
                         pivotMidi={searchOptions.pivotMidi}
                         setPivotMidi={(val) => setSearchOptions((prev) => ({...prev, pivotMidi: val}))}
                         pivotOptions={pivotOptions}
