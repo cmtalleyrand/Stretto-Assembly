@@ -198,6 +198,31 @@ export function calculateStrettoScore(
     }
 
     const activeIds = new Set<number>();
+    const activeSortedIds: number[] = [];
+    const insertSortedId = (id: number): void => {
+        let lo = 0;
+        let hi = activeSortedIds.length;
+        while (lo < hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (activeSortedIds[mid] < id) lo = mid + 1;
+            else hi = mid;
+        }
+        activeSortedIds.splice(lo, 0, id);
+    };
+    const removeSortedId = (id: number): void => {
+        let lo = 0;
+        let hi = activeSortedIds.length - 1;
+        while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            const cur = activeSortedIds[mid];
+            if (cur === id) {
+                activeSortedIds.splice(mid, 1);
+                return;
+            }
+            if (cur < id) lo = mid + 1;
+            else hi = mid - 1;
+        }
+    };
     const scoringEvents: ScoringEvent[] = [];
     for (let i = 0; i < sortedPoints.length - 1; i++) {
         const start = sortedPoints[i];
@@ -206,13 +231,23 @@ export function calculateStrettoScore(
         if (dur <= 0) continue;
 
         const endingNow = noteEnds.get(start);
-        if (endingNow) endingNow.forEach((id) => activeIds.delete(id));
+        if (endingNow) {
+            endingNow.forEach((id) => {
+                if (!activeIds.has(id)) return;
+                activeIds.delete(id);
+                removeSortedId(id);
+            });
+        }
         const startingNow = noteStarts.get(start);
-        if (startingNow) startingNow.forEach((id) => activeIds.add(id));
+        if (startingNow) {
+            startingNow.forEach((id) => {
+                if (activeIds.has(id)) return;
+                activeIds.add(id);
+                insertSortedId(id);
+            });
+        }
 
-        const voices = Array.from(activeIds)
-            .sort((a, b) => a - b)
-            .map((id) => placedNotes[id]);
+        const voices = activeSortedIds.map((id) => placedNotes[id]);
 
         const pitches = voices.map(v => v.pitch);
         scoringEvents.push({
