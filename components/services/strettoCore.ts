@@ -112,25 +112,27 @@ function analyzeVerticalSlice(pitches: number[]): { isDissonant: boolean; label:
     return { isDissonant: false, label: getIntervalLabel(firstInt) };
 }
 
-// Special function for Dyad inference (2 pitch classes)
-function analyzeDyad(pc1: number, pc2: number): { name: string; root: number; quality: string } | null {
-    const diff = (pc2 - pc1 + 12) % 12; // Assuming pc1 is bass for interval calc
-    
-    // 3rd (Major or Minor) -> Root is bottom
-    if (diff === 3) return { name: "Min (no 5)", root: pc1, quality: "Min" };
-    if (diff === 4) return { name: "Maj (no 5)", root: pc1, quality: "Maj" };
-    
-    // 6th (Inverted 3rd) -> Root is top
-    if (diff === 8) return { name: "Maj (no 5)", root: pc2, quality: "Maj" }; // m6 -> Inverted Maj3
-    if (diff === 9) return { name: "Min (no 5)", root: pc2, quality: "Min" }; // M6 -> Inverted min3
-    
-    // Perfect 5th -> Power Chord
-    if (diff === 7) return { name: "5", root: pc1, quality: "5" };
-    
-    // Tritone -> Diminished (no 3rd) - Usually implies dim triad or dim7
-    if (diff === 6) return { name: "Dim (no 3)", root: pc1, quality: "Dim" };
+// Special function for Dyad inference (2 pitches, including compound intervals).
+function analyzeDyad(lowPitch: number, highPitch: number): { name: string; root: number; quality: string } | null {
+    const lowPC = ((lowPitch % 12) + 12) % 12;
+    const highPC = ((highPitch % 12) + 12) % 12;
+    const simpleInterval = ((highPitch - lowPitch) % 12 + 12) % 12;
 
-    // P4, 2nds, 7ths are treated as Intervals, not Chords here
+    // 3rd (including 10th, 17th, ...) -> Root is lower note.
+    if (simpleInterval === 3) return { name: "Min (no 5)", root: lowPC, quality: "Min" };
+    if (simpleInterval === 4) return { name: "Maj (no 5)", root: lowPC, quality: "Maj" };
+
+    // 6th (including 13th, 20th, ...) -> First inversion of a third, root is upper note.
+    if (simpleInterval === 8) return { name: "Maj (no 5)", root: highPC, quality: "Maj" }; // m6 => inverted M3
+    if (simpleInterval === 9) return { name: "Min (no 5)", root: highPC, quality: "Min" }; // M6 => inverted m3
+
+    // Perfect 5th / 12th -> power chord.
+    if (simpleInterval === 7) return { name: "5", root: lowPC, quality: "5" };
+
+    // Tritone / compound tritone.
+    if (simpleInterval === 6) return { name: "Dim (no 3)", root: lowPC, quality: "Dim" };
+
+    // P4, 2nds, 7ths are treated as intervals, not chords.
     return null;
 }
 
@@ -142,12 +144,10 @@ function identifyChordWithNCT(pitches: number[]): { name: string, quality: strin
     
     // Dyad/Cluster handling for 2 unique PCs (even if multiple octaves)
     if (uniquePCs.length === 2) {
-        const sortedPCs = [...uniquePCs].sort((a,b) => a-b);
         const sortedInput = [...pitches].sort((a,b) => a-b);
-        const bassPC = sortedInput[0] % 12;
-        const otherPC = uniquePCs.find(p => p !== bassPC) || bassPC;
-        
-        const dyadAnalysis = analyzeDyad(bassPC, otherPC);
+        const lowPitch = sortedInput[0];
+        const highPitch = sortedInput[sortedInput.length - 1];
+        const dyadAnalysis = analyzeDyad(lowPitch, highPitch);
         if (dyadAnalysis) {
             return {
                 name: `${getStrictPitchName(dyadAnalysis.root).replace(/\d/g, '')} ${dyadAnalysis.name}`,
