@@ -118,6 +118,7 @@ const dagStart: SearchProgressState = {
     stage: 'dag',
     completedUnits: 4,
     totalUnits: 8,
+    terminal: false,
     telemetry: {
         ...tripletStart.telemetry,
         maxDepthReached: 4,

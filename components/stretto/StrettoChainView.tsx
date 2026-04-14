@@ -249,7 +249,7 @@ export default function StrettoChainView({
                                 </span>
                             </div>
                             {diagnostics.coverage && (
-                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent}%<MetricHelp metricKey="nodeBudgetUsedPercent" /> · completion lower bound: {diagnostics.coverage.completionRatioLowerBound != null ? `${diagnostics.coverage.completionRatioLowerBound}%` : 'n/a'}<MetricHelp metricKey="completionRatioLowerBound" /> · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()}<MetricHelp metricKey="maxFrontierSize" /> ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
+                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent != null ? `${diagnostics.coverage.nodeBudgetUsedPercent}%` : 'n/a'}<MetricHelp metricKey="nodeBudgetUsedPercent" /> · completion lower bound: {diagnostics.coverage.completionRatioLowerBound != null ? `${diagnostics.coverage.completionRatioLowerBound}%` : 'n/a'}<MetricHelp metricKey="completionRatioLowerBound" /> · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()}<MetricHelp metricKey="maxFrontierSize" /> ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
                             )}
                             {diagnostics.timeoutExtensionAppliedMs > 0 && (
                                 <div>Timeout extension applied: +{diagnostics.timeoutExtensionAppliedMs}ms near completion.</div>
