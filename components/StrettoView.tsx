@@ -19,7 +19,7 @@ import StrettoFooter from './stretto/StrettoFooter';
 import StrettoChainView from './stretto/StrettoChainView';
 import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
-import { computeSecondDelayStart, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
+import { computeSecondDelayStart, computeSecondDelayEnd, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
 
 interface StrettoViewProps {
     notes: RawNote[]; 
@@ -116,9 +116,14 @@ export default function StrettoView({
 }: StrettoViewProps) {
     const [mode, setMode] = useState<'midi' | 'abc'>('abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
-    const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain'); 
+    const [viewMode, setViewMode] = useState<'pairwise' | 'chain'>('chain');
     const [discoveryArity, setDiscoveryArity] = useState<'pairwise' | 'triplet'>('pairwise');
-    const [tripletDelayOrderingMode, setTripletDelayOrderingMode] = useState<TripletDelayOrderingMode>('ordered');
+    const [tripletDelayOrderingMode, setTripletDelayOrderingMode] = useState<TripletDelayOrderingMode>('unconstrained');
+    const [isDiscovering, setIsDiscovering] = useState(false);
+    const [pairwiseResults, setPairwiseResults] = useState<StrettoCandidate[]>([]);
+    // Delay range (in beats). null = auto-derived from subject length.
+    const [minDelayBeats, setMinDelayBeats] = useState<number>(0.5);
+    const [maxDelayBeats, setMaxDelayBeats] = useState<string>(''); // empty = auto
     
     const [gradeFilter, setGradeFilter] = useState<Record<StrettoGrade, boolean>>({
         'STRONG': true,
@@ -231,7 +236,7 @@ export default function StrettoView({
         timeSignature: { numerator: activeMeter.num, denominator: activeMeter.den },
     }), [subjectNotes, ppq, activeMeter]);
 
-    // Clear selection when subject changes
+    // Clear selection and discovery results when subject changes
     useEffect(() => {
         setSelectedCandidate(null);
         setCheckedIds(new Set());
@@ -239,6 +244,7 @@ export default function StrettoView({
         setSelectedChain(null);
         setSearchReport(null);
         setDiscoveryFilterContext(null);
+        setPairwiseResults([]);
     }, [subjectNotes]);
 
     // Intelligent Pivot Initialization using Key Prediction or ABC Context
@@ -333,41 +339,64 @@ export default function StrettoView({
         setAssemblyResult, runAssembly 
     } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts: activeMeter });
 
-    const pairwiseResults = useMemo(() => {
-        if (subjectNotes.length === 0 || viewMode !== 'pairwise') return [];
-        const candidates: StrettoCandidate[] = [];
+    /** Auto-computed max delay in beats (2/3 of subject length), shown as placeholder. */
+    const maxDelayAutoBeats = useMemo(() => {
         const validNotes = subjectNotes.filter(n => !!n);
-        if (validNotes.length === 0) return [];
-
-        const durationTicks = Math.max(...validNotes.map(n => n.ticks + n.durationTicks));
-        const maxDelay = durationTicks * (2/3); 
+        if (validNotes.length === 0) return 0;
         const currentPpq = ppq || 480;
-        let stepTicks = currentPpq; 
-        if (searchRes === 'half') stepTicks = currentPpq / 2;
-        else if (searchRes === 'double') stepTicks = currentPpq * 2;
-        
-        let intervalsToCheck = [...configIntervals];
-        if (includeExtensions) {
-            const exts = [3, 4, 8, 9, -3, -4, -8, -9];
-            exts.forEach(e => { if (!intervalsToCheck.includes(e)) intervalsToCheck.push(e); });
-        }
+        const durationTicks = Math.max(...validNotes.map(n => n.ticks + n.durationTicks));
+        const beatDiv = currentPpq * (4 / activeMeter.den);
+        return parseFloat(((durationTicks * (2/3)) / beatDiv).toFixed(2));
+    }, [subjectNotes, ppq, activeMeter]);
 
-        if (discoveryArity === 'pairwise') {
-            intervalsToCheck.forEach(interval => {
-                for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
-                    candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
-                    if (includeInversions) {
-                        candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+    const runDiscovery = () => {
+        const validNotes = subjectNotes.filter(n => !!n);
+        if (validNotes.length === 0) return;
+
+        setIsDiscovering(true);
+        // Yield to React so the loading state renders before the heavy loop
+        setTimeout(() => {
+            const candidates: StrettoCandidate[] = [];
+            const durationTicks = Math.max(...validNotes.map(n => n.ticks + n.durationTicks));
+            const currentPpq = ppq || 480;
+            const beatDiv = currentPpq * (4 / activeMeter.den);
+
+            let stepTicks = currentPpq;
+            if (searchRes === 'half') stepTicks = currentPpq / 2;
+            else if (searchRes === 'double') stepTicks = currentPpq * 2;
+
+            // Respect user-specified max delay (capped by the 2/3 Sb rule)
+            const autoMax = durationTicks * (2/3);
+            const userMax = maxDelayBeats !== '' ? parseFloat(maxDelayBeats) * beatDiv : autoMax;
+            const effectiveMaxDelay = Math.min(userMax, autoMax);
+            const effectiveMinDelay = Math.max(stepTicks, Math.round(minDelayBeats * beatDiv));
+
+            let intervalsToCheck = [...configIntervals];
+            if (includeExtensions) {
+                const exts = [3, 4, 8, 9, -3, -4, -8, -9];
+                exts.forEach(e => { if (!intervalsToCheck.includes(e)) intervalsToCheck.push(e); });
+            }
+
+            if (discoveryArity === 'pairwise') {
+                intervalsToCheck.forEach(interval => {
+                    for (let d = effectiveMinDelay; d <= effectiveMaxDelay; d += stepTicks) {
+                        candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                        if (includeInversions) {
+                            candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance));
+                        }
                     }
-                }
-            });
-        } else {
-            const inversionPairs = enumerateTripletInversionPairs(includeInversions);
-            for (let d1 = stepTicks; d1 <= maxDelay; d1 += stepTicks) {
-                for (let d2 = computeSecondDelayStart(d1, stepTicks, tripletDelayOrderingMode); d2 <= maxDelay; d2 += stepTicks) {
-                    for (const i1 of intervalsToCheck) {
-                        for (const i2 of intervalsToCheck) {
-                            for (const inversionPair of inversionPairs) {
+                });
+            } else {
+                // Triplet: d1 = delay from e0→e1, d2 = relative gap from e1→e2
+                // e2 absolute position = d1 + d2 (handled inside analyzeStrettoTripletCandidate)
+                const inversionPairs = enumerateTripletInversionPairs(includeInversions);
+                for (let d1 = effectiveMinDelay; d1 <= effectiveMaxDelay; d1 += stepTicks) {
+                    const d2Start = computeSecondDelayStart(d1, stepTicks);
+                    const d2End = computeSecondDelayEnd(d1, effectiveMaxDelay, stepTicks, tripletDelayOrderingMode);
+                    for (let d2 = d2Start; d2 <= d2End; d2 += stepTicks) {
+                        for (const i1 of intervalsToCheck) {
+                            for (const i2 of intervalsToCheck) {
+                                for (const inversionPair of inversionPairs) {
                                     candidates.push(
                                         analyzeStrettoTripletCandidate(
                                             validNotes,
@@ -385,14 +414,17 @@ export default function StrettoView({
                                             searchOptions.maxPairwiseDissonance
                                         )
                                     );
+                                }
                             }
                         }
                     }
                 }
             }
-        }
-        return candidates;
-    }, [subjectNotes, configIntervals, includeExtensions, includeInversions, ppq, activeMeter, searchRes, viewMode, discoveryArity, tripletDelayOrderingMode, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
+
+            setPairwiseResults(candidates);
+            setIsDiscovering(false);
+        }, 10);
+    };
 
     const processedDiscoveryResults = useMemo(() => {
         return pairwiseResults.filter(r => gradeFilter[r.grade] && r.dissonanceRatio <= searchOptions.maxPairwiseDissonance);
@@ -667,45 +699,93 @@ export default function StrettoView({
                 </div>
             </div>
             {viewMode === 'pairwise' && (
-                <div className="mb-4 flex flex-wrap items-center gap-4">
-                    <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Discovery Arity:</span>
-                        <button
-                            type="button"
-                            onClick={() => setDiscoveryArity('pairwise')}
-                            className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${discoveryArity === 'pairwise' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                        >
-                            Pairwise
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setDiscoveryArity('triplet')}
-                            className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${discoveryArity === 'triplet' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                        >
-                            Triplet
-                        </button>
-                    </div>
-                    {discoveryArity === 'triplet' && (
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Delay Ordering:</span>
+                <div className="mb-4 p-3 bg-gray-800 rounded-lg border border-gray-700 flex flex-wrap items-end gap-4">
+                    {/* Arity */}
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Discovery Arity</span>
+                        <div className="flex items-center gap-1">
                             <button
                                 type="button"
-                                onClick={() => setTripletDelayOrderingMode('ordered')}
-                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'ordered' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                                title="Constrained temporal ordering: d2 >= d1"
+                                onClick={() => { setDiscoveryArity('pairwise'); setPairwiseResults([]); }}
+                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${discoveryArity === 'pairwise' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
                             >
-                                Constrained (d2 ≥ d1)
+                                Pairwise
                             </button>
                             <button
                                 type="button"
-                                onClick={() => setTripletDelayOrderingMode('unconstrained')}
-                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'unconstrained' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                                title="Unconstrained temporal ordering: d2 can be less than, equal to, or greater than d1"
+                                onClick={() => { setDiscoveryArity('triplet'); setPairwiseResults([]); }}
+                                className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${discoveryArity === 'triplet' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
                             >
-                                Unconstrained (any d1,d2)
+                                Triplet
                             </button>
                         </div>
+                    </div>
+
+                    {/* Triplet: delay ordering */}
+                    {discoveryArity === 'triplet' && (
+                        <div className="flex flex-col gap-1">
+                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">d2 (e1→e2 gap)</span>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => setTripletDelayOrderingMode('tightening')}
+                                    className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'tightening' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                                    title="Only enumerate tightening triplets where d2 < d1"
+                                >
+                                    Tightening (d2 &lt; d1)
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setTripletDelayOrderingMode('unconstrained')}
+                                    className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'unconstrained' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
+                                    title="Enumerate all d2 values up to max delay"
+                                >
+                                    All d2
+                                </button>
+                            </div>
+                        </div>
                     )}
+
+                    {/* Delay range */}
+                    <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Delay Range (beats)</span>
+                        <div className="flex items-center gap-1">
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={minDelayBeats}
+                                onChange={e => setMinDelayBeats(Math.max(0, parseFloat(e.target.value) || 0))}
+                                className="w-16 bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-brand-primary"
+                                title="Minimum delay (beats)"
+                            />
+                            <span className="text-gray-500 text-xs">–</span>
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={maxDelayBeats}
+                                onChange={e => setMaxDelayBeats(e.target.value)}
+                                placeholder={maxDelayAutoBeats > 0 ? `${maxDelayAutoBeats}` : 'auto'}
+                                className="w-20 bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-xs text-white outline-none focus:border-brand-primary"
+                                title="Maximum delay (beats) — blank = auto (2/3 subject length)"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Discover button */}
+                    <div className="flex flex-col gap-1 ml-auto">
+                        <span className="text-[10px] font-bold text-transparent select-none">_</span>
+                        <button
+                            type="button"
+                            onClick={runDiscovery}
+                            disabled={isDiscovering || subjectNotes.length === 0}
+                            className="px-4 py-1.5 text-xs rounded border font-bold transition-colors bg-brand-secondary text-white border-brand-secondary hover:bg-brand-secondary/80 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                            {isDiscovering && <Spinner className="w-3 h-3" />}
+                            {isDiscovering ? 'Discovering…' : 'Run Discovery'}
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -816,16 +896,18 @@ export default function StrettoView({
                     />
                     
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                        <StrettoList 
-                            candidates={pairwiseResults} 
+                        <StrettoList
+                            candidates={pairwiseResults}
                             processedResults={processedDiscoveryResults}
                             gradeFilter={gradeFilter}
                             setGradeFilter={setGradeFilter}
-                            selectedId={selectedCandidate?.id || null} 
-                            onSelect={setSelectedCandidate} 
-                            checkedIds={checkedIds} 
+                            selectedId={selectedCandidate?.id || null}
+                            onSelect={setSelectedCandidate}
+                            checkedIds={checkedIds}
                             onToggleCheck={toggleCheck}
                             onFilterContextChange={setDiscoveryFilterContext}
+                            isTriplet={discoveryArity === 'triplet'}
+                            showNct={discoveryArity === 'triplet'}
                         />
                         <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={activeMeter} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} />
                     </div>

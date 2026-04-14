@@ -3,7 +3,11 @@ export type TripletInversionPair = {
   secondIsInverted: boolean;
 };
 
-export type TripletDelayOrderingMode = 'unconstrained' | 'ordered';
+/**
+ * 'tightening' — only enumerate pairs where d2 < d1 (stretto progressive tightening)
+ * 'unconstrained' — enumerate all (d1, d2) combinations
+ */
+export type TripletDelayOrderingMode = 'tightening' | 'unconstrained';
 
 export function enumerateTripletInversionPairs(includeInversions: boolean): TripletInversionPair[] {
   if (!includeInversions) {
@@ -18,10 +22,27 @@ export function enumerateTripletInversionPairs(includeInversions: boolean): Trip
   ];
 }
 
-export function computeSecondDelayStart(
+/**
+ * d2 is the relative gap from e1 to e2 — always starts at the minimum step.
+ */
+export function computeSecondDelayStart(_firstDelayTicks: number, stepTicks: number): number {
+  return stepTicks;
+}
+
+/**
+ * Upper bound for d2 (the e1→e2 gap).
+ * 'tightening': d2 must be strictly less than d1 (progressive stretto).
+ * 'unconstrained': d2 can be up to maxDelay.
+ */
+export function computeSecondDelayEnd(
   firstDelayTicks: number,
+  maxDelay: number,
   stepTicks: number,
   mode: TripletDelayOrderingMode
 ): number {
-  return mode === 'ordered' ? firstDelayTicks : stepTicks;
+  if (mode === 'tightening') {
+    // d2 < d1 — largest valid d2 is one step below d1
+    return firstDelayTicks - stepTicks;
+  }
+  return maxDelay;
 }
