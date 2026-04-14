@@ -113,6 +113,70 @@ function computeAutoTruncation(
     return 0;
 }
 
+type CanonRole = 'S' | 'A' | 'T' | 'B';
+
+function getCanonVoiceRoles(totalVoices: number): CanonRole[] {
+    if (totalVoices <= 2) return ['S', 'B'];
+    if (totalVoices === 3) return ['S', 'A', 'B'];
+    if (totalVoices === 4) return ['S', 'A', 'T', 'B'];
+    if (totalVoices === 5) return ['S', 'S', 'A', 'T', 'B'];
+    if (totalVoices === 6) return ['S', 'S', 'A', 'A', 'T', 'B'];
+
+    const fallback: CanonRole[] = [];
+    const cycle: CanonRole[] = ['S', 'A', 'T', 'B'];
+    for (let i = 0; i < totalVoices; i++) fallback.push(cycle[i % cycle.length]);
+    return fallback;
+}
+
+function pairRangeForRoles(upper: CanonRole, lower: CanonRole): { min: number; max: number } | null {
+    if ((upper === 'S' && lower === 'A') || (upper === 'A' && lower === 'T')) return { min: 3, max: 19 }; // m3..P12
+    if (upper === 'T' && lower === 'B') return { min: 7, max: 21 }; // P5..M13
+    if (upper === 'S' && lower === 'T') return { min: 8, max: 24 }; // m6..2 oct
+    if (upper === 'A' && lower === 'B') return { min: 12, max: 31 }; // 8ve..P19
+    if (upper === 'S' && lower === 'B') return { min: 19, max: 36 }; // P12..3 oct
+    return null;
+}
+
+function entriesRespectCanonTranspositionRules(
+    entries: StrettoChainOption[],
+    startTick: number,
+    candidate: StrettoChainOption,
+    roles: CanonRole[],
+    ppq: number
+): boolean {
+    const active = entries.filter(e => {
+        const eStart = Math.round(e.startBeat * ppq);
+        const eEnd = eStart + e.length;
+        return eStart <= startTick && eEnd > startTick;
+    });
+
+    const activePlus = [...active, candidate];
+    const transpositions = new Set<number>();
+    for (const e of activePlus) {
+        if (transpositions.has(e.transposition)) return false;
+        transpositions.add(e.transposition);
+    }
+
+    for (let i = 0; i < activePlus.length; i++) {
+        for (let j = i + 1; j < activePlus.length; j++) {
+            const left = activePlus[i];
+            const right = activePlus[j];
+            if (left.voiceIndex === right.voiceIndex) continue;
+
+            const upper = left.voiceIndex < right.voiceIndex ? left : right;
+            const lower = upper === left ? right : left;
+
+            const gap = upper.transposition - lower.transposition;
+            if (gap < 0) return false;
+
+            const range = pairRangeForRoles(roles[upper.voiceIndex], roles[lower.voiceIndex]);
+            if (range && (gap < range.min || gap > range.max)) return false;
+        }
+    }
+
+    return true;
+}
+
 // ---------------------------------------------------------------------------
 // Main search function
 // ---------------------------------------------------------------------------
@@ -164,6 +228,7 @@ export function runCanonSearch(
 
     const results: CanonChainResult[] = [];
     let totalEvaluated = 0;
+    const voiceRoles = getCanonVoiceRoles(options.ensembleTotal);
 
     for (const delayBeats of delays) {
         const delayTicks = Math.round(delayBeats * ppq);
@@ -175,6 +240,7 @@ export function runCanonSearch(
 
                 for (let chainLen = minLen; chainLen <= maxLen; chainLen++) {
                     totalEvaluated++;
+                    let isViable = true;
 
                     // ----------------------------------------------------------------
                     // Auto-truncation
@@ -277,14 +343,23 @@ export function runCanonSearch(
 
                         const variant = variants[safeVIdx];
 
-                        entries.push({
+                        const nextEntry: StrettoChainOption = {
                             startBeat: i * delayBeats,
                             transposition: absoluteTransposition,
                             type: isInverted ? 'I' : 'N',
                             length: variant.lengthTicks,
                             voiceIndex,
-                        });
+                        };
+
+                        if (!entriesRespectCanonTranspositionRules(entries, Math.round(nextEntry.startBeat * ppq), nextEntry, voiceRoles, ppq)) {
+                            isViable = false;
+                            break;
+                        }
+
+                        entries.push(nextEntry);
                     }
+
+                    if (!isViable) continue;
 
                     // ----------------------------------------------------------------
                     // Score
