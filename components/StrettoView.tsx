@@ -809,7 +809,7 @@ export default function StrettoView({
                         includeExtensions={includeExtensions} 
                         setIncludeExtensions={setIncludeExtensions} 
                         pivotMidi={searchOptions.pivotMidi}
-                        setPivotMidi={(val) => setSearchOptions({...searchOptions, pivotMidi: val})}
+                        setPivotMidi={(val) => setSearchOptions((prev) => ({...prev, pivotMidi: val}))}
                         pivotOptions={pivotOptions}
                         onFindOptimalPivot={runOptimalPivotSearch}
                         pivotSearchResults={pivotSearchResults}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { PivotSearchMetric, PIVOT_OBJECTIVE_WEIGHTS } from '../services/pairwisePivotSearch';
+import { resolveActiveRowPivot } from './pivotSelection';
 
 const INTERVAL_OPTIONS = [
     { label: 'Unison (P1)', val: 0 },
@@ -98,10 +99,8 @@ export default function StrettoConfig({
     const activeRow = pivotSearchResults.find((r) => r.pivotMidi === activeRowPivot) ?? best;
 
     React.useEffect(() => {
-        if (best) {
-            setActiveRowPivot((prev) => prev ?? best.pivotMidi);
-        }
-    }, [best]);
+        setActiveRowPivot(resolveActiveRowPivot(pivotMidi, pivotSearchResults));
+    }, [pivotMidi, pivotSearchResults]);
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -211,24 +210,24 @@ export default function StrettoConfig({
 
                         {best && (
                             <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                                <button type="button" onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('objective'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                <button type="button" onClick={() => { setPivotMidi(best.pivotMidi); setActiveRowPivot(best.pivotMidi); setActiveMetric('objective'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
                                     <div className="text-[9px] text-gray-400">Best Pivot</div>
                                     <div className="text-sm font-bold text-brand-primary">{getStrictPitchName(best.pivotMidi)}</div>
                                     <div className="text-[9px] text-gray-500">rank #1</div>
                                 </button>
-                                <button type="button" onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('viable'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                <button type="button" onClick={() => { setPivotMidi(best.pivotMidi); setActiveRowPivot(best.pivotMidi); setActiveMetric('viable'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
                                     <div className="text-[9px] text-gray-400">Viable Pairs</div>
                                     <div className="text-sm font-mono text-gray-100">{toPercent(best.viablePairRate)}</div>
                                     <div className="text-[9px] text-gray-500">{best.viablePairs}/{best.totalPairs}</div>
                                     {renderMetricBar(best.viablePairRate)}
                                 </button>
-                                <button type="button" onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('delay'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                <button type="button" onClick={() => { setPivotMidi(best.pivotMidi); setActiveRowPivot(best.pivotMidi); setActiveMetric('delay'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
                                     <div className="text-[9px] text-gray-400">Delay Coverage</div>
                                     <div className="text-sm font-mono text-gray-100">{toPercent(best.delayCoverageRate)}</div>
                                     <div className="text-[9px] text-gray-500">{best.delaysWithViablePairs}/{best.totalDelays}</div>
                                     {renderMetricBar(best.delayCoverageRate)}
                                 </button>
-                                <button type="button" onClick={() => { setActiveRowPivot(best.pivotMidi); setActiveMetric('vwDiss'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
+                                <button type="button" onClick={() => { setPivotMidi(best.pivotMidi); setActiveRowPivot(best.pivotMidi); setActiveMetric('vwDiss'); }} className="bg-gray-900 border border-gray-700 rounded p-2 text-left hover:border-brand-primary transition-colors">
                                     <div className="text-[9px] text-gray-400">Vw Delay Diss.</div>
                                     <div className="text-sm font-mono text-gray-100">{toPercent(best.varietyWeightedDelayDissonance)}</div>
                                     <div className="text-[9px] text-gray-500">lower is better</div>
@@ -251,7 +250,7 @@ export default function StrettoConfig({
                                     {pivotSearchResults.slice(0, 12).map((row, idx) => (
                                         <button type="button"
                                             key={row.pivotMidi}
-                                            onClick={() => setActiveRowPivot(row.pivotMidi)}
+                                            onClick={() => { setPivotMidi(row.pivotMidi); setActiveRowPivot(row.pivotMidi); }}
                                             className={`w-full grid grid-cols-6 text-[10px] px-2 py-2 border-t border-gray-800 transition-colors text-left ${row.pivotMidi === activeRow?.pivotMidi ? 'bg-brand-primary/15' : idx === 0 ? 'bg-brand-primary/12' : 'bg-gray-900/40 text-gray-300 hover:bg-gray-900/70'}`}
                                         >
                                             <div className={`${idx === 0 ? 'text-brand-primary font-bold' : 'text-gray-200'}`}>{getStrictPitchName(row.pivotMidi)}</div>
