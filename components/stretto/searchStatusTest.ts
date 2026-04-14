@@ -1,5 +1,6 @@
 import { deriveSearchDiagnosticsPresentation, deriveSearchRuntimePresentation, deriveSearchStatusPresentation } from './searchStatus';
 import { StrettoSearchReport } from '../../types';
+import { STRETTO_TELEMETRY_GLOSSARY, metricHelpText } from './telemetryGlossary';
 
 function mkReport(
   stopReason: StrettoSearchReport['stats']['stopReason'],
@@ -95,8 +96,29 @@ if (runtime.elapsedPercent !== 40) {
 if (runtime.algorithmPhase !== 'Triplet Gate Construction') {
   throw new Error('Runtime phase classification must align with elapsed budget segment.');
 }
+if (!runtime.phaseDetail.includes('Wall-clock budget segment')) {
+  throw new Error('Runtime phase detail must explicitly distinguish budget segments from strict algorithmic completion.');
+}
 if (runtime.estimatedRemainingMs !== 18000) {
   throw new Error('Runtime remaining-time estimate must be budget minus elapsed.');
+}
+if (STRETTO_TELEMETRY_GLOSSARY.elapsedBudgetPercent.estimateClass !== 'exact') {
+  throw new Error('Glossary classification for elapsed budget percent must remain exact.');
+}
+if (!metricHelpText('runtimePhaseHeuristic').includes('not a proof of algorithmic completion')) {
+  throw new Error('Glossary help text must disambiguate heuristic budget phases from completion.');
+}
+if (STRETTO_TELEMETRY_GLOSSARY.dagNodesExpanded.estimateClass !== 'exact') {
+  throw new Error('DAG node expansion metric must remain classified as exact.');
+}
+if (!metricHelpText('dagEdgesEvaluated').includes('transition edges evaluated')) {
+  throw new Error('DAG edge metric glossary text must remain explicit about transition-edge counting semantics.');
+}
+if (STRETTO_TELEMETRY_GLOSSARY.pairwiseOperationsProcessed.estimateClass !== 'exact') {
+  throw new Error('Pairwise operations processed metric must remain classified as exact.');
+}
+if (!metricHelpText('tripletOperationsProcessed').includes('triplet candidate operations processed')) {
+  throw new Error('Triplet operations metric glossary text must remain explicit about candidate-operation counting semantics.');
 }
 
 console.log('searchStatusTest passed');

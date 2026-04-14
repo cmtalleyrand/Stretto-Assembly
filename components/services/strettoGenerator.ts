@@ -3106,7 +3106,7 @@ export async function searchStrettoChains(
             metricOffsetTicks: offsetTicks,
             timeoutExtensionAppliedMs,
             coverage: {
-                nodeBudgetUsedPercent: null, // No node budget — time-only gating
+                nodeBudgetUsedPercent: 0, // No node budget — time-only gating
                 maxFrontierSize,
                 maxFrontierClassCount,
                 edgesTraversed,
