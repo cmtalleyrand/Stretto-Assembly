@@ -156,6 +156,45 @@ function enumerateTranspositionTuples(
     return results;
 }
 
+/**
+ * Build a cumulative transposition tuple for a given base step T.
+ *
+ * Voice 0 is fixed at 0.  Each subsequent voice is placed at the previous
+ * voice's transposition + T, then shifted by the minimum integer number of
+ * octaves (±12) needed to satisfy ALL voice-spacing constraints with every
+ * higher voice already placed.  This keeps the interval class the same (e.g.
+ * a P5-below canon stays a P5 or its octave compound, never drifting to a M3).
+ * Returns null if no octave adjustment within ±4 octaves can produce a valid
+ * placement for any voice.
+ */
+function buildCumulativeTuple(T: number, V: number, roles: CanonRole[]): number[] | null {
+    const tuple: number[] = [0];
+
+    for (let vi = 1; vi < V; vi++) {
+        const base = tuple[vi - 1] + T;
+        // Try 0, ±1, ±2, ±3, ±4 octaves in order of ascending |k|
+        const octaveOrder = [0, -1, 1, -2, 2, -3, 3, -4, 4];
+        let placed: number | null = null;
+
+        for (const k of octaveOrder) {
+            const candidate = base + k * 12;
+            let valid = true;
+            for (let prevVi = 0; prevVi < vi && valid; prevVi++) {
+                const gap = tuple[prevVi] - candidate;
+                if (gap < 0) { valid = false; break; }
+                const range = pairGapRange(roles[prevVi], roles[vi]);
+                if (range && (gap < range.min || gap > range.max)) valid = false;
+            }
+            if (valid) { placed = candidate; break; }
+        }
+
+        if (placed === null) return null;
+        tuple.push(placed);
+    }
+
+    return tuple;
+}
+
 // ---------------------------------------------------------------------------
 // Subject helpers
 // ---------------------------------------------------------------------------
@@ -289,20 +328,17 @@ export function runCanonSearch(
     let tTuples: number[][];
 
     if (mode === 'cumulative') {
+        // For each T, step each consecutive voice by T (same interval class),
+        // adjusting by ±octaves as needed to satisfy voice-spacing rules.
+        const seen = new Set<string>();
         tTuples = [];
         for (const T of tSteps) {
-            const tuple = Array.from({ length: V }, (_, i) => i * T);
-            // Validate against voice-spacing rules
-            let valid = true;
-            outer: for (let i = 0; i < V; i++) {
-                for (let j = i + 1; j < V; j++) {
-                    const gap = tuple[i] - tuple[j];
-                    if (gap < 0) { valid = false; break outer; }
-                    const range = pairGapRange(roles[i], roles[j]);
-                    if (range && (gap < range.min || gap > range.max)) { valid = false; break outer; }
-                }
-            }
-            if (valid) tTuples.push(tuple);
+            const tuple = buildCumulativeTuple(T, V, roles);
+            if (tuple === null) continue;
+            const key = tuple.join(',');
+            if (seen.has(key)) continue; // different T values can produce the same tuple
+            seen.add(key);
+            tTuples.push(tuple);
         }
     } else {
         // 'independent': full enumeration of valid V-tuples
