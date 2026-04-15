@@ -20,7 +20,6 @@ import StrettoChainView from './stretto/StrettoChainView';
 import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
 import { computeSecondDelayStart, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
-import { buildVisiblePivotOptions } from './stretto/pivotOptions';
 
 interface StrettoViewProps {
     notes: RawNote[]; 
@@ -195,10 +194,15 @@ export default function StrettoView({
 
 
     const constrainedPivotOptions = useMemo(() => computeSubjectPivotCandidates(subjectNotes), [subjectNotes]);
-    const pivotOptions = useMemo(
-        () => buildVisiblePivotOptions(constrainedPivotOptions, searchOptions.pivotMidi),
-        [constrainedPivotOptions, searchOptions.pivotMidi]
-    );
+    const pivotOptions = useMemo(() => {
+        if (constrainedPivotOptions.length === 0) {
+            return [searchOptions.pivotMidi];
+        }
+        if (constrainedPivotOptions.includes(searchOptions.pivotMidi)) {
+            return constrainedPivotOptions;
+        }
+        return [...constrainedPivotOptions, searchOptions.pivotMidi];
+    }, [constrainedPivotOptions, searchOptions.pivotMidi]);
 
     const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
     const abcKeyLabel = useMemo(() => {
