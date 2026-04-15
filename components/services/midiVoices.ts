@@ -61,6 +61,23 @@ export function getVoiceLabel(index: number, total: number): string {
     return `${name} ${posInBucket}`;
 }
 
+/**
+ * Returns compact role code for a voice (e.g. S, A, T, B, S1, A2).
+ * If a user-defined label exists, it remains highest priority.
+ */
+export function getVoiceCode(index: number, total: number, voiceNames?: Record<number, string>): string {
+    const customLabel = voiceNames?.[index];
+    if (customLabel) return customLabel;
+
+    const label = getVoiceLabel(index, total);
+    const voiceMatch = label.match(/^([A-Za-z]+)(?:\s+(\d+))?$/);
+    if (!voiceMatch) return label;
+
+    const [, roleName, roleNumber] = voiceMatch;
+    const roleCode = roleName.charAt(0).toUpperCase();
+    return roleNumber ? `${roleCode}${roleNumber}` : roleCode;
+}
+
 interface DensityArea {
     startTick: number;
     endTick: number;
