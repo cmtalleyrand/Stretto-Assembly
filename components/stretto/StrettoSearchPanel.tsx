@@ -381,14 +381,14 @@ export default function StrettoSearchPanel({
                         </div>
                         <div className="flex items-center gap-2 mt-1">
                             <span className="text-[10px] text-gray-500 whitespace-nowrap">Pivot:</span>
-                            <select 
-                                value={options.pivotMidi}
+                            <select
+                                value={String(options.pivotMidi)}
                                 onChange={(e) => handleChange('pivotMidi', parseInt(e.target.value))}
                                 className="bg-gray-900 border border-gray-600 text-[10px] rounded px-1 py-0.5 text-gray-300 flex-grow"
                             >
                                 {Array.from({length: 12}).map((_, i) => {
-                                    const midi = 60 + i; 
-                                    return <option key={midi} value={midi}>{getStrictPitchName(midi)}</option>
+                                    const midi = 60 + i;
+                                    return <option key={midi} value={String(midi)}>{getStrictPitchName(midi)}</option>
                                 })}
                             </select>
                         </div>
