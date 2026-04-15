@@ -162,6 +162,9 @@ export interface StrettoSearchProgressUpdate {
         tripletOperationsProcessed: number;
         dagNodesExpanded: number;
         dagEdgesEvaluated: number;
+        dagExploredWorkItems: number;
+        dagLiveFrontierWorkItems: number;
+        dagHeuristicCompletionRatio?: number;
     };
 }
 
@@ -1295,6 +1298,9 @@ export async function searchStrettoChains(
     let tripletOperationsProcessed = 0;
     let dagNodesExpanded = 0;
     let dagEdgesEvaluated = 0;
+    let dagExploredWorkItems = 0;
+    let dagLiveFrontierWorkItems = 0;
+    let dagHeuristicCompletionRatio: number | undefined = undefined;
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
     let fullChainsFound = 0;
@@ -1329,7 +1335,10 @@ export async function searchStrettoChains(
                 pairwiseOperationsProcessed,
                 tripletOperationsProcessed,
                 dagNodesExpanded,
-                dagEdgesEvaluated
+                dagEdgesEvaluated,
+                dagExploredWorkItems,
+                dagLiveFrontierWorkItems,
+                dagHeuristicCompletionRatio
             }
         });
     };
@@ -2468,8 +2477,8 @@ export async function searchStrettoChains(
     emitStageProgress('triplet', tripletTotalUnits, tripletTotalUnits, true);
     const dagTotalUnits = Math.max(1, options.targetChainLength);
     let dagCompletedUnits = 0;
-    let dagExploredWorkItems = 0;
-    let dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
+    dagExploredWorkItems = 0;
+    dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
     const queueDagWorkItems = (count: number): void => {
         if (count <= 0) return;
         dagLiveFrontierWorkItems += count;
@@ -2483,6 +2492,7 @@ export async function searchStrettoChains(
         // The ratio is traversal-state based and does not rely on chain-depth upper bounds.
         const denom = Math.max(1, dagExploredWorkItems + dagLiveFrontierWorkItems);
         const heuristicRatio = dagExploredWorkItems / denom;
+        dagHeuristicCompletionRatio = heuristicRatio;
         const boundedNonTerminalCeiling = Math.max(0, dagTotalUnits - 1);
         const nextCompletedUnits = terminal
             ? dagTotalUnits

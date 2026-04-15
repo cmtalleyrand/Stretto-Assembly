@@ -16,6 +16,9 @@ export interface SearchProgressState {
         tripletOperationsProcessed: number;
         dagNodesExpanded: number;
         dagEdgesEvaluated: number;
+        dagExploredWorkItems: number;
+        dagLiveFrontierWorkItems: number;
+        dagHeuristicCompletionRatio?: number;
     };
     heartbeat: boolean;
 }
@@ -39,6 +42,9 @@ export interface SearchProgressDisplay {
     rateUnitLabel: string;
     stars: string;
     isHeartbeat: boolean;
+    depthAxisPercent: number;
+    traversalCompletionPercent: number | null;
+    countersLabel: string;
 }
 
 const STAGE_ORDER: SearchProgressStage[] = ['pairwise', 'triplet', 'dag'];
@@ -95,6 +101,9 @@ export function computeSearchProgressDisplay(
             rateUnitLabel: 'units/s',
             stars: '☆☆☆☆☆☆☆☆☆☆',
             isHeartbeat: false,
+            depthAxisPercent: 0,
+            traversalCompletionPercent: null,
+            countersLabel: 'explored 0 · live 0 · nodes 0 · edges 0 · maxDepth 0',
         };
     }
 
@@ -142,6 +151,15 @@ export function computeSearchProgressDisplay(
         : depthBasedEtaSeconds;
 
     const filledStars = Math.max(1, Math.min(10, Math.round(overallEstimatePercent / 10)));
+    const depthAxisPercent = Math.max(
+        0,
+        Math.min(100, Math.round((progress.telemetry.maxDepthReached / Math.max(1, progress.telemetry.targetChainLength)) * 100))
+    );
+    const queueDenominator = progress.telemetry.dagExploredWorkItems + progress.telemetry.dagLiveFrontierWorkItems;
+    const traversalCompletionPercent = queueDenominator > 0
+        ? Math.max(0, Math.min(100, Math.round((progress.telemetry.dagExploredWorkItems / queueDenominator) * 100)))
+        : null;
+    const countersLabel = `explored ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · live ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · nodes ${progress.telemetry.dagNodesExpanded.toLocaleString()} · edges ${progress.telemetry.dagEdgesEvaluated.toLocaleString()} · maxDepth ${progress.telemetry.maxDepthReached.toLocaleString()}`;
 
     return {
         stageLabel: progress.heartbeat ? 'Search active (collecting stage metrics)' : STAGE_LABELS[progress.stage],
@@ -155,5 +173,8 @@ export function computeSearchProgressDisplay(
         rateUnitLabel,
         stars: '★'.repeat(filledStars).padEnd(10, '☆'),
         isHeartbeat: progress.heartbeat,
+        depthAxisPercent,
+        traversalCompletionPercent,
+        countersLabel,
     };
 }

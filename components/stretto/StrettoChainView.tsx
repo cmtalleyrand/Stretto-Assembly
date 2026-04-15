@@ -33,6 +33,9 @@ interface StrettoChainViewProps {
             tripletOperationsProcessed: number;
             dagNodesExpanded: number;
             dagEdgesEvaluated: number;
+            dagExploredWorkItems: number;
+            dagLiveFrontierWorkItems: number;
+            dagHeuristicCompletionRatio?: number;
         };
         heartbeat: boolean;
     } | null;
