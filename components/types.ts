@@ -352,6 +352,8 @@ export interface StrettoSearchReport {
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        tripletEnumerationTruncated?: boolean;
+        tripletBudgetMs?: number;
         stageStats?: {
             tripleCandidates: number;
             triplePairwiseRejected: number;

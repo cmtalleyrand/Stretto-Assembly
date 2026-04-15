@@ -49,6 +49,24 @@ assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].include
 assert.ok(reportA.stats.maxDepthReached >= 1);
 assert.notEqual(timeoutNearCompletionReport.stats.maxDepthReached >= baseOptions.targetChainLength && timeoutNearCompletionReport.results.length === 0, true);
 
+process.env.STRETTO_DISABLE_PREFIX_ADMISSIBILITY = '1';
+const noPrefixPruningReport = await searchStrettoChains(baseSubject, baseOptions, ppq);
+delete process.env.STRETTO_DISABLE_PREFIX_ADMISSIBILITY;
+const maxScoringValidDepthWithPruning = reportA.results.reduce((max, result) => Math.max(max, result.entries.length), 0);
+const maxScoringValidDepthWithoutPruning = noPrefixPruningReport.results.reduce((max, result) => Math.max(max, result.entries.length), 0);
+assert.ok(
+  reportA.stats.stageStats!.prunedByPrefixAdmissibility >= 0,
+  'prefix-pruning telemetry must be exposed in stageStats.'
+);
+assert.ok(
+  reportA.stats.nodesVisited <= noPrefixPruningReport.stats.nodesVisited,
+  'enabling prefix admissibility pruning must not increase expanded traversal volume for the fixed fixture.'
+);
+assert.ok(
+  maxScoringValidDepthWithPruning >= maxScoringValidDepthWithoutPruning,
+  'prefix admissibility pruning must preserve or improve maximum scoring-valid depth.'
+);
+
 const transformConstrainedOptions = {
   ...baseOptions,
   subjectVoiceIndex: 0,
