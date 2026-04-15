@@ -182,6 +182,20 @@ The canonical tuple `(d_i, t_i, v_i, inv_i, trunc_i)` is now documented as the n
 | Search/generation (`components/services/strettoGenerator.ts`) | Compatibility mode (legacy fields + `variantIndices`) |
 | UI rendering (`components/stretto/StrettoChainView.tsx`, `components/stretto/StrettoResultsList.tsx`) | Compatibility mode |
 
+## Active vs. legacy analysis pathways
+
+The intended production workflow is constrained to Stretto and Canon discovery surfaces. Legacy harmonic-report pathways remain in-repo strictly for backward compatibility and test coverage, and are not part of the normative operator path.
+
+Detailed classification (with module-level rationale) is maintained in:
+
+- `docs/active-vs-legacy-analysis-paths.md`
+
+Deprecation intent:
+
+- **Active** pathways should receive feature evolution and bug-fix priority.
+- **Legacy** pathways are retained for compatibility/testing only and should not be used as design anchors for new behavior.
+- Migration target is consolidation on Stretto pairwise discovery, Stretto chain search worker execution, Canon search, and their associated result displays.
+
 ## Test Tiering and Change-Type Mapping
 
 The test scripts are partitioned by deterministic cost and failure-surface breadth to minimize unnecessary runtime while preserving regression guarantees.
