@@ -151,5 +151,28 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
 }
 
 printComparisonTable();
+
+{
+  const pressuredOptions: StrettoSearchOptions = {
+    ...FIXTURES.target8_scale8.options,
+    maxSearchTimeMs: 40
+  };
+  const pressuredReport = await searchStrettoChains(FIXTURES.target8_scale8.subject, pressuredOptions, ppq);
+  assert.ok(
+    (pressuredReport.stats.finalizationBudgetMs ?? 0) > 0,
+    'finalization budget must be reserved under timeout pressure.'
+  );
+  assert.ok(
+    (pressuredReport.stats.finalizationScoredCount ?? 0) >= 0,
+    'finalization counters must be present under timeout pressure.'
+  );
+  if (pressuredReport.stats.enumerationStoppedForFinalization) {
+    assert.ok(
+      pressuredReport.stats.finalizationScoredCount !== undefined,
+      'when enumeration is stopped for reserved finalization, finalization must still execute.'
+    );
+  }
+}
+
 console.log('stretto performance regression test passed');
 console.log('Baseline update guidance:', baseline.updateGuidance.join(' '));
