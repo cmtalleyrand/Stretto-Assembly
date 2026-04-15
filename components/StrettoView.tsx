@@ -486,13 +486,18 @@ export default function StrettoView({
             worker.onmessage = (event: MessageEvent<StrettoSearchWorkerProgress | StrettoSearchWorkerResult | StrettoSearchWorkerFailure>) => {
                 const payload = event.data;
                 if (payload.ok && payload.kind === 'progress') {
+                    const telemetry = {
+                        ...payload.telemetry,
+                        dagExploredWorkItems: payload.telemetry.dagExploredWorkItems ?? 0,
+                        dagLiveFrontierWorkItems: payload.telemetry.dagLiveFrontierWorkItems ?? 0
+                    };
                     onProgress({
                         elapsedMs: payload.elapsedMs,
                         stage: payload.stage,
                         completedUnits: payload.completedUnits,
                         totalUnits: payload.totalUnits,
                         terminal: payload.terminal,
-                        telemetry: payload.telemetry,
+                        telemetry,
                         heartbeat: payload.heartbeat
                     });
                     return;
