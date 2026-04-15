@@ -164,6 +164,21 @@ export default function StrettoChainView({
         const stats = searchReport.stats as any;
         const transitionRowsReturned = stats.stageStats.transitionsReturned ?? 0;
         const transitionCandidatesEnumerated = stats.stageStats.candidateTransitionsEnumerated ?? 0;
+        const tripletRejectedTotal = stats.stageStats.tripletRejectedTotal ?? (
+            (stats.stageStats.tripletRejectA10 ?? 0)
+            + (stats.stageStats.tripletRejectA8 ?? 0)
+            + (stats.stageStats.tripletRejectDelayShape ?? 0)
+            + (stats.stageStats.tripletRejectPairBCMissing ?? 0)
+            + (stats.stageStats.tripletRejectAdjSepBC ?? 0)
+            + (stats.stageStats.tripletRejectPairACMissing ?? 0)
+            + (stats.stageStats.tripletRejectLowerBound ?? stats.stageStats.tripleLowerBoundRejected ?? 0)
+            + (stats.stageStats.tripletRejectParallel ?? stats.stageStats.tripleParallelRejected ?? 0)
+            + (stats.stageStats.tripletRejectVoice ?? stats.stageStats.tripleVoiceRejected ?? 0)
+            + (stats.stageStats.tripletRejectP4Bass ?? stats.stageStats.tripleP4BassRejected ?? 0)
+            + (stats.stageStats.tripletRejectNoDelayContext ?? 0)
+        );
+        const tripletAcceptedTotal = stats.stageStats.tripletAcceptedTotal ?? (stats.stageStats.tripleCandidates - tripletRejectedTotal);
+        const tripletAccountingHolds = stats.stageStats.tripleCandidates === (tripletRejectedTotal + tripletAcceptedTotal);
         return {
             stage: stats.stageStats,
             coverage: stats.coverage ?? null,
@@ -171,7 +186,10 @@ export default function StrettoChainView({
             timeoutExtensionAppliedMs: stats.timeoutExtensionAppliedMs ?? 0,
             transitionRowsReturned,
             transitionCandidatesEnumerated,
-            transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated
+            transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated,
+            tripletRejectedTotal,
+            tripletAcceptedTotal,
+            tripletAccountingHolds
         };
     }, [searchReport]);
 
@@ -244,6 +262,12 @@ export default function StrettoChainView({
                             <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}<MetricHelp metricKey="structuralScanInvocations" /></div>
                             <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()}<MetricHelp metricKey="pairStageRejected" /> · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()}<MetricHelp metricKey="tripletStageRejected" /> · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}<MetricHelp metricKey="globalLineageStageRejected" /></div>
                             <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
+                            <div>
+                                Triplet candidate accounting → {diagnostics.stage.tripleCandidates.toLocaleString()} = {diagnostics.tripletRejectedTotal.toLocaleString()} + {diagnostics.tripletAcceptedTotal.toLocaleString()} · invariant:
+                                <span className={diagnostics.tripletAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
+                                    {diagnostics.tripletAccountingHolds ? 'holds' : 'violated'}
+                                </span>
+                            </div>
                             <div>
                                 Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()}<MetricHelp metricKey="transitionRowsReturned" /> · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()}<MetricHelp metricKey="transitionCandidatesEnumerated" /> · invariant:
                                 <span className={diagnostics.transitionAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
