@@ -100,32 +100,64 @@ interface ScoreGroup {
     label: string;
     net: number;
     color: string;
+    detail?: string;
 }
 
 function buildScoreGroups(log: ScoreLog): ScoreGroup[] {
-    const sum = (items: { reason: string; points: number }[], ...keywords: string[]) =>
-        items
-            .filter(it => keywords.some(k => it.reason.toLowerCase().includes(k.toLowerCase())))
-            .reduce((s, it) => s + it.points, 0);
+    const breakdown = log.breakdown;
+    const sum = (items: { reason: string; points: number }[], ...keywords: string[]) => items
+        .filter(it => keywords.some(k => it.reason.toLowerCase().includes(k.toLowerCase())))
+        .reduce((s, it) => s + it.points, 0);
 
-    const harmonyBonus =
-        sum(log.bonuses, 'triad', '7th', '6th', 'chord', 'harmony');
-    const dissonanceNet =
-        sum(log.bonuses, 'resolv', 'dissonance resolv') -
-        sum(log.penalties, 'dissonance');
-    const voiceLeadingPenalty =
-        sum(log.penalties, 'parallel', 'unison');
-    const nctPenalty =
-        sum(log.penalties, 'nct', 'non-chord');
-    const structureNet =
-        sum(log.bonuses, 'step', 'chain step') -
-        sum(log.penalties, 'truncat');
+    const harmonyBonus = breakdown?.contributions.harmonyBonus
+        ?? sum(log.bonuses, 'triad', '7th', '6th', 'chord', 'harmony');
+    const dissonancePenalty = breakdown?.contributions.dissonancePenalty
+        ?? sum(log.penalties, 'dissonance');
+    const dissonanceResolution = breakdown?.contributions.dissonanceResolutionBonus
+        ?? sum(log.bonuses, 'resolv', 'dissonance resolv');
+    const voiceLeadingPenalty = (breakdown?.contributions.parallelPenalty ?? sum(log.penalties, 'parallel'))
+        + (breakdown?.contributions.unisonPenalty ?? sum(log.penalties, 'unison'));
+    const nctPenalty = breakdown?.contributions.nctPenalty
+        ?? sum(log.penalties, 'nct', 'non-chord');
+    const structureNet = (breakdown?.contributions.stepBonus ?? sum(log.bonuses, 'step', 'chain step'))
+        - (breakdown?.contributions.truncationPenalty ?? sum(log.penalties, 'truncat'));
+
+    const dissonanceNet = dissonanceResolution - dissonancePenalty;
+    const dissonancePct = breakdown && breakdown.analyzedBeats > 0
+        ? (breakdown.dissonantBeats / breakdown.analyzedBeats) * 100
+        : null;
+    const nctPct = breakdown && breakdown.analyzedBeats > 0
+        ? (breakdown.nctBeats / breakdown.analyzedBeats) * 100
+        : null;
+    const parallelCount = breakdown?.parallelPerfectCount ?? 0;
 
     const groups: ScoreGroup[] = [
-        { label: 'Harmony', net: harmonyBonus, color: harmonyBonus >= 0 ? 'text-green-400' : 'text-red-400' },
-        { label: 'Dissonance', net: dissonanceNet, color: dissonanceNet >= 0 ? 'text-green-400' : 'text-orange-400' },
-        { label: 'Voice Leading', net: -voiceLeadingPenalty, color: voiceLeadingPenalty === 0 ? 'text-green-400' : 'text-red-400' },
-        { label: 'NCT', net: -nctPenalty, color: nctPenalty === 0 ? 'text-green-400' : 'text-yellow-400' },
+        {
+            label: 'Harmony',
+            net: harmonyBonus,
+            color: harmonyBonus >= 0 ? 'text-green-400' : 'text-red-400',
+            detail: breakdown
+                ? `Triad ${breakdown.harmonyCounts.fullTriad} · 7/6 ${breakdown.harmonyCounts.full7thOr6th} · Inc ${breakdown.harmonyCounts.incomplete7thOr6th}`
+                : undefined,
+        },
+        {
+            label: 'Dissonance',
+            net: dissonanceNet,
+            color: dissonanceNet >= 0 ? 'text-green-400' : 'text-orange-400',
+            detail: dissonancePct === null ? undefined : `${dissonancePct.toFixed(1)}% · pen ${dissonancePenalty.toFixed(0)} · res +${dissonanceResolution.toFixed(0)}`,
+        },
+        {
+            label: 'Voice Leading',
+            net: -voiceLeadingPenalty,
+            color: voiceLeadingPenalty === 0 ? 'text-green-400' : 'text-red-400',
+            detail: breakdown ? `Par 5/8: ${parallelCount} · Unisons: ${breakdown.unisonCount}` : undefined,
+        },
+        {
+            label: 'NCT',
+            net: -nctPenalty,
+            color: nctPenalty === 0 ? 'text-green-400' : 'text-yellow-400',
+            detail: nctPct === null ? undefined : `${nctPct.toFixed(1)}%`,
+        },
         { label: 'Structure', net: structureNet, color: structureNet >= 0 ? 'text-green-400' : 'text-red-400' },
     ];
 
@@ -135,23 +167,55 @@ function buildScoreGroups(log: ScoreLog): ScoreGroup[] {
 function renderScoreTooltip(log: ScoreLog) {
     const groups = buildScoreGroups(log);
     return (
-        <div className="absolute right-0 top-full mt-1 z-50 w-52 bg-black border border-gray-600 rounded p-2.5 shadow-xl text-xs text-gray-300">
+        <div className="absolute right-0 top-full mt-1 z-50 w-80 bg-black border border-gray-600 rounded p-2.5 shadow-xl text-xs text-gray-300">
             <div className="font-bold text-gray-200 border-b border-gray-600 pb-1 mb-2 text-[11px]">
                 Score: {log.total.toFixed(0)}
             </div>
             {groups.map((g, i) => (
-                <div key={i} className="flex justify-between items-center text-[10px] py-0.5">
-                    <span className="text-gray-400">{g.label}</span>
-                    <span className={`font-mono font-bold ${g.color}`}>
-                        {g.net > 0 ? '+' : ''}{g.net.toFixed(0)}
-                    </span>
+                <div key={i} className="py-0.5">
+                    <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-gray-400">{g.label}</span>
+                        <span className={`font-mono font-bold ${g.color}`}>
+                            {g.net > 0 ? '+' : ''}{g.net.toFixed(0)}
+                        </span>
+                    </div>
+                    {g.detail && <div className="text-[9px] text-gray-500">{g.detail}</div>}
                 </div>
             ))}
+            {log.breakdown && log.breakdown.chordSequence.length > 0 && (
+                <div className="border-t border-gray-700 mt-2 pt-1.5">
+                    <div className="text-[10px] uppercase tracking-wide text-gray-500 mb-1">Chord sequence</div>
+                    <div className="flex flex-wrap gap-1">
+                        {log.breakdown.chordSequence.slice(0, 12).map((span, idx) => (
+                            <span
+                                key={idx}
+                                className={`text-[9px] px-1 py-0.5 rounded border font-mono ${harmonyBadgeClass(span.harmonyClass)}`}
+                                title={`${span.label} · ${span.durationBeats.toFixed(2)}b${span.nctCount > 0 ? ` · NCT ${span.nctCount}` : ''}${span.dissonant ? ' · dissonant' : ''}`}
+                            >
+                                {span.label} {span.durationBeats.toFixed(2)}b
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
             {groups.length === 0 && (
                 <div className="text-gray-600 text-[10px]">No scored events</div>
             )}
         </div>
     );
+}
+
+function harmonyBadgeClass(harmonyClass: NonNullable<ScoreLog['breakdown']>['chordSequence'][number]['harmonyClass']): string {
+    switch (harmonyClass) {
+        case 'full_triad':
+            return 'bg-emerald-900/40 text-emerald-300 border-emerald-700/50';
+        case 'full_7th_or_6th':
+            return 'bg-blue-900/40 text-blue-300 border-blue-700/50';
+        case 'incomplete_7th_or_6th':
+            return 'bg-amber-900/40 text-amber-300 border-amber-700/50';
+        default:
+            return 'bg-gray-800 text-gray-300 border-gray-600';
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +399,36 @@ const ResultRow: React.FC<ResultRowProps> = ({
             </div>
 
             {/* Entry badges */}
+            {res.scoreLog?.breakdown && (
+                <div className="mt-1 flex flex-wrap gap-1.5 items-center">
+                    <span className="text-[9px] text-gray-500">Harmony:</span>
+                    {res.scoreLog.breakdown.chordSequence.slice(0, 8).map((span, idx) => (
+                        <span
+                            key={idx}
+                            className={`text-[9px] px-1 py-0.5 rounded border font-mono ${harmonyBadgeClass(span.harmonyClass)}`}
+                            title={`${span.label} · ${span.durationBeats.toFixed(2)}b`}
+                        >
+                            {span.label}
+                        </span>
+                    ))}
+                    <span className="text-[9px] text-gray-400 font-mono">
+                        DISS {(res.scoreLog.breakdown.analyzedBeats > 0 ? (res.scoreLog.breakdown.dissonantBeats / res.scoreLog.breakdown.analyzedBeats) * 100 : 0).toFixed(1)}%
+                        {' '}({-res.scoreLog.breakdown.contributions.dissonancePenalty + res.scoreLog.breakdown.contributions.dissonanceResolutionBonus >= 0 ? '+' : ''}
+                        {(-res.scoreLog.breakdown.contributions.dissonancePenalty + res.scoreLog.breakdown.contributions.dissonanceResolutionBonus).toFixed(0)})
+                    </span>
+                    <span className="text-[9px] text-gray-400 font-mono">
+                        NCT {(res.scoreLog.breakdown.analyzedBeats > 0 ? (res.scoreLog.breakdown.nctBeats / res.scoreLog.breakdown.analyzedBeats) * 100 : 0).toFixed(1)}%
+                        {' '}(-{res.scoreLog.breakdown.contributions.nctPenalty.toFixed(0)})
+                    </span>
+                    <span className="text-[9px] text-gray-400 font-mono">
+                        P5/P8 {res.scoreLog.breakdown.parallelPerfectCount} (-{res.scoreLog.breakdown.contributions.parallelPenalty.toFixed(0)})
+                    </span>
+                    <span className="text-[9px] text-gray-500 font-mono">
+                        Step +{res.scoreLog.breakdown.contributions.stepBonus.toFixed(0)}
+                        {res.scoreLog.breakdown.contributions.truncationPenalty > 0 && ` · Trunc -${res.scoreLog.breakdown.contributions.truncationPenalty.toFixed(0)}`}
+                    </span>
+                </div>
+            )}
             <div className="flex flex-wrap gap-1 mt-1.5">
                 {res.entries.map((e, ei) => {
                     const delay = ei === 0 ? 0 : e.startBeat - res.entries[ei - 1].startBeat;
