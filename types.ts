@@ -534,10 +534,50 @@ export interface ScoreLogItem {
     points: number;
 }
 
+export type CanonHarmonyClass =
+    | 'full_triad'
+    | 'full_7th_or_6th'
+    | 'incomplete_7th_or_6th'
+    | 'non_chord';
+
+export interface CanonChordSpan {
+    label: string;
+    harmonyClass: CanonHarmonyClass;
+    durationBeats: number;
+    nctCount: number;
+    dissonant: boolean;
+}
+
+export interface CanonScoreBreakdown {
+    analyzedBeats: number;
+    dissonantBeats: number;
+    nctBeats: number;
+    parallelPerfectCount: number;
+    unisonCount: number;
+    harmonyCounts: {
+        fullTriad: number;
+        full7thOr6th: number;
+        incomplete7thOr6th: number;
+        nonChord: number;
+    };
+    contributions: {
+        harmonyBonus: number;
+        dissonancePenalty: number;
+        dissonanceResolutionBonus: number;
+        nctPenalty: number;
+        parallelPenalty: number;
+        unisonPenalty: number;
+        stepBonus: number;
+        truncationPenalty: number;
+    };
+    chordSequence: CanonChordSpan[];
+}
+
 export interface ScoreLog {
     base: number; // Base utility anchor (0 in current scorer)
     penalties: ScoreLogItem[];
     bonuses: ScoreLogItem[];
+    breakdown?: CanonScoreBreakdown;
     total: number;
 }
 

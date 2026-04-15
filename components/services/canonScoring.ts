@@ -7,7 +7,7 @@
  * quality) rather than the proportion-based S1–S3 metrics used by stretto.
  */
 
-import { StrettoChainOption, ScoreLog } from '../../types';
+import { StrettoChainOption, ScoreLog, CanonChordSpan, CanonHarmonyClass } from '../../types';
 import { SubjectVariant } from './strettoScoring';
 import { INTERVALS } from './strettoConstants';
 
@@ -180,6 +180,13 @@ export interface CanonScoreResult {
     detectedChords: string[];
 }
 
+function classifyHarmony(chordResult: ChordMatchResult): CanonHarmonyClass {
+    if (chordResult.isFull7thOr6th) return 'full_7th_or_6th';
+    if (chordResult.is7thMissing5th) return 'incomplete_7th_or_6th';
+    if (chordResult.isFullTriad) return 'full_triad';
+    return 'non_chord';
+}
+
 export function calculateCanonScore(
     chain: StrettoChainOption[],
     variants: SubjectVariant[],
@@ -245,6 +252,29 @@ export function calculateCanonScore(
     // For parallel perfect consecutive tracking: voicePairKey -> consecutive count
     const parallelPerfectConsec: Map<string, number> = new Map();
     const detectedChordsMap = new Map<string, number>(); // chordName -> beats
+    const chordSequence: CanonChordSpan[] = [];
+
+    let analyzedBeats = 0;
+    let dissonantBeats = 0;
+    let nctBeats = 0;
+    let parallelPerfectCount = 0;
+    let unisonCount = 0;
+    const harmonyCounts = {
+        fullTriad: 0,
+        full7thOr6th: 0,
+        incomplete7thOr6th: 0,
+        nonChord: 0,
+    };
+    const contributions = {
+        harmonyBonus: 0,
+        dissonancePenalty: 0,
+        dissonanceResolutionBonus: 0,
+        nctPenalty: 0,
+        parallelPenalty: 0,
+        unisonPenalty: 0,
+        stepBonus: 0,
+        truncationPenalty: 0,
+    };
 
     for (let bi = 0; bi < boundaries.length - 1; bi++) {
         const sliceStart = boundaries[bi];
@@ -273,6 +303,7 @@ export function calculateCanonScore(
         const pitches = active.map(a => a.pitch);
         const currentPitchesByVoice = new Map<number, number>();
         for (const a of active) currentPitchesByVoice.set(a.voice, a.pitch);
+        analyzedBeats += sliceDurBeats;
 
         // Check for short notes in this slice
         const hasShortNote = active.some(a => a.durationTicks < EIGHTH_NOTE_TICKS);
@@ -284,11 +315,13 @@ export function calculateCanonScore(
         const sliceIsDiss = isDissonant(pitches);
 
         if (sliceIsDiss) {
+            dissonantBeats += sliceDurBeats;
             // Per-beat dissonance penalty
             const beatPenalty = Math.round(DISSONANCE_PENALTY_PER_BEAT * sliceDurBeats * shortScale);
             if (beatPenalty > 0) {
                 score -= beatPenalty;
                 penalties.push({ reason: `Dissonance (${sliceDurBeats.toFixed(2)} beat${sliceDurBeats !== 1 ? 's' : ''})`, points: beatPenalty });
+                contributions.dissonancePenalty += beatPenalty;
             }
 
             if (prevWasDiss) {
@@ -297,6 +330,7 @@ export function calculateCanonScore(
                 const chainPenalty = Math.round(DISSONANCE_CHAIN_BASE_PENALTY * Math.pow(PARALLEL_PERFECT_MULTIPLIER, consecutiveDissonanceCount - 1) * shortScale);
                 score -= chainPenalty;
                 penalties.push({ reason: `Consecutive dissonance chain (run ${consecutiveDissonanceCount + 1})`, points: chainPenalty });
+                contributions.dissonancePenalty += chainPenalty;
             } else {
                 // First dissonance in a new run
                 consecutiveDissonanceCount = 0;
@@ -308,6 +342,7 @@ export function calculateCanonScore(
                 const resolveBonus = Math.round(DISSONANCE_RESOLUTION_BONUS * shortScale);
                 score += resolveBonus;
                 bonuses.push({ reason: `Dissonance resolution`, points: resolveBonus });
+                contributions.dissonanceResolutionBonus += resolveBonus;
             }
             consecutiveDissonanceCount = 0;
         }
@@ -320,17 +355,27 @@ export function calculateCanonScore(
             const unisonPenalty = Math.round(UNISON_PENALTY * shortScale);
             score -= unisonPenalty;
             penalties.push({ reason: `Unison between voices`, points: unisonPenalty });
+            unisonCount++;
+            contributions.unisonPenalty += unisonPenalty;
         }
 
         // -----------------------------------------------------------------------
         // C. NCT analysis (one-time per slice, not per beat)
         // -----------------------------------------------------------------------
         const chordResult = detectChordQuality(pitches);
+        if (chordResult.nctCount > 0) nctBeats += sliceDurBeats;
         if (chordResult.nctCount > 0) {
             const nctPenalty = Math.round((NCT_PENALTY + (chordResult.nctCount - 1) * NCT_ADD_PENALTY) * shortScale);
             score -= nctPenalty;
             penalties.push({ reason: `NCT (${chordResult.nctCount} non-chord tone${chordResult.nctCount > 1 ? 's' : ''})`, points: nctPenalty });
+            contributions.nctPenalty += nctPenalty;
         }
+
+        const harmonyClass = classifyHarmony(chordResult);
+        if (harmonyClass === 'full_triad') harmonyCounts.fullTriad++;
+        else if (harmonyClass === 'full_7th_or_6th') harmonyCounts.full7thOr6th++;
+        else if (harmonyClass === 'incomplete_7th_or_6th') harmonyCounts.incomplete7thOr6th++;
+        else harmonyCounts.nonChord++;
 
         // -----------------------------------------------------------------------
         // D. Harmony bonuses (per beat)
@@ -340,15 +385,44 @@ export function calculateCanonScore(
                 const h = Math.round(HARMONY_FULL_7TH_BONUS * sliceDurBeats * shortScale);
                 score += h;
                 bonuses.push({ reason: `Full 7th/6th chord (${sliceDurBeats.toFixed(2)} beat${sliceDurBeats !== 1 ? 's' : ''})`, points: h });
+                contributions.harmonyBonus += h;
             } else if (chordResult.is7thMissing5th) {
                 const h = Math.round(HARMONY_7TH_MISSING_5TH_BONUS * sliceDurBeats * shortScale);
                 score += h;
                 bonuses.push({ reason: `7th/6th missing 5th (${sliceDurBeats.toFixed(2)} beat${sliceDurBeats !== 1 ? 's' : ''})`, points: h });
+                contributions.harmonyBonus += h;
             } else if (chordResult.isFullTriad) {
                 const h = Math.round(HARMONY_FULL_TRIAD_BONUS * sliceDurBeats * shortScale);
                 score += h;
                 bonuses.push({ reason: `Full triad (${sliceDurBeats.toFixed(2)} beat${sliceDurBeats !== 1 ? 's' : ''})`, points: h });
+                contributions.harmonyBonus += h;
             }
+        }
+
+        const chordSpan: CanonChordSpan = {
+            label: harmonyClass === 'full_7th_or_6th'
+                ? '7th/6th'
+                : harmonyClass === 'incomplete_7th_or_6th'
+                    ? '7th/6th (incomplete)'
+                    : harmonyClass === 'full_triad'
+                        ? 'Triad'
+                        : 'Other',
+            harmonyClass,
+            durationBeats: sliceDurBeats,
+            nctCount: chordResult.nctCount,
+            dissonant: sliceIsDiss,
+        };
+        const lastSpan = chordSequence[chordSequence.length - 1];
+        if (
+            lastSpan &&
+            lastSpan.label === chordSpan.label &&
+            lastSpan.harmonyClass === chordSpan.harmonyClass &&
+            lastSpan.nctCount === chordSpan.nctCount &&
+            lastSpan.dissonant === chordSpan.dissonant
+        ) {
+            lastSpan.durationBeats += chordSpan.durationBeats;
+        } else {
+            chordSequence.push(chordSpan);
         }
 
         // -----------------------------------------------------------------------
@@ -385,6 +459,8 @@ export function calculateCanonScore(
                             score -= penalty;
                             penalties.push({ reason: `Parallel ${curInt === 0 ? 'unison/octave' : 'perfect 5th'} (v${va}–v${vb}, consec ${prevConsec + 1})`, points: penalty });
                             parallelPerfectConsec.set(pairKey, prevConsec + 1);
+                            parallelPerfectCount++;
+                            contributions.parallelPenalty += penalty;
                         } else {
                             parallelPerfectConsec.delete(pairKey);
                         }
@@ -420,6 +496,7 @@ export function calculateCanonScore(
     const stepBonus = chain.length * STEP_BONUS;
     score += stepBonus;
     bonuses.push({ reason: `Chain length bonus (${chain.length} entries × ${STEP_BONUS})`, points: stepBonus });
+    contributions.stepBonus += stepBonus;
 
     // Truncation penalty: -20 per beat of auto-truncation per entry
     if (autoTruncatedBeats > 0) {
@@ -431,6 +508,7 @@ export function calculateCanonScore(
         const truncPenalty = truncatedCount * autoTruncatedBeats * TRUNCATION_PENALTY_PER_BEAT;
         score -= truncPenalty;
         penalties.push({ reason: `Auto-truncation (${truncatedCount} entries × ${autoTruncatedBeats} beat${autoTruncatedBeats !== 1 ? 's' : ''})`, points: truncPenalty });
+        contributions.truncationPenalty += truncPenalty;
     }
 
     // -------------------------------------------------------------------------
@@ -446,6 +524,16 @@ export function calculateCanonScore(
         base: 0,
         bonuses,
         penalties,
+        breakdown: {
+            analyzedBeats,
+            dissonantBeats,
+            nctBeats,
+            parallelPerfectCount,
+            unisonCount,
+            harmonyCounts,
+            contributions,
+            chordSequence,
+        },
         total: score,
     };
 
