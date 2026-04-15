@@ -177,8 +177,9 @@ export default function StrettoChainView({
             + (stats.stageStats.tripletRejectP4Bass ?? stats.stageStats.tripleP4BassRejected ?? 0)
             + (stats.stageStats.tripletRejectNoDelayContext ?? 0)
         );
-        const tripletAcceptedTotal = stats.stageStats.tripletAcceptedTotal ?? (stats.stageStats.tripleCandidates - tripletRejectedTotal);
-        const tripletAccountingHolds = stats.stageStats.tripleCandidates === (tripletRejectedTotal + tripletAcceptedTotal);
+        const tripletAcceptedCandidates = stats.stageStats.tripletCandidatesAccepted ?? stats.stageStats.tripletAcceptedTotal ?? (stats.stageStats.tripleCandidates - tripletRejectedTotal);
+        const tripletDistinctShapesAccepted = stats.stageStats.tripletDistinctShapesAccepted ?? stats.stageStats.harmonicallyValidTriples ?? 0;
+        const tripletAccountingHolds = stats.stageStats.tripleCandidates === (tripletRejectedTotal + tripletAcceptedCandidates);
         return {
             stage: stats.stageStats,
             coverage: stats.coverage ?? null,
@@ -188,7 +189,8 @@ export default function StrettoChainView({
             transitionCandidatesEnumerated,
             transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated,
             tripletRejectedTotal,
-            tripletAcceptedTotal,
+            tripletAcceptedCandidates,
+            tripletDistinctShapesAccepted,
             tripletAccountingHolds
         };
     }, [searchReport]);
@@ -262,8 +264,10 @@ export default function StrettoChainView({
                             <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}<MetricHelp metricKey="structuralScanInvocations" /></div>
                             <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()}<MetricHelp metricKey="pairStageRejected" /> · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()}<MetricHelp metricKey="tripletStageRejected" /> · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}<MetricHelp metricKey="globalLineageStageRejected" /></div>
                             <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
+                            <div>Triplet accepted candidates: {diagnostics.tripletAcceptedCandidates.toLocaleString()}</div>
+                            <div>Triplet distinct shapes: {diagnostics.tripletDistinctShapesAccepted.toLocaleString()}</div>
                             <div>
-                                Triplet candidate accounting → {diagnostics.stage.tripleCandidates.toLocaleString()} = {diagnostics.tripletRejectedTotal.toLocaleString()} + {diagnostics.tripletAcceptedTotal.toLocaleString()} · invariant:
+                                Triplet candidate accounting → candidates total = accepted candidates + rejected candidates → {diagnostics.stage.tripleCandidates.toLocaleString()} = {diagnostics.tripletAcceptedCandidates.toLocaleString()} + {diagnostics.tripletRejectedTotal.toLocaleString()} · invariant:
                                 <span className={diagnostics.tripletAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
                                     {diagnostics.tripletAccountingHolds ? 'holds' : 'violated'}
                                 </span>

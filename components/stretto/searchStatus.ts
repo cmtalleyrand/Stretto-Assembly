@@ -54,13 +54,18 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
 
   const pairRejectPercent = asPercent(stageStats.pairStageRejected, stageStats.pairwiseTotal);
   const pairCompatiblePercent = asPercent(stageStats.pairwiseCompatible, stageStats.pairwiseTotal);
-  const tripleRejected = stageStats.triplePairwiseRejected + stageStats.tripleLowerBoundRejected + stageStats.tripleParallelRejected + stageStats.tripleVoiceRejected + stageStats.tripleP4BassRejected;
-  const tripleRejectPercent = asPercent(tripleRejected, stageStats.tripleCandidates);
-  const tripleValidPercent = asPercent(stageStats.harmonicallyValidTriples, stageStats.tripleCandidates);
+  const tripletRejectedTotal = stageStats.tripletRejectedTotal
+    ?? stageStats.triplePairwiseRejected + stageStats.tripleLowerBoundRejected + stageStats.tripleParallelRejected + stageStats.tripleVoiceRejected + stageStats.tripleP4BassRejected;
+  const tripletAcceptedCandidates = stageStats.tripletCandidatesAccepted
+    ?? stageStats.tripletAcceptedTotal
+    ?? Math.max(0, stageStats.tripleCandidates - tripletRejectedTotal);
+  const tripletDistinctShapesAccepted = stageStats.tripletDistinctShapesAccepted ?? stageStats.harmonicallyValidTriples;
+  const tripleRejectPercent = asPercent(tripletRejectedTotal, stageStats.tripleCandidates);
+  const tripletAcceptedPercent = asPercent(tripletAcceptedCandidates, stageStats.tripleCandidates);
 
   const signals: string[] = [];
   signals.push(`Pairwise combinations: ${stageStats.pairwiseTotal.toLocaleString()} total; ${stageStats.pairwiseCompatible.toLocaleString()} compatible (${pairCompatiblePercent}%), ${stageStats.pairStageRejected.toLocaleString()} rejected (${pairRejectPercent}%).`);
-  signals.push(`Triplet combinations: ${stageStats.tripleCandidates.toLocaleString()} total; ${stageStats.harmonicallyValidTriples.toLocaleString()} valid (${tripleValidPercent}%), ${tripleRejected.toLocaleString()} rejected (${tripleRejectPercent}%).`);
+  signals.push(`Triplet candidates: ${stageStats.tripleCandidates.toLocaleString()} total; ${tripletAcceptedCandidates.toLocaleString()} accepted (${tripletAcceptedPercent}%), ${tripletRejectedTotal.toLocaleString()} rejected (${tripleRejectPercent}%). Distinct accepted shapes=${tripletDistinctShapesAccepted.toLocaleString()}.`);
   signals.push(`Triplet reject breakdown: pairwise=${stageStats.triplePairwiseRejected}, lowerBound=${stageStats.tripleLowerBoundRejected}, parallel=${stageStats.tripleParallelRejected}, voice=${stageStats.tripleVoiceRejected}, p4Bass=${stageStats.tripleP4BassRejected}.`);
   signals.push(`Global-lineage rejects: ${stageStats.globalLineageStageRejected}. Structural scans: ${stageStats.structuralScanInvocations.toLocaleString()}. DAG merges: ${stageStats.deterministicDagMergedNodes.toLocaleString()}.`);
 
