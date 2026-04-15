@@ -89,6 +89,49 @@ const report4cum = await runCanonSearch(
 assert.ok(report4cum.results.length > 0,
   'Cumulative mode must produce results');
 
+// ─── Third transposition mode: free re-entry ─────────────────────────────────
+
+const lockFixture = await runCanonSearch(
+  subject,
+  {
+    ...baseOptions,
+    ensembleTotal: 3,
+    chainLengthMin: 6,
+    chainLengthMax: 6,
+    transpositionMode: 'independent',
+  },
+  480
+);
+
+assert.ok(lockFixture.results.length > 0, 'Independent mode fixture must produce results');
+assert.ok(
+  lockFixture.results.every((result) => result.entries.every((entry, i) => {
+    if (i < 3) return true;
+    return entry.transposition === result.entries[i % 3].transposition;
+  })),
+  'Independent mode must reuse each voice slot initial transposition on re-entry'
+);
+
+const unlockFixture = await runCanonSearch(
+  subject,
+  {
+    ...baseOptions,
+    ensembleTotal: 3,
+    chainLengthMin: 6,
+    chainLengthMax: 6,
+    transpositionMode: 'independent_reentry_free',
+  },
+  480
+);
+
+assert.ok(unlockFixture.results.length > 0, 'Free re-entry mode fixture must produce results');
+assert.ok(
+  unlockFixture.results.some((result) =>
+    result.entries.some((entry, i) => i >= 3 && entry.transposition !== result.entries[i % 3].transposition)
+  ),
+  'Independent free re-entry mode must allow a voice slot to re-enter at a different transposition'
+);
+
 // ─── Progress callback fires ─────────────────────────────────────────────────
 
 let progressCalls = 0;

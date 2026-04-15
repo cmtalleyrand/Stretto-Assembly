@@ -198,6 +198,35 @@ function buildCumulativeTuple(T: number, V: number, roles: CanonRole[]): number[
     return tuple;
 }
 
+/**
+ * Visits each cycle-level transposition plan for a chain.
+ *
+ * Cycle 0 is fixed to `firstTuple` so the outer loop remains deterministic.
+ * For cycleCount=1 this invokes callback exactly once.
+ */
+function forEachCycleTupleSequence(
+    firstTuple: number[],
+    allTuples: number[][],
+    cycleCount: number,
+    visit: (cycleTuples: number[][]) => void
+): void {
+    const chosen: number[][] = [firstTuple];
+
+    function backtrack(cycleIdx: number): void {
+        if (cycleIdx === cycleCount) {
+            visit(chosen);
+            return;
+        }
+        for (const tuple of allTuples) {
+            chosen.push(tuple);
+            backtrack(cycleIdx + 1);
+            chosen.pop();
+        }
+    }
+
+    backtrack(1);
+}
+
 // ---------------------------------------------------------------------------
 // Pairwise dissonance pre-filter
 // ---------------------------------------------------------------------------
@@ -364,6 +393,7 @@ export async function runCanonSearch(
     const V = options.ensembleTotal;
     const roles = getVoiceRoles(V);
     const mode: CanonTranspositionMode = options.transpositionMode ?? 'independent';
+    const allowFreeReentry = mode === 'independent_reentry_free';
     const dissonanceThreshold = options.dissonanceThreshold ?? 0.5;
 
     // Build the set of transposition V-tuples to search over.
@@ -403,143 +433,156 @@ export async function runCanonSearch(
         );
 
         for (const tTuple of tTuples) {
-            // ------------------------------------------------------------------
-            // Pairwise dissonance pre-filter (adjacent voice slot pairs only).
-            // For a canon the offset between adjacent slots is always delayTicks,
-            // so we reuse the same cache key for all adjacent pairs with the same
-            // transpositions and delay.
-            // ------------------------------------------------------------------
-            let tooDissonant = false;
-            for (let vi = 0; vi < V - 1 && !tooDissonant; vi++) {
-                const ratio = pairDissonanceRatio(
-                    baseVariant, delayTicks,
-                    tTuple[vi], tTuple[vi + 1],
-                    ppq, dissonanceCache
-                );
-                if (ratio > dissonanceThreshold) tooDissonant = true;
-            }
-            if (tooDissonant) {
-                prunedByDissonance++;
-                continue;
-            }
-
             for (const pattern of patterns) {
                 for (let chainLen = minLen; chainLen <= maxLen; chainLen++) {
-                    totalEvaluated++;
+                    const cycleCount = Math.ceil(chainLen / V);
+                    const allCycleTuples = allowFreeReentry ? tTuples : [tTuple];
 
-                    // ----------------------------------------------------------
-                    // Auto-truncation
-                    // ----------------------------------------------------------
-                    const beatsRemoved = computeAutoTruncation(
-                        delayBeats, V, subjectLengthBeats, chainLen
-                    );
-                    const hasTruncation = beatsRemoved > 0;
-                    const truncTicks = hasTruncation
-                        ? Math.round((subjectLengthBeats - beatsRemoved) * ppq)
-                        : subjectLengthTicks;
-
-                    // ----------------------------------------------------------
-                    // Build variant array
-                    //   [0] normal full
-                    //   [1] inverted full        (only when inversions allowed)
-                    //   [2] normal truncated     (only when hasTruncation)
-                    //   [3] inverted truncated   (only when inversions + hasTruncation)
-                    // ----------------------------------------------------------
-                    const variants: SubjectVariant[] = [];
-
-                    variants.push({
-                        type: 'N', truncationBeats: 0,
-                        lengthTicks: subjectLengthTicks, notes: baseNotes,
-                    });
-
-                    if (options.allowInversions) {
-                        variants.push({
-                            type: 'I', truncationBeats: 0,
-                            lengthTicks: subjectLengthTicks, notes: invNotes,
+                    forEachCycleTupleSequence(tTuple, allCycleTuples, cycleCount, (cycleTuples) => {
+                        const entryTranspositions = Array.from({ length: chainLen }, (_, i) => {
+                            const voiceIndex = i % V;
+                            if (!allowFreeReentry) return tTuple[voiceIndex];
+                            const cycleIndex = Math.floor(i / V);
+                            return cycleTuples[cycleIndex][voiceIndex];
                         });
-                    }
 
-                    if (hasTruncation) {
-                        const truncNotes: InternalNote[] = baseNotes
-                            .filter(n => n.relTick < truncTicks)
-                            .map(n => ({
-                                relTick: n.relTick,
-                                durationTicks: Math.min(n.durationTicks, truncTicks - n.relTick),
-                                pitch: n.pitch,
-                            }));
-                        variants.push({
-                            type: 'N', truncationBeats: beatsRemoved,
-                            lengthTicks: truncTicks, notes: truncNotes,
-                        });
-                    }
-
-                    if (options.allowInversions && hasTruncation) {
-                        const truncInvNotes: InternalNote[] = invNotes
-                            .filter(n => n.relTick < truncTicks)
-                            .map(n => ({
-                                relTick: n.relTick,
-                                durationTicks: Math.min(n.durationTicks, truncTicks - n.relTick),
-                                pitch: n.pitch,
-                            }));
-                        variants.push({
-                            type: 'I', truncationBeats: beatsRemoved,
-                            lengthTicks: truncTicks, notes: truncInvNotes,
-                        });
-                    }
-
-                    // ----------------------------------------------------------
-                    // Build chain entries
-                    // ----------------------------------------------------------
-                    const entries: StrettoChainOption[] = [];
-                    const variantIndices: number[] = [];
-
-                    for (let i = 0; i < chainLen; i++) {
-                        const voiceIndex = i % V;
-
-                        const isInverted = (() => {
-                            if (!options.allowInversions) return false;
-                            switch (pattern) {
-                                case 'none':         return false;
-                                case 'alternating':  return i % 2 === 1;
-                                case 'all-inverted': return i > 0;
+                        // Pairwise dissonance pre-filter for consecutive entries.
+                        let tooDissonant = false;
+                        for (let i = 1; i < chainLen; i++) {
+                            const ratio = pairDissonanceRatio(
+                                baseVariant,
+                                delayTicks,
+                                entryTranspositions[i - 1],
+                                entryTranspositions[i],
+                                ppq,
+                                dissonanceCache
+                            );
+                            if (ratio > dissonanceThreshold) {
+                                tooDissonant = true;
+                                break;
                             }
-                        })();
+                        }
+                        if (tooDissonant) {
+                            prunedByDissonance++;
+                            return;
+                        }
 
-                        const vIdx = Math.min(
-                            getVariantIndex(i, pattern, hasTruncation, options.allowInversions),
-                            variants.length - 1
+                        totalEvaluated++;
+
+                        // ----------------------------------------------------------
+                        // Auto-truncation
+                        // ----------------------------------------------------------
+                        const beatsRemoved = computeAutoTruncation(
+                            delayBeats, V, subjectLengthBeats, chainLen
                         );
-                        variantIndices.push(vIdx);
+                        const hasTruncation = beatsRemoved > 0;
+                        const truncTicks = hasTruncation
+                            ? Math.round((subjectLengthBeats - beatsRemoved) * ppq)
+                            : subjectLengthTicks;
 
-                        entries.push({
-                            startBeat:    i * delayBeats,
-                            transposition: tTuple[voiceIndex],
-                            type:         isInverted ? 'I' : 'N',
-                            length:       variants[vIdx].lengthTicks,
-                            voiceIndex,
+                        // ----------------------------------------------------------
+                        // Build variant array
+                        //   [0] normal full
+                        //   [1] inverted full        (only when inversions allowed)
+                        //   [2] normal truncated     (only when hasTruncation)
+                        //   [3] inverted truncated   (only when inversions + hasTruncation)
+                        // ----------------------------------------------------------
+                        const variants: SubjectVariant[] = [];
+
+                        variants.push({
+                            type: 'N', truncationBeats: 0,
+                            lengthTicks: subjectLengthTicks, notes: baseNotes,
                         });
-                    }
 
-                    // ----------------------------------------------------------
-                    // Score
-                    // ----------------------------------------------------------
-                    const { score, scoreLog, detectedChords } = calculateCanonScore(
-                        entries, variants, variantIndices, beatsRemoved, ppq
-                    );
+                        if (options.allowInversions) {
+                            variants.push({
+                                type: 'I', truncationBeats: 0,
+                                lengthTicks: subjectLengthTicks, notes: invNotes,
+                            });
+                        }
 
-                    const tupleKey = tTuple.join(',');
-                    results.push({
-                        id: `canon-${delayBeats}-${tupleKey}-${pattern}-${chainLen}-${totalEvaluated}`,
-                        entries,
-                        score,
-                        scoreLog,
-                        delayBeats,
-                        transpositionSteps: tTuple,
-                        chainLength: chainLen,
-                        inversionPattern: pattern,
-                        detectedChords,
-                        autoTruncatedBeats: beatsRemoved,
-                        warnings: [],
+                        if (hasTruncation) {
+                            const truncNotes: InternalNote[] = baseNotes
+                                .filter(n => n.relTick < truncTicks)
+                                .map(n => ({
+                                    relTick: n.relTick,
+                                    durationTicks: Math.min(n.durationTicks, truncTicks - n.relTick),
+                                    pitch: n.pitch,
+                                }));
+                            variants.push({
+                                type: 'N', truncationBeats: beatsRemoved,
+                                lengthTicks: truncTicks, notes: truncNotes,
+                            });
+                        }
+
+                        if (options.allowInversions && hasTruncation) {
+                            const truncInvNotes: InternalNote[] = invNotes
+                                .filter(n => n.relTick < truncTicks)
+                                .map(n => ({
+                                    relTick: n.relTick,
+                                    durationTicks: Math.min(n.durationTicks, truncTicks - n.relTick),
+                                    pitch: n.pitch,
+                                }));
+                            variants.push({
+                                type: 'I', truncationBeats: beatsRemoved,
+                                lengthTicks: truncTicks, notes: truncInvNotes,
+                            });
+                        }
+
+                        // ----------------------------------------------------------
+                        // Build chain entries
+                        // ----------------------------------------------------------
+                        const entries: StrettoChainOption[] = [];
+                        const variantIndices: number[] = [];
+
+                        for (let i = 0; i < chainLen; i++) {
+                            const voiceIndex = i % V;
+
+                            const isInverted = (() => {
+                                if (!options.allowInversions) return false;
+                                switch (pattern) {
+                                    case 'none':         return false;
+                                    case 'alternating':  return i % 2 === 1;
+                                    case 'all-inverted': return i > 0;
+                                }
+                            })();
+
+                            const vIdx = Math.min(
+                                getVariantIndex(i, pattern, hasTruncation, options.allowInversions),
+                                variants.length - 1
+                            );
+                            variantIndices.push(vIdx);
+
+                            entries.push({
+                                startBeat:    i * delayBeats,
+                                transposition: entryTranspositions[i],
+                                type:         isInverted ? 'I' : 'N',
+                                length:       variants[vIdx].lengthTicks,
+                                voiceIndex,
+                            });
+                        }
+
+                        // ----------------------------------------------------------
+                        // Score
+                        // ----------------------------------------------------------
+                        const { score, scoreLog, detectedChords } = calculateCanonScore(
+                            entries, variants, variantIndices, beatsRemoved, ppq
+                        );
+
+                        const tupleKey = entryTranspositions.join(',');
+                        results.push({
+                            id: `canon-${delayBeats}-${tupleKey}-${pattern}-${chainLen}-${totalEvaluated}`,
+                            entries,
+                            score,
+                            scoreLog,
+                            delayBeats,
+                            transpositionSteps: tTuple,
+                            chainLength: chainLen,
+                            inversionPattern: pattern,
+                            detectedChords,
+                            autoTruncatedBeats: beatsRemoved,
+                            warnings: [],
+                        });
                     });
                 }
             }

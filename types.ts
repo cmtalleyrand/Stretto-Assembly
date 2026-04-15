@@ -677,8 +677,10 @@ export type CanonInversionPattern = 'none' | 'alternating' | 'all-inverted';
  * 'cumulative'  — for every T in the allowed interval set, build the tuple
  *                 [0, T, 2T, 3T, …]; only tuples that satisfy voice-spacing
  *                 rules are kept.
+ * 'independent_reentry_free' — like independent, but on re-entry cycles a voice
+ *                 slot may use a different transposition than its first-cycle value.
  */
-export type CanonTranspositionMode = 'independent' | 'cumulative';
+export type CanonTranspositionMode = 'independent' | 'cumulative' | 'independent_reentry_free';
 
 export interface CanonSearchOptions {
     ensembleTotal: number;

@@ -249,6 +249,20 @@ export default function CanonSearchPanel({
                                     <span className="text-gray-500 block">Voice i at i×T for every T in the interval set</span>
                                 </span>
                             </label>
+                            <label className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="transpositionMode"
+                                    value="independent_reentry_free"
+                                    checked={options.transpositionMode === 'independent_reentry_free'}
+                                    onChange={() => set('transpositionMode', 'independent_reentry_free' as CanonTranspositionMode)}
+                                    className="mt-0.5 h-3 w-3"
+                                />
+                                <span className="text-[10px] text-gray-300">
+                                    <span className="font-bold">Independent (free re-entry)</span>
+                                    <span className="text-gray-500 block">Independent tuple set, but later voice-slot re-entries may switch to a different tuple</span>
+                                </span>
+                            </label>
                         </div>
                     </div>
 
