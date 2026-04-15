@@ -193,18 +193,16 @@ export default function StrettoView({
     }, [mode, abcInput, initialNotes, ppq]);
 
 
+    const constrainedPivotOptions = useMemo(() => computeSubjectPivotCandidates(subjectNotes), [subjectNotes]);
     const pivotOptions = useMemo(() => {
-        const candidates = computeSubjectPivotCandidates(subjectNotes);
-        if (candidates.length > 0) return candidates;
-        return [searchOptions.pivotMidi];
-    }, [subjectNotes, searchOptions.pivotMidi]);
-
-    useEffect(() => {
-        if (pivotOptions.length === 0) return;
-        if (!pivotOptions.includes(searchOptions.pivotMidi)) {
-            setSearchOptions((prev) => ({ ...prev, pivotMidi: pivotOptions[0] }));
+        if (constrainedPivotOptions.length === 0) {
+            return [searchOptions.pivotMidi];
         }
-    }, [pivotOptions, searchOptions.pivotMidi]);
+        if (constrainedPivotOptions.includes(searchOptions.pivotMidi)) {
+            return constrainedPivotOptions;
+        }
+        return [...constrainedPivotOptions, searchOptions.pivotMidi];
+    }, [constrainedPivotOptions, searchOptions.pivotMidi]);
 
     const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
     const abcKeyLabel = useMemo(() => {
@@ -572,7 +570,7 @@ export default function StrettoView({
 
 
     const runOptimalPivotSearch = () => {
-        if (!includeInversions || subjectNotes.length === 0 || pivotOptions.length === 0) {
+        if (!includeInversions || subjectNotes.length === 0 || constrainedPivotOptions.length === 0) {
             setPivotSearchResults([]);
             return;
         }
@@ -597,7 +595,7 @@ export default function StrettoView({
         }
 
         const ranked = rankPivotCandidates({
-            pivots: pivotOptions,
+            pivots: constrainedPivotOptions,
             referencePivot: searchOptions.pivotMidi,
             evaluatePivot: (pivotMidi) => {
                 const observations: PivotCandidateObservation[] = [];
@@ -799,9 +797,9 @@ export default function StrettoView({
 
             {viewMode === 'pairwise' ? (
                 <>
-                    <StrettoConfig 
-                        selectedIntervals={configIntervals} 
-                        setSelectedIntervals={setConfigIntervals} 
+                    <StrettoConfig
+                        selectedIntervals={configIntervals}
+                        setSelectedIntervals={setConfigIntervals}
                         searchRes={searchRes} 
                         setSearchRes={setSearchRes} 
                         includeInversions={includeInversions} 
@@ -809,8 +807,9 @@ export default function StrettoView({
                         includeExtensions={includeExtensions} 
                         setIncludeExtensions={setIncludeExtensions} 
                         pivotMidi={searchOptions.pivotMidi}
-                        setPivotMidi={(val) => setSearchOptions({...searchOptions, pivotMidi: val})}
+                        setPivotMidi={(val) => setSearchOptions((prev) => ({...prev, pivotMidi: val}))}
                         pivotOptions={pivotOptions}
+                        constrainedPivotCount={constrainedPivotOptions.length}
                         onFindOptimalPivot={runOptimalPivotSearch}
                         pivotSearchResults={pivotSearchResults}
                     />
