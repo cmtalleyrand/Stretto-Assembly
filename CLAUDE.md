@@ -40,6 +40,7 @@ Every rule in this codebase traces back to one of these files. When there is any
 | `docs/stretto-entry-model.md` | Canonical entry tuple `(d_i, t_i, v_i, inv_i, trunc_i)` and legacy-field mapping |
 | `SCORING_MECHANISM.md` | Scoring formula detail: penalty/bonus point values and removed legacy terms |
 | `TS_GUIDELINES.md` | TypeScript workflow requirements |
+| `TESTING_GUIDELINES.md` | What makes a good test vs anti-patterns; when to write/delete tests |
 
 ## Full rule set
 
