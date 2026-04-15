@@ -250,6 +250,7 @@ interface StageStats {
     transitionWindowLookups: number;
     transitionsReturned: number;
     candidateTransitionsEnumerated: number;
+    prunedByPrefixAdmissibility: number;
 }
 
 type AdmissiblePairIndex = Map<number, Map<number, Map<number, Set<number>>>>;
@@ -268,6 +269,13 @@ interface StructuralState {
     prevTransposition: number;
     nInv: number;
     nTrunc: number;
+}
+
+interface PrefixDissonanceState {
+    macroRunCount: number;
+    macroRunEnd: number;
+    macroRunFirstStart: number;
+    violated: boolean;
 }
 
 type TransitionRuleClass = 'local' | 'prefix-global' | 'terminal/output';
@@ -1043,6 +1051,46 @@ export function violatesCombinedDissonanceStarts(
     return false;
 }
 
+function extendPrefixDissonanceState(
+    previous: PrefixDissonanceState,
+    deltaRunSpans: SimultaneitySpan[],
+    ppq: number,
+    metricOffset: number = 0,
+    tsNum: number = 4,
+    tsDenom: number = 4
+): PrefixDissonanceState {
+    if (previous.violated || deltaRunSpans.length === 0) return previous;
+    const nextState: PrefixDissonanceState = { ...previous };
+    const sortedDelta = [...deltaRunSpans].sort((a, b) => a.startTick - b.startTick);
+    for (const span of sortedDelta) {
+        if (span.startTick <= nextState.macroRunEnd) {
+            nextState.macroRunCount++;
+            nextState.macroRunEnd = Math.max(nextState.macroRunEnd, span.endTick);
+        } else {
+            nextState.macroRunCount = 1;
+            nextState.macroRunEnd = span.endTick;
+            nextState.macroRunFirstStart = span.startTick;
+        }
+        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
+        if (nextState.macroRunCount > 2) {
+            nextState.violated = true;
+            break;
+        }
+        if (isStrong && nextState.macroRunCount > 1) {
+            nextState.violated = true;
+            break;
+        }
+        if (nextState.macroRunCount === 2) {
+            const prevIsStrong = isStrongBeat(nextState.macroRunFirstStart + metricOffset, ppq, tsNum, tsDenom);
+            if (isStrong || prevIsStrong) {
+                nextState.violated = true;
+                break;
+            }
+        }
+    }
+    return nextState;
+}
+
 function rebaseRunSpansToAbsolute(runSpans: SimultaneitySpan[], pairAnchorStartTick: number): SimultaneitySpan[] {
     if (runSpans.length === 0) return [];
     return runSpans.map((span) => ({
@@ -1298,8 +1346,17 @@ export async function searchStrettoChains(
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
     let fullChainsFound = 0;
+    let structurallyCompleteChainsFound = 0;
+    let prefixAdmissibleCompleteChainsFound = 0;
+    let finalizationScoredCount = 0;
+    let finalizationRejectedScoringInvalid = 0;
+    let finalizationRejectedVoiceAssignment = 0;
     const configuredTimeLimitMs = Number.isFinite(options.maxSearchTimeMs) ? Math.max(1, Math.floor(options.maxSearchTimeMs as number)) : DEFAULT_TIME_LIMIT_MS;
-    let activeTimeLimitMs = configuredTimeLimitMs;
+    const enablePrefixAdmissibilityGate = process.env.STRETTO_DISABLE_PREFIX_ADMISSIBILITY !== '1';
+    const finalizationBudgetMs = Math.max(1, Math.min(Math.floor(configuredTimeLimitMs * 0.25), configuredTimeLimitMs - 1));
+    const enumerationBudgetMs = Math.max(1, configuredTimeLimitMs - finalizationBudgetMs);
+    let enumerationStoppedForFinalization = false;
+    let activeTimeLimitMs = enumerationBudgetMs;
     let timeoutExtensionAppliedMs = 0;
     let terminationReason: StrettoSearchReport['stats']['stopReason'] | null = null;
     const emitStageProgress = (
@@ -1372,7 +1429,8 @@ export async function searchStrettoChains(
                     parallelPerfectLocationTicks: [],
                     transitionWindowLookups: 0,
                     transitionsReturned: 0,
-                    candidateTransitionsEnumerated: 0
+                    candidateTransitionsEnumerated: 0,
+                    prunedByPrefixAdmissibility: 0
                 }
             }
         };
@@ -1540,7 +1598,8 @@ export async function searchStrettoChains(
         parallelPerfectLocationTicks: [],
         transitionWindowLookups: 0,
         transitionsReturned: 0,
-        candidateTransitionsEnumerated: 0
+        candidateTransitionsEnumerated: 0,
+        prunedByPrefixAdmissibility: 0
     };
 
     const precomputeIndex: PairwiseTripletPrecomputeIndex = precomputeBackend === 'dense'
@@ -2006,12 +2065,33 @@ export async function searchStrettoChains(
         entries: StrettoChainOption[];
         variantIndices: number[];
     }
-    const unscoredResults: UnscoredChain[] = [];
-    const unscoredPartials: UnscoredChain[] = [];
+    const MAX_FINALIZATION_CANDIDATES_PER_DEPTH = 512;
+    const candidateFrontierByDepth = new Map<number, UnscoredChain[]>();
     const MAX_PARTIALS = 500; // Cap partial buffer to avoid OOM in difficult searches
     const seenPartialSigs = new Set<string>();
 
     const seenSignatures = new Set<string>();
+    const emptyPrefixDissonanceState: PrefixDissonanceState = {
+        macroRunCount: 0,
+        macroRunEnd: Number.NEGATIVE_INFINITY,
+        macroRunFirstStart: Number.NEGATIVE_INFINITY,
+        violated: false
+    };
+
+    function estimateCandidateUpperBound(chain: StrettoChainOption[]): number {
+        const depth = chain.length;
+        const latestStart = Math.round(chain[depth - 1].startBeat * ppq);
+        return (depth * 100000) - latestStart;
+    }
+
+    function pushBoundedCandidateFrontier(candidate: UnscoredChain): void {
+        const depth = candidate.entries.length;
+        const currentBucket = candidateFrontierByDepth.get(depth) ?? [];
+        currentBucket.push(candidate);
+        currentBucket.sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
+        if (currentBucket.length > MAX_FINALIZATION_CANDIDATES_PER_DEPTH) currentBucket.length = MAX_FINALIZATION_CANDIDATES_PER_DEPTH;
+        candidateFrontierByDepth.set(depth, currentBucket);
+    }
     // Collision-free structural string key for deduplication
     function getChainSignature(c: StrettoChainOption[]): string {
         let sig = '';
@@ -2036,6 +2116,8 @@ export async function searchStrettoChains(
         nFree: number;
         usedLongDelays: Set<number>; // A.1: delays > Sb/3 must be globally unique
         longDelaySignature: string;
+        prefixDissonanceState: PrefixDissonanceState;
+        prefixAdmissible: boolean;
     }
 
     // --- Active-tail DAG key ---
@@ -2163,6 +2245,10 @@ export async function searchStrettoChains(
 
     function expandNode(node: DagNode): DagNode[] {
         const successors: DagNode[] = [];
+        if (enablePrefixAdmissibilityGate && (!node.prefixAdmissible || node.prefixDissonanceState.violated)) {
+            stageStats.prunedByPrefixAdmissibility++;
+            return successors;
+        }
         const { chain, variantIndices, nInv, nTrunc, nRestricted, nFree, usedLongDelays, longDelaySignature } = node;
         const depth = chain.length;
         const prevEntry = chain[depth - 1];
@@ -2415,7 +2501,18 @@ export async function searchStrettoChains(
                         const pairStartTicks = Math.round(entry.startBeat * ppq);
                         for (const s of rebaseRunSpansToAbsolute(pairRecord.bassRoleDissonanceRunSpans.none, pairStartTicks)) allRunSpans.push(s);
                     }
-                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
+                    const nextPrefixDissonanceState = extendPrefixDissonanceState(
+                        node.prefixDissonanceState,
+                        allRunSpans,
+                        ppq,
+                        offsetTicks,
+                        tsNum,
+                        tsDenom
+                    );
+                    if (enablePrefixAdmissibilityGate && nextPrefixDissonanceState.violated) {
+                        stageStats.prunedByPrefixAdmissibility++;
+                        continue;
+                    }
 
                     const metricProbeEntry: StrettoChainOption = {
                         startBeat: absStartBeat,
@@ -2451,7 +2548,9 @@ export async function searchStrettoChains(
                         nRestricted: nextRestricted,
                         nFree: nextFree,
                         usedLongDelays: newUsedLongDelays,
-                        longDelaySignature: newLongDelaySignature
+                        longDelaySignature: newLongDelaySignature,
+                        prefixDissonanceState: nextPrefixDissonanceState,
+                        prefixAdmissible: true
                     });
                 }
             }
@@ -2510,7 +2609,9 @@ export async function searchStrettoChains(
         nRestricted: 0,
         nFree: 1,
         usedLongDelays: new Set<number>(),
-        longDelaySignature: ''
+        longDelaySignature: '',
+        prefixDissonanceState: emptyPrefixDissonanceState,
+        prefixAdmissible: true
     }];
 
     let maxFrontierSize = frontier.length;
@@ -2520,11 +2621,17 @@ export async function searchStrettoChains(
 
     // --- Helper: check time/node limits and handle timeout extension ---
     function checkLimits(): boolean {
-        if (Date.now() - startTime > activeTimeLimitMs) {
+        const elapsedMs = Date.now() - startTime;
+        if (!enumerationStoppedForFinalization && elapsedMs >= enumerationBudgetMs) {
+            enumerationStoppedForFinalization = true;
+            if (!terminationReason) terminationReason = 'Timeout';
+            return true;
+        }
+        if (elapsedMs > activeTimeLimitMs) {
             const canExtend = timeoutExtensionAppliedMs === 0 && shouldExtendTimeoutNearCompletion(maxDepth, options.targetChainLength);
             if (canExtend) {
                 timeoutExtensionAppliedMs = NEAR_COMPLETION_TIMEOUT_EXTENSION_MS;
-                activeTimeLimitMs += timeoutExtensionAppliedMs;
+                activeTimeLimitMs = Math.min(enumerationBudgetMs, activeTimeLimitMs + timeoutExtensionAppliedMs);
             } else {
                 if (!terminationReason) terminationReason = 'Timeout';
                 return true;
@@ -2534,15 +2641,15 @@ export async function searchStrettoChains(
     }
 
     // --- Helper: record a completed chain ---
-    function recordCompletedChain(chain: StrettoChainOption[], variantIndices: number[]): void {
+    function recordCompletedChain(chain: StrettoChainOption[], variantIndices: number[], prefixAdmissible: boolean): void {
+        structurallyCompleteChainsFound++;
+        fullChainsFound = structurallyCompleteChainsFound;
+        if (!prefixAdmissible) return;
+        prefixAdmissibleCompleteChainsFound++;
         const sig = getChainSignature(chain);
         if (!seenSignatures.has(sig)) {
             seenSignatures.add(sig);
-            const assigned = assignVoices([...chain], [...variantIndices]);
-            if (assigned !== null) {
-                fullChainsFound++;
-                unscoredResults.push({ entries: assigned, variantIndices: [...variantIndices] });
-            }
+            pushBoundedCandidateFrontier({ entries: [...chain], variantIndices: [...variantIndices] });
         }
     }
 
@@ -2570,7 +2677,7 @@ export async function searchStrettoChains(
         emitDagProgress();
 
         if (node.chain.length === options.targetChainLength) {
-            recordCompletedChain(node.chain, node.variantIndices);
+            recordCompletedChain(node.chain, node.variantIndices, node.prefixAdmissible);
             return;
         }
 
@@ -2614,6 +2721,8 @@ export async function searchStrettoChains(
             nRestricted: number;
             nFree: number;
             usedLongDelays: Set<number>;
+            prefixDissonanceState: PrefixDissonanceState;
+            prefixAdmissible: boolean;
         }
 
         // Extend a triplet-join state by one entry (adding eK at depth K).
@@ -2621,6 +2730,10 @@ export async function searchStrettoChains(
         function tripletJoinExtend(state: TripletJoinState): TripletJoinState[] {
             const depth = state.chain.length; // current chain length = next entry index
             if (depth < 3) return []; // need at least e0,e1,e2 before extending
+            if (enablePrefixAdmissibilityGate && (!state.prefixAdmissible || state.prefixDissonanceState.violated)) {
+                stageStats.prunedByPrefixAdmissibility++;
+                return [];
+            }
 
             // Look up transition window for the last two entries
             const prevPrevVarIdx = state.variantIndices[depth - 2];
@@ -2744,7 +2857,18 @@ export async function searchStrettoChains(
                     if (harmonicFail) continue;
 
                     // Combined dissonance-run gate on immediate + long-range pairs
-                    if (violatesCombinedDissonanceStarts(allRunSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
+                    const nextPrefixDissonanceState = extendPrefixDissonanceState(
+                        state.prefixDissonanceState,
+                        allRunSpans,
+                        ppq,
+                        offsetTicks,
+                        tsNum,
+                        tsDenom
+                    );
+                    if (enablePrefixAdmissibilityGate && nextPrefixDissonanceState.violated) {
+                        stageStats.prunedByPrefixAdmissibility++;
+                        continue;
+                    }
 
                     // Metric compliance
                     const metricProbeEntry: StrettoChainOption = {
@@ -2766,7 +2890,9 @@ export async function searchStrettoChains(
                         nTrunc: state.nTrunc + (isTrunc ? 1 : 0),
                         nRestricted: nextRestricted,
                         nFree: nextFree,
-                        usedLongDelays: newUsedLongDelays
+                        usedLongDelays: newUsedLongDelays,
+                        prefixDissonanceState: nextPrefixDissonanceState,
+                        prefixAdmissible: true
                     });
                 }
             }
@@ -2920,7 +3046,18 @@ export async function searchStrettoChains(
                                     if (e0e3Pair) {
                                         for (const s of rebaseRunSpansToAbsolute(e0e3Pair.bassRoleDissonanceRunSpans.none, e0Start)) seedSpans.push(s);
                                     }
-                                    if (violatesCombinedDissonanceStarts(seedSpans, ppq, offsetTicks, tsNum, tsDenom)) continue;
+                                    const seedPrefixDissonanceState = extendPrefixDissonanceState(
+                                        emptyPrefixDissonanceState,
+                                        seedSpans,
+                                        ppq,
+                                        offsetTicks,
+                                        tsNum,
+                                        tsDenom
+                                    );
+                                    if (enablePrefixAdmissibilityGate && seedPrefixDissonanceState.violated) {
+                                        stageStats.prunedByPrefixAdmissibility++;
+                                        continue;
+                                    }
 
                                     const seedChain: StrettoChainOption[] = [
                                         e0Entry,
@@ -2943,7 +3080,9 @@ export async function searchStrettoChains(
                                         delays: [firstDelay, delayAB, delayBC],
                                         transpositions: [0, tE1, tE2, tE3],
                                         nInv, nTrunc, nRestricted, nFree,
-                                        usedLongDelays: usedDelays
+                                        usedLongDelays: usedDelays,
+                                        prefixDissonanceState: seedPrefixDissonanceState,
+                                        prefixAdmissible: true
                                     };
 
                                     recordDeferredPartial(seedState.chain, seedState.variantIndices);
@@ -2974,11 +3113,13 @@ export async function searchStrettoChains(
                                                 nRestricted: current.nRestricted,
                                                 nFree: current.nFree,
                                                 usedLongDelays: current.usedLongDelays,
-                                                longDelaySignature: longDelaySig
+                                                longDelaySignature: longDelaySig,
+                                                prefixDissonanceState: current.prefixDissonanceState,
+                                                prefixAdmissible: current.prefixAdmissible
                                             };
 
                                             if (currentDepth === options.targetChainLength) {
-                                                recordCompletedChain(dagNode.chain, dagNode.variantIndices);
+                                                recordCompletedChain(dagNode.chain, dagNode.variantIndices, dagNode.prefixAdmissible);
                                             } else {
                                                 recordDeferredPartial(dagNode.chain, dagNode.variantIndices);
                                                 queueDagWorkItems(1);
@@ -2999,7 +3140,7 @@ export async function searchStrettoChains(
                                                 // Record full-depth chains immediately on generation so a
                                                 // subsequent timeout check cannot drop a completed candidate
                                                 // that has already satisfied all structural constraints.
-                                                recordCompletedChain(succ.chain, succ.variantIndices);
+                                                recordCompletedChain(succ.chain, succ.variantIndices, succ.prefixAdmissible);
                                                 continue;
                                             }
                                             if (succ.chain.length >= 3) {
@@ -3043,7 +3184,7 @@ export async function searchStrettoChains(
 
                 // If target reached during Phase A (target <= PHASE_A_DEPTH)
                 if (node.chain.length === options.targetChainLength) {
-                    recordCompletedChain(node.chain, node.variantIndices);
+                    recordCompletedChain(node.chain, node.variantIndices, node.prefixAdmissible);
                     continue;
                 }
 
@@ -3100,31 +3241,35 @@ export async function searchStrettoChains(
         }
     }
 
-    // --- POST-SEARCH: Score all found chains ---
-    let sourceUnscored = unscoredResults;
-    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || (unscoredResults.length > 0 ? 'Success' : 'Exhausted');
-
-    // Fallback to partials if no full-length results.
-    // Voice assignment is deferred to here to avoid expensive CSP during traversal.
-    if (unscoredResults.length === 0 && deferredPartials.length > 0) {
+    // --- POST-SEARCH: Reserved finalization stage ---
+    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || (candidateFrontierByDepth.size > 0 ? 'Success' : 'Exhausted');
+    if (candidateFrontierByDepth.size === 0 && deferredPartials.length > 0) {
         for (const dp of deferredPartials) {
-            const assigned = assignVoices(dp.chain, dp.variantIndices);
-            if (assigned !== null) {
-                unscoredPartials.push({ entries: assigned, variantIndices: dp.variantIndices });
-            }
+            pushBoundedCandidateFrontier({ entries: dp.chain, variantIndices: dp.variantIndices });
         }
-        sourceUnscored = unscoredPartials;
         if (!terminationReason) stopReason = 'Exhausted';
     }
 
-    // Score all candidates (deferred from search)
+    const sourceUnscored: UnscoredChain[] = Array.from(candidateFrontierByDepth.values()).flat();
+    sourceUnscored.sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
+
     const scoredResults: StrettoChainResult[] = [];
     for (const uc of sourceUnscored) {
-        const scored = calculateStrettoScore(uc.entries, variants, uc.variantIndices, options, ppq);
+        if (Date.now() - startTime >= configuredTimeLimitMs) break;
+        const assigned = assignVoices([...uc.entries], [...uc.variantIndices]);
+        if (assigned === null) {
+            finalizationRejectedVoiceAssignment++;
+            continue;
+        }
+        finalizationScoredCount++;
+        const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq);
         if (scored.isValid) {
             scoredResults.push(scored);
+        } else {
+            finalizationRejectedScoringInvalid++;
         }
     }
+    fullChainsFound = structurallyCompleteChainsFound;
 
     // Group by delay pattern + type sequence to avoid similar chains clogging display
     function getGroupKey(entries: StrettoChainOption[]): string {
@@ -3167,6 +3312,16 @@ export async function searchStrettoChains(
             maxDepthReached: maxDepth,
             metricOffsetTicks: offsetTicks,
             timeoutExtensionAppliedMs,
+            finalizationBudgetMs,
+            finalizationScoredCount,
+            enumerationStoppedForFinalization,
+            completionDiagnostics: {
+                structurallyCompleteChainsFound,
+                prefixAdmissibleCompleteChainsFound,
+                scoringValidChainsFound: scoredResults.length,
+                finalizationRejectedVoiceAssignment,
+                finalizationRejectedScoringInvalid
+            },
             coverage: {
                 nodeBudgetUsedPercent: null, // No node budget — time-only gating
                 maxFrontierSize,

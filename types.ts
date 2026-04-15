@@ -565,6 +565,16 @@ export interface StrettoSearchReport {
         maxDepthReached: number;
         metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
+        finalizationBudgetMs?: number;
+        finalizationScoredCount?: number;
+        enumerationStoppedForFinalization?: boolean;
+        completionDiagnostics?: {
+            structurallyCompleteChainsFound: number;
+            prefixAdmissibleCompleteChainsFound: number;
+            scoringValidChainsFound: number;
+            finalizationRejectedVoiceAssignment: number;
+            finalizationRejectedScoringInvalid: number;
+        };
         coverage?: {
             nodeBudgetUsedPercent: number | null;
             maxFrontierSize: number;
@@ -601,6 +611,7 @@ export interface StrettoSearchReport {
             transitionWindowLookups?: number;
             transitionsReturned?: number;
             candidateTransitionsEnumerated?: number;
+            prunedByPrefixAdmissibility?: number;
         };
     };
 }

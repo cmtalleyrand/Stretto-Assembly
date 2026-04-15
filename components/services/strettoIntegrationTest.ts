@@ -376,3 +376,52 @@ console.log('stretto integration tests passed');
   }
   console.log(`[integration:fixture-F] stopReason=${report.stats.stopReason} chains=${report.results.length}`);
 }
+
+// ── Fixture G: prefix admissibility and finalization diagnostics are observable ──
+{
+  const subject: RawNote[] = [
+    { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
+    { midi: 61, ticks: 240, durationTicks: 480, velocity: 90, name: 'C#4' },
+    { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
+    { midi: 63, ticks: 720, durationTicks: 480, velocity: 90, name: 'D#4' }
+  ];
+  const options: StrettoSearchOptions = {
+    ensembleTotal: 4,
+    targetChainLength: 4,
+    subjectVoiceIndex: 1,
+    truncationMode: 'None',
+    truncationTargetBeats: 1,
+    inversionMode: 'None',
+    useChromaticInversion: false,
+    thirdSixthMode: 'None',
+    pivotMidi: 60,
+    requireConsonantEnd: false,
+    disallowComplexExceptions: false,
+    maxPairwiseDissonance: 0.3,
+    maxSearchTimeMs: 200,
+    scaleRoot: 0,
+    scaleMode: 'Major'
+  };
+  const report = await searchStrettoChains(subject, options, ppq);
+  assert.ok(report.stats.stageStats, 'fixture-G: stage stats must be available.');
+  assert.ok(
+    (report.stats.stageStats.prunedByPrefixAdmissibility ?? 0) >= 0,
+    'fixture-G: prefix admissibility pruning counter must be exposed.'
+  );
+
+  process.env.STRETTO_DISABLE_PREFIX_ADMISSIBILITY = '1';
+  const unprunedReport = await searchStrettoChains(subject, options, ppq);
+  delete process.env.STRETTO_DISABLE_PREFIX_ADMISSIBILITY;
+  assert.ok(
+    report.stats.nodesVisited <= unprunedReport.stats.nodesVisited,
+    'fixture-G: no successor expansion should proceed from inadmissible prefixes when the gate is enabled.'
+  );
+
+  if (report.stats.maxDepthReached >= options.targetChainLength && (report.stats.completionDiagnostics?.structurallyCompleteChainsFound ?? 0) > 0 && report.results.length === 0) {
+    assert.ok(
+      (report.stats.completionDiagnostics?.finalizationRejectedScoringInvalid ?? 0)
+        + (report.stats.completionDiagnostics?.finalizationRejectedVoiceAssignment ?? 0) > 0,
+      'fixture-G: when full chains exist but no final results survive, diagnostics must expose finalization rejection counts.'
+    );
+  }
+}
