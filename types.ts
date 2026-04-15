@@ -567,8 +567,16 @@ export interface StrettoSearchReport {
         timeoutExtensionAppliedMs?: number;
         coverage?: {
             nodeBudgetUsedPercent: number | null;
+            exploredWorkItems: number;
+            liveFrontierWorkItems: number;
             maxFrontierSize: number;
             maxFrontierClassCount: number;
+            depthHistogram: Record<string, number>;
+            completionLowerBound?: number | null;
+            completionLowerBoundIsHeuristic?: boolean;
+            completionLowerBoundAssumptions?: {
+                monotoneQueuedWorkItems: boolean;
+            };
             edgesTraversed: number;
             frontierSizeAtTermination: number;
             frontierClassesAtTermination: number;
@@ -585,6 +593,19 @@ export interface StrettoSearchReport {
             pairwiseParallelRejected?: number;
             tripleCandidates: number;
             triplePairwiseRejected: number;
+            tripletRejectA10?: number;
+            tripletRejectA8?: number;
+            tripletRejectDelayShape?: number;
+            tripletRejectPairBCMissing?: number;
+            tripletRejectAdjSepBC?: number;
+            tripletRejectPairACMissing?: number;
+            tripletRejectLowerBound?: number;
+            tripletRejectParallel?: number;
+            tripletRejectVoice?: number;
+            tripletRejectP4Bass?: number;
+            tripletRejectNoDelayContext?: number;
+            tripletRejectedTotal?: number;
+            tripletAcceptedTotal?: number;
             tripleLowerBoundRejected: number;
             tripleParallelRejected: number;
             tripleVoiceRejected: number;

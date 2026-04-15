@@ -19,8 +19,16 @@ function mkReport(
       coverage: withStats
         ? {
             nodeBudgetUsedPercent: 20,
+            exploredWorkItems: 71,
+            liveFrontierWorkItems: 29,
             maxFrontierSize: 150,
             maxFrontierClassCount: 12,
+            depthHistogram: { '1': 3, '2': 12, '3': 56 },
+            completionLowerBound: 0.71,
+            completionLowerBoundIsHeuristic: true,
+            completionLowerBoundAssumptions: {
+              monotoneQueuedWorkItems: true
+            },
             edgesTraversed: 500,
             frontierSizeAtTermination: 40,
             frontierClassesAtTermination: 8,
@@ -87,6 +95,9 @@ if (!diagnostics.constraintSignals.some((signal) => signal.includes('Triplet rej
 }
 if (!diagnostics.constraintSignals.some((signal) => signal.includes('terminationFrontier=40 (8 classes)'))) {
   throw new Error('Diagnostics must expose termination frontier coverage signal.');
+}
+if (!diagnostics.constraintSignals.some((signal) => signal.includes('completionLowerBound(heuristic)=71% explored=71 live=29'))) {
+  throw new Error('Diagnostics must expose heuristic completion-bound assumptions and explored/live work-item counts.');
 }
 
 const runtime = deriveSearchRuntimePresentation(12000, 30000);

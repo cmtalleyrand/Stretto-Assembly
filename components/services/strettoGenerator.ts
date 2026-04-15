@@ -162,6 +162,9 @@ export interface StrettoSearchProgressUpdate {
         tripletOperationsProcessed: number;
         dagNodesExpanded: number;
         dagEdgesEvaluated: number;
+        dagExploredWorkItems: number;
+        dagLiveFrontierWorkItems: number;
+        dagHeuristicCompletionRatio?: number;
     };
 }
 
@@ -234,10 +237,23 @@ interface StageStats {
     pairwiseParallelRejected: number;
     tripleCandidates: number;
     triplePairwiseRejected: number;
+    tripletRejectA10: number;
+    tripletRejectA8: number;
+    tripletRejectDelayShape: number;
+    tripletRejectPairBCMissing: number;
+    tripletRejectAdjSepBC: number;
+    tripletRejectPairACMissing: number;
+    tripletRejectLowerBound: number;
+    tripletRejectParallel: number;
+    tripletRejectVoice: number;
+    tripletRejectP4Bass: number;
     tripleLowerBoundRejected: number;
     tripleParallelRejected: number;
     tripleVoiceRejected: number;
     tripleP4BassRejected: number;
+    tripletRejectNoDelayContext: number;
+    tripletRejectedTotal: number;
+    tripletAcceptedTotal: number;
     harmonicallyValidTriples: number;
     deterministicDagMergedNodes: number;
     pairStageRejected: number;
@@ -258,6 +274,22 @@ interface EntryStateAdmissibilityModel {
     admissiblePairKeys: AdmissiblePairIndex | null;
     statesVisited: number;
 }
+
+const TRIPLET_REJECT_REASON = {
+    A10: 'tripletRejectA10',
+    A8: 'tripletRejectA8',
+    DELAY_SHAPE: 'tripletRejectDelayShape',
+    PAIR_BC_MISSING: 'tripletRejectPairBCMissing',
+    ADJ_SEP_BC: 'tripletRejectAdjSepBC',
+    PAIR_AC_MISSING: 'tripletRejectPairACMissing',
+    LOWER_BOUND: 'tripletRejectLowerBound',
+    PARALLEL: 'tripletRejectParallel',
+    VOICE: 'tripletRejectVoice',
+    P4_BASS: 'tripletRejectP4Bass',
+    NO_DELAY_CONTEXT: 'tripletRejectNoDelayContext'
+} as const;
+
+type TripletRejectReason = typeof TRIPLET_REJECT_REASON[keyof typeof TRIPLET_REJECT_REASON];
 
 interface StructuralState {
     depth: number;
@@ -311,6 +343,52 @@ export function passesGlobalLineageStage(stageStats: StageStats, predicate: bool
         return false;
     }
     return true;
+}
+
+function incrementTripletRejectCounter(stageStats: StageStats, reason: TripletRejectReason): void {
+    switch (reason) {
+        case TRIPLET_REJECT_REASON.A10:
+            stageStats.tripletRejectA10++;
+            break;
+        case TRIPLET_REJECT_REASON.A8:
+            stageStats.tripletRejectA8++;
+            break;
+        case TRIPLET_REJECT_REASON.DELAY_SHAPE:
+            stageStats.tripletRejectDelayShape++;
+            break;
+        case TRIPLET_REJECT_REASON.PAIR_BC_MISSING:
+            stageStats.tripletRejectPairBCMissing++;
+            break;
+        case TRIPLET_REJECT_REASON.ADJ_SEP_BC:
+            stageStats.tripletRejectAdjSepBC++;
+            break;
+        case TRIPLET_REJECT_REASON.PAIR_AC_MISSING:
+            stageStats.tripletRejectPairACMissing++;
+            stageStats.triplePairwiseRejected++;
+            break;
+        case TRIPLET_REJECT_REASON.LOWER_BOUND:
+            stageStats.tripletRejectLowerBound++;
+            stageStats.tripleLowerBoundRejected++;
+            break;
+        case TRIPLET_REJECT_REASON.PARALLEL:
+            stageStats.tripletRejectParallel++;
+            stageStats.tripleParallelRejected++;
+            break;
+        case TRIPLET_REJECT_REASON.VOICE:
+            stageStats.tripletRejectVoice++;
+            stageStats.tripleVoiceRejected++;
+            break;
+        case TRIPLET_REJECT_REASON.P4_BASS:
+            stageStats.tripletRejectP4Bass++;
+            stageStats.tripleP4BassRejected++;
+            break;
+        case TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT:
+            stageStats.tripletRejectNoDelayContext++;
+            break;
+        default:
+            break;
+    }
+    passesTripletStage(stageStats, false);
 }
 
 function runStructuralScanGuard<T>(
@@ -1295,6 +1373,9 @@ export async function searchStrettoChains(
     let tripletOperationsProcessed = 0;
     let dagNodesExpanded = 0;
     let dagEdgesEvaluated = 0;
+    let dagExploredWorkItems = 0;
+    let dagLiveFrontierWorkItems = 0;
+    let dagHeuristicCompletionRatio: number | undefined = undefined;
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
     let fullChainsFound = 0;
@@ -1329,7 +1410,10 @@ export async function searchStrettoChains(
                 pairwiseOperationsProcessed,
                 tripletOperationsProcessed,
                 dagNodesExpanded,
-                dagEdgesEvaluated
+                dagEdgesEvaluated,
+                dagExploredWorkItems,
+                dagLiveFrontierWorkItems,
+                dagHeuristicCompletionRatio
             }
         });
     };
@@ -1357,10 +1441,23 @@ export async function searchStrettoChains(
                     pairwiseParallelRejected: 0,
                     tripleCandidates: 0,
                     triplePairwiseRejected: 0,
+                    tripletRejectA10: 0,
+                    tripletRejectA8: 0,
+                    tripletRejectDelayShape: 0,
+                    tripletRejectPairBCMissing: 0,
+                    tripletRejectAdjSepBC: 0,
+                    tripletRejectPairACMissing: 0,
+                    tripletRejectLowerBound: 0,
+                    tripletRejectParallel: 0,
+                    tripletRejectVoice: 0,
+                    tripletRejectP4Bass: 0,
                     tripleLowerBoundRejected: 0,
                     tripleParallelRejected: 0,
                     tripleVoiceRejected: 0,
                     tripleP4BassRejected: 0,
+                    tripletRejectNoDelayContext: 0,
+                    tripletRejectedTotal: 0,
+                    tripletAcceptedTotal: 0,
                     harmonicallyValidTriples: 0,
                     deterministicDagMergedNodes: 0,
                     pairStageRejected: 0,
@@ -1525,10 +1622,23 @@ export async function searchStrettoChains(
         pairwiseParallelRejected: 0,
         tripleCandidates: 0,
         triplePairwiseRejected: 0,
+        tripletRejectA10: 0,
+        tripletRejectA8: 0,
+        tripletRejectDelayShape: 0,
+        tripletRejectPairBCMissing: 0,
+        tripletRejectAdjSepBC: 0,
+        tripletRejectPairACMissing: 0,
+        tripletRejectLowerBound: 0,
+        tripletRejectParallel: 0,
+        tripletRejectVoice: 0,
+        tripletRejectP4Bass: 0,
         tripleLowerBoundRejected: 0,
         tripleParallelRejected: 0,
         tripleVoiceRejected: 0,
         tripleP4BassRejected: 0,
+        tripletRejectNoDelayContext: 0,
+        tripletRejectedTotal: 0,
+        tripletAcceptedTotal: 0,
         harmonicallyValidTriples: 0,
         deterministicDagMergedNodes: 0,
         pairStageRejected: 0,
@@ -1830,38 +1940,52 @@ export async function searchStrettoChains(
             const d2 = p2.d;
             const vC = p2.vB;
             const vCVariant = variants[vC];
+            let rejectReason: TripletRejectReason | null = null;
 
             // A.10: no truncated entries at delay >= 0.5*Sb (disabled in canon-delay mode)
             if (!isCanonDelaySearch) {
-                if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) continue;
-                if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) continue;
+                if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
+                else if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
             }
 
             // A.8: Transform-following — transformed entry must be followed by normal
             const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
             const bTransformed = vBVariant.type === 'I' || vBVariant.truncationBeats > 0;
             const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
-            if (aTransformed && bTransformed) continue;
-            if (bTransformed && cTransformed) continue;
+            if (!rejectReason && (aTransformed && bTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
+            if (!rejectReason && (bTransformed && cTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
 
             // Delay progression constraints:
             // - Stretto mode: bounded expansion (A.x local shape guard)
             // - Canon mode: all delays must be identical
-            if (!passesTripletStage(stageStats, isCanonDelaySearch ? d2 === d1 : d2 <= d1 + delayStep)) continue;
+            if (!rejectReason && !(isCanonDelaySearch ? d2 === d1 : d2 <= d1 + delayStep)) {
+                rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+            }
 
             // A.2, A.5, A.4 on the d1→d2 edge — disabled in canon-delay mode
             if (!isCanonDelaySearch) {
-                if (!satisfiesHalfLengthTrigger(d1, d2)) continue;
-                if (!satisfiesMaximumContractionBound(d1, d2)) continue;
-                if (!satisfiesPostTruncationContraction(vB, d1, d2)) continue;
+                if (!rejectReason && !satisfiesHalfLengthTrigger(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                if (!rejectReason && !satisfiesMaximumContractionBound(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                if (!rejectReason && !satisfiesPostTruncationContraction(vB, d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+            }
+
+            if (rejectReason) {
+                incrementTripletRejectCounter(stageStats, rejectReason);
+                continue;
             }
 
             // Fetch pairBC only after all cheap checks have passed
             const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
-            if (!pairBC) continue;
+            if (!pairBC) {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PAIR_BC_MISSING);
+                continue;
+            }
 
             // A.7 on B→C edge (needs pairBC)
-            if (!pairBC.meetsAdjacentTranspositionSeparation) continue;
+            if (!pairBC.meetsAdjacentTranspositionSeparation) {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.ADJ_SEP_BC);
+                continue;
+            }
 
             // Rule: Pair A->C compatibility (if overlapping)
             const dAC = d1 + d2;
@@ -1870,22 +1994,29 @@ export async function searchStrettoChains(
             const lenA = variants[vA].lengthTicks;
             if (dAC < lenA) {
                 const pairAC = precomputeIndex.getPairRecord(vA, vC, dAC, tAC);
-                if (!passesTripletStage(stageStats, !!pairAC)) {
-                    stageStats.triplePairwiseRejected++;
+                if (!pairAC) {
+                    incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PAIR_AC_MISSING);
                     continue;
                 }
-                if (!passesTripletStage(stageStats, !violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) && !violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance) && !violatesPairwiseLowerBound(pairAC, options.maxPairwiseDissonance))) {
-                    stageStats.tripleLowerBoundRejected++;
+                if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance)
+                    || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance)
+                    || violatesPairwiseLowerBound(pairAC, options.maxPairwiseDissonance)) {
+                    incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.LOWER_BOUND);
                     continue;
                 }
-            } else if (!passesTripletStage(stageStats, !violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance) && !violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance))) {
-                stageStats.tripleLowerBoundRejected++;
+            } else if (violatesPairwiseLowerBound(pairAB, options.maxPairwiseDissonance)
+                || violatesPairwiseLowerBound(pairBC, options.maxPairwiseDissonance)) {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.LOWER_BOUND);
                 continue;
             }
             
             // Rule: Voice Spacing for the Triple
             const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
-            if (!passesGlobalLineageStage(stageStats, trans[2] - trans[0] >= 7)) continue;
+            if (trans[2] - trans[0] < 7) {
+                passesGlobalLineageStage(stageStats, false);
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PARALLEL);
+                continue;
+            }
 
             // Use precomputed allowedVoicePairs from pairwise records to constrain
             // the triplet voice assignment. The pairwise records already encode
@@ -1909,9 +2040,9 @@ export async function searchStrettoChains(
 
             if (!possibleAssignment) {
                 if (!spacingFeasible) {
-                    stageStats.tripleVoiceRejected++;
+                    incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.VOICE);
                 } else {
-                    stageStats.tripleP4BassRejected++;
+                    incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.P4_BASS);
                 }
                 passesGlobalLineageStage(stageStats, false);
                 continue;
@@ -1950,9 +2081,25 @@ export async function searchStrettoChains(
 
             if (tripletHasValidDelayContext) {
                 precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d1}|${d2}|${p1.t}|${p2.t}`);
+            } else {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT);
             }
         }
     }
+
+    stageStats.tripletRejectedTotal =
+        stageStats.tripletRejectA10
+        + stageStats.tripletRejectA8
+        + stageStats.tripletRejectDelayShape
+        + stageStats.tripletRejectPairBCMissing
+        + stageStats.tripletRejectAdjSepBC
+        + stageStats.tripletRejectPairACMissing
+        + stageStats.tripletRejectLowerBound
+        + stageStats.tripletRejectParallel
+        + stageStats.tripletRejectVoice
+        + stageStats.tripletRejectP4Bass
+        + stageStats.tripletRejectNoDelayContext;
+    stageStats.tripletAcceptedTotal = stageStats.tripleCandidates - stageStats.tripletRejectedTotal;
 
     stageStats.harmonicallyValidTriples = precomputeIndex.getTripletShapeCount();
 
@@ -2468,21 +2615,24 @@ export async function searchStrettoChains(
     emitStageProgress('triplet', tripletTotalUnits, tripletTotalUnits, true);
     const dagTotalUnits = Math.max(1, options.targetChainLength);
     let dagCompletedUnits = 0;
-    let dagExploredWorkItems = 0;
-    let dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
+    dagExploredWorkItems = 0;
+    dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
     const queueDagWorkItems = (count: number): void => {
         if (count <= 0) return;
         dagLiveFrontierWorkItems += count;
     };
-    const startDagWorkItem = (): void => {
+    const dagDepthHistogram: Map<number, number> = new Map();
+    const startDagWorkItem = (depth: number): void => {
         dagExploredWorkItems++;
         dagLiveFrontierWorkItems = Math.max(0, dagLiveFrontierWorkItems - 1);
+        dagDepthHistogram.set(depth, (dagDepthHistogram.get(depth) ?? 0) + 1);
     };
     const emitDagProgress = (force: boolean = false, terminal: boolean = false): void => {
         // Monotone heuristic completion: explored / (explored + live frontier).
         // The ratio is traversal-state based and does not rely on chain-depth upper bounds.
         const denom = Math.max(1, dagExploredWorkItems + dagLiveFrontierWorkItems);
         const heuristicRatio = dagExploredWorkItems / denom;
+        dagHeuristicCompletionRatio = heuristicRatio;
         const boundedNonTerminalCeiling = Math.max(0, dagTotalUnits - 1);
         const nextCompletedUnits = terminal
             ? dagTotalUnits
@@ -2562,7 +2712,7 @@ export async function searchStrettoChains(
     // Long-range pair checks are sparse: cumulative delay typically exceeds Sb,
     // so entries 3+ apart rarely overlap.
     function dfsExtend(node: DagNode): void {
-        startDagWorkItem();
+        startDagWorkItem(node.chain.length);
         nodesVisited++;
         dagNodesExpanded++;
         operationCounter++;
@@ -2955,13 +3105,13 @@ export async function searchStrettoChains(
                                     let queueIndex = 0;
                                     while (queueIndex < extensionQueue.length) {
                                         if (terminationReason) break;
-                                        startDagWorkItem();
+                                        const current = extensionQueue[queueIndex++];
+                                        startDagWorkItem(current.chain.length);
                                         operationCounter++;
                                         if (shouldYieldToEventLoop(operationCounter)) {
                                             await new Promise<void>((resolve) => setTimeout(resolve, 0));
                                         }
                                         if (checkLimits()) break;
-                                        const current = extensionQueue[queueIndex++];
                                         const currentDepth = current.chain.length;
 
                                         if (currentDepth >= 7) {
@@ -3030,7 +3180,7 @@ export async function searchStrettoChains(
             let stopTraversal = false;
 
             for (const node of frontier) {
-                startDagWorkItem();
+                startDagWorkItem(node.chain.length);
                 nodesVisited++;
                 dagNodesExpanded++;
                 operationCounter++;
@@ -3154,8 +3304,21 @@ export async function searchStrettoChains(
     });
 
     emitDagProgress(true, true);
-    const isExhaustivelyComplete = stopReason === 'Exhausted' && frontierSizeAtTermination === 0;
-    const completionRatioLowerBound = isExhaustivelyComplete ? 100 : null;
+    const totalKnownWorkItems = dagExploredWorkItems + dagLiveFrontierWorkItems;
+    const completionLowerBound = totalKnownWorkItems > 0
+        ? (dagExploredWorkItems / totalKnownWorkItems)
+        : null;
+    const completionLowerBoundAssumptions = {
+        monotoneQueuedWorkItems: true
+    };
+    const completionLowerBoundIsHeuristic = true;
+    const depthHistogram = Array.from(dagDepthHistogram.entries())
+        .sort(([depthA], [depthB]) => depthA - depthB)
+        .reduce<Record<string, number>>((acc, [depth, count]) => {
+            acc[String(depth)] = count;
+            return acc;
+        }, {});
+    const completionRatioLowerBound = completionLowerBound == null ? null : Math.round(completionLowerBound * 100);
 
     return {
         results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),
@@ -3169,12 +3332,17 @@ export async function searchStrettoChains(
             timeoutExtensionAppliedMs,
             coverage: {
                 nodeBudgetUsedPercent: null, // No node budget — time-only gating
+                exploredWorkItems: dagExploredWorkItems,
+                liveFrontierWorkItems: dagLiveFrontierWorkItems,
                 maxFrontierSize,
                 maxFrontierClassCount,
+                depthHistogram,
+                completionLowerBound,
+                completionLowerBoundIsHeuristic,
+                completionLowerBoundAssumptions,
                 edgesTraversed,
                 frontierSizeAtTermination,
                 frontierClassesAtTermination,
-                // Completion lower bound is only mathematically valid when the traversal is proven exhaustive.
                 completionRatioLowerBound
             },
             stageStats

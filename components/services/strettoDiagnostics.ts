@@ -103,8 +103,10 @@ async function runDiagnostics() {
     }
     if (stats.coverage) {
       const nodeBudget = typeof stats.coverage.nodeBudgetUsedPercent === 'number' ? `${stats.coverage.nodeBudgetUsedPercent}%` : 'null';
-      const completionLowerBound = typeof stats.coverage.completionRatioLowerBound === 'number' ? `${stats.coverage.completionRatioLowerBound}%` : 'null';
-      console.log(`  coverage(nodeBudget/completionLowerBound/maxFrontier/classes)=${nodeBudget}/${completionLowerBound}/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
+      const completionLowerBound = typeof stats.coverage.completionLowerBound === 'number'
+        ? `${Math.round(stats.coverage.completionLowerBound * 100)}%`
+        : 'null';
+      console.log(`  coverage(nodeBudget/completionLowerBoundHeuristic/explored/live/maxFrontier/classes)=${nodeBudget}/${completionLowerBound}/${stats.coverage.exploredWorkItems}/${stats.coverage.liveFrontierWorkItems}/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
     }
   }
 

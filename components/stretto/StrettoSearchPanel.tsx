@@ -32,6 +32,9 @@ interface StrettoSearchPanelProps {
             tripletOperationsProcessed: number;
             dagNodesExpanded: number;
             dagEdgesEvaluated: number;
+            dagExploredWorkItems: number;
+            dagLiveFrontierWorkItems: number;
+            dagHeuristicCompletionRatio?: number;
         };
         heartbeat: boolean;
     } | null;
@@ -478,7 +481,7 @@ export default function StrettoSearchPanel({
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {searchProgress.stage === 'dag'
-                            ? `Depth: ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength}`
+                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · traversal ${progressDisplay.traversalCompletionPercent ?? 0}%`
                             : `Stage progress: ${progressDisplay.stageEstimatePercent}% · units ${progressDisplay.unitLabel}`}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
@@ -491,20 +494,32 @@ export default function StrettoSearchPanel({
                         Max depth {searchProgress.telemetry.maxDepthReached}<MetricHelp metricKey="maxDepthReached" /> / target {searchProgress.telemetry.targetChainLength}<MetricHelp metricKey="targetChainLength" />
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        DAG nodes {searchProgress.telemetry.dagNodesExpanded.toLocaleString()}<MetricHelp metricKey="dagNodesExpanded" /> · DAG edges {searchProgress.telemetry.dagEdgesEvaluated.toLocaleString()}<MetricHelp metricKey="dagEdgesEvaluated" />
+                        {progressDisplay.countersLabel}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {progressDisplay.throughputLabel} · {progressDisplay.etaLabel}
                     </div>
+                    <div className="mt-1 text-[9px] text-gray-300 font-semibold">Depth reached</div>
                     <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                         <div
                             className="h-full bg-brand-primary transition-all duration-200"
                             style={{ width: searchProgress.stage === 'dag'
-                                ? `${Math.max(2, Math.round((searchProgress.telemetry.maxDepthReached / Math.max(1, searchProgress.telemetry.targetChainLength)) * 100))}%`
+                                ? `${Math.max(2, progressDisplay.depthAxisPercent)}%`
                                 : `${Math.max(2, progressDisplay.stageEstimatePercent)}%`
                             }}
                         />
                     </div>
+                    {searchProgress.stage === 'dag' && (
+                        <>
+                            <div className="mt-1 text-[9px] text-gray-300 font-semibold">Traversal completion heuristic</div>
+                            <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
+                                <div
+                                    className="h-full bg-cyan-500 transition-all duration-200"
+                                    style={{ width: `${Math.max(2, progressDisplay.traversalCompletionPercent ?? 0)}%` }}
+                                />
+                            </div>
+                        </>
+                    )}
                 </div>
             )}
             

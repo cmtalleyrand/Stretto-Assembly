@@ -12,6 +12,60 @@ import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRe
 import { metricHelpText } from './telemetryGlossary';
 import { STAGE_LABELS } from './searchProgressModel';
 
+type CoverageDiagnostics = NonNullable<NonNullable<StrettoSearchReport['stats']['coverage']>>;
+
+export interface CoverageDisplayMetric {
+    metricKey: Parameters<typeof metricHelpText>[0];
+    label: string;
+    value: string;
+    show: boolean;
+}
+
+export function deriveCoverageDisplayMetrics(coverage: CoverageDiagnostics): CoverageDisplayMetric[] {
+    const completionAssumptionsHold = coverage.completionLowerBoundAssumptions?.monotoneQueuedWorkItems === true;
+    const completionLowerBoundPercent = coverage.completionLowerBound != null
+        ? Math.round(coverage.completionLowerBound * 100)
+        : null;
+    return [
+        {
+            metricKey: 'nodeBudgetUsedPercent',
+            label: 'node budget',
+            value: coverage.nodeBudgetUsedPercent != null ? `${coverage.nodeBudgetUsedPercent}%` : 'n/a',
+            show: true
+        },
+        {
+            metricKey: 'completionRatioLowerBound',
+            label: 'completion lower bound (heuristic)',
+            value: completionLowerBoundPercent != null ? `${completionLowerBoundPercent}%` : 'n/a',
+            show: completionAssumptionsHold
+        },
+        {
+            metricKey: 'exploredWorkItems',
+            label: 'explored',
+            value: coverage.exploredWorkItems.toLocaleString(),
+            show: true
+        },
+        {
+            metricKey: 'liveFrontierWorkItems',
+            label: 'live frontier',
+            value: coverage.liveFrontierWorkItems.toLocaleString(),
+            show: true
+        },
+        {
+            metricKey: 'maxFrontierSize',
+            label: 'max frontier',
+            value: `${coverage.maxFrontierSize.toLocaleString()} (${coverage.maxFrontierClassCount.toLocaleString()} classes)`,
+            show: true
+        },
+        {
+            metricKey: 'depthHistogram',
+            label: 'depth histogram',
+            value: Object.entries(coverage.depthHistogram).map(([depth, count]) => `${depth}:${count}`).join(', ') || 'n/a',
+            show: true
+        }
+    ];
+}
+
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
     setSearchOptions: (opt: StrettoSearchOptions) => void;
@@ -33,6 +87,9 @@ interface StrettoChainViewProps {
             tripletOperationsProcessed: number;
             dagNodesExpanded: number;
             dagEdgesEvaluated: number;
+            dagExploredWorkItems: number;
+            dagLiveFrontierWorkItems: number;
+            dagHeuristicCompletionRatio?: number;
         };
         heartbeat: boolean;
     } | null;
@@ -161,6 +218,21 @@ export default function StrettoChainView({
         const stats = searchReport.stats as any;
         const transitionRowsReturned = stats.stageStats.transitionsReturned ?? 0;
         const transitionCandidatesEnumerated = stats.stageStats.candidateTransitionsEnumerated ?? 0;
+        const tripletRejectedTotal = stats.stageStats.tripletRejectedTotal ?? (
+            (stats.stageStats.tripletRejectA10 ?? 0)
+            + (stats.stageStats.tripletRejectA8 ?? 0)
+            + (stats.stageStats.tripletRejectDelayShape ?? 0)
+            + (stats.stageStats.tripletRejectPairBCMissing ?? 0)
+            + (stats.stageStats.tripletRejectAdjSepBC ?? 0)
+            + (stats.stageStats.tripletRejectPairACMissing ?? 0)
+            + (stats.stageStats.tripletRejectLowerBound ?? stats.stageStats.tripleLowerBoundRejected ?? 0)
+            + (stats.stageStats.tripletRejectParallel ?? stats.stageStats.tripleParallelRejected ?? 0)
+            + (stats.stageStats.tripletRejectVoice ?? stats.stageStats.tripleVoiceRejected ?? 0)
+            + (stats.stageStats.tripletRejectP4Bass ?? stats.stageStats.tripleP4BassRejected ?? 0)
+            + (stats.stageStats.tripletRejectNoDelayContext ?? 0)
+        );
+        const tripletAcceptedTotal = stats.stageStats.tripletAcceptedTotal ?? (stats.stageStats.tripleCandidates - tripletRejectedTotal);
+        const tripletAccountingHolds = stats.stageStats.tripleCandidates === (tripletRejectedTotal + tripletAcceptedTotal);
         return {
             stage: stats.stageStats,
             coverage: stats.coverage ?? null,
@@ -168,7 +240,10 @@ export default function StrettoChainView({
             timeoutExtensionAppliedMs: stats.timeoutExtensionAppliedMs ?? 0,
             transitionRowsReturned,
             transitionCandidatesEnumerated,
-            transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated
+            transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated,
+            tripletRejectedTotal,
+            tripletAcceptedTotal,
+            tripletAccountingHolds
         };
     }, [searchReport]);
 
@@ -242,13 +317,30 @@ export default function StrettoChainView({
                             <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()}<MetricHelp metricKey="pairStageRejected" /> · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()}<MetricHelp metricKey="tripletStageRejected" /> · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}<MetricHelp metricKey="globalLineageStageRejected" /></div>
                             <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
                             <div>
+                                Triplet candidate accounting → {diagnostics.stage.tripleCandidates.toLocaleString()} = {diagnostics.tripletRejectedTotal.toLocaleString()} + {diagnostics.tripletAcceptedTotal.toLocaleString()} · invariant:
+                                <span className={diagnostics.tripletAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
+                                    {diagnostics.tripletAccountingHolds ? 'holds' : 'violated'}
+                                </span>
+                            </div>
+                            <div>
                                 Transition accounting → returned rows: {diagnostics.transitionRowsReturned.toLocaleString()}<MetricHelp metricKey="transitionRowsReturned" /> · enumerated candidates: {diagnostics.transitionCandidatesEnumerated.toLocaleString()}<MetricHelp metricKey="transitionCandidatesEnumerated" /> · invariant:
                                 <span className={diagnostics.transitionAccountingHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
                                     {diagnostics.transitionAccountingHolds ? 'holds' : 'violated'}
                                 </span>
                             </div>
                             {diagnostics.coverage && (
-                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent != null ? `${diagnostics.coverage.nodeBudgetUsedPercent}%` : 'n/a'}<MetricHelp metricKey="nodeBudgetUsedPercent" /> · completion lower bound: {diagnostics.coverage.completionRatioLowerBound != null ? `${diagnostics.coverage.completionRatioLowerBound}%` : 'n/a'}<MetricHelp metricKey="completionRatioLowerBound" /> · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()}<MetricHelp metricKey="maxFrontierSize" /> ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
+                                <div>
+                                    Coverage →
+                                    {deriveCoverageDisplayMetrics(diagnostics.coverage)
+                                        .filter((metric) => metric.show)
+                                        .map((metric, index) => (
+                                            <React.Fragment key={metric.metricKey}>
+                                                {index === 0 ? ' ' : ' · '}
+                                                {metric.label}: {metric.value}
+                                                <MetricHelp metricKey={metric.metricKey} />
+                                            </React.Fragment>
+                                        ))}
+                                </div>
                             )}
                             {diagnostics.timeoutExtensionAppliedMs > 0 && (
                                 <div>Timeout extension applied: +{diagnostics.timeoutExtensionAppliedMs}ms near completion.</div>

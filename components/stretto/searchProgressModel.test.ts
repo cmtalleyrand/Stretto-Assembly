@@ -20,7 +20,9 @@ const pairwiseStart: SearchProgressState = {
         pairwiseOperationsProcessed: 100,
         tripletOperationsProcessed: 0,
         dagNodesExpanded: 0,
-        dagEdgesEvaluated: 0
+        dagEdgesEvaluated: 0,
+        dagExploredWorkItems: 0,
+        dagLiveFrontierWorkItems: 0
     },
     heartbeat: false
 };
@@ -61,7 +63,9 @@ const tripletStart: SearchProgressState = {
         pairwiseOperationsProcessed: 700,
         tripletOperationsProcessed: 0,
         dagNodesExpanded: 0,
-        dagEdgesEvaluated: 0
+        dagEdgesEvaluated: 0,
+        dagExploredWorkItems: 0,
+        dagLiveFrontierWorkItems: 0
     },
     heartbeat: false
 };
@@ -97,13 +101,17 @@ const dagNonTerminal: SearchProgressState = {
         pairwiseOperationsProcessed: 700,
         tripletOperationsProcessed: 4500,
         dagNodesExpanded: 1200,
-        dagEdgesEvaluated: 8400
+        dagEdgesEvaluated: 8400,
+        dagExploredWorkItems: 1200,
+        dagLiveFrontierWorkItems: 400
     },
     heartbeat: false
 };
 const dagNonTerminalDisplay = computeSearchProgressDisplay(dagNonTerminal, nextSearchProgressAccumulator(dagNonTerminal, accumulatorAfterTripletTransition));
 assert.equal(dagNonTerminalDisplay.stageEstimatePercent, 100, 'Stage estimate may numerically reach 100 before terminal confirmation.');
 assert.equal(dagNonTerminalDisplay.overallEstimatePercent, 99, 'Overall estimate must remain below 100 before terminal DAG completion conditions.');
+assert.equal(dagNonTerminalDisplay.depthAxisPercent, 88, 'Depth axis should be computed as maxDepthReached / targetChainLength.');
+assert.equal(dagNonTerminalDisplay.traversalCompletionPercent, 75, 'Traversal heuristic should use explored / (explored + live).');
 
 const dagTerminal: SearchProgressState = {
     ...dagNonTerminal,
@@ -122,7 +130,9 @@ const dagStart: SearchProgressState = {
         ...tripletStart.telemetry,
         maxDepthReached: 4,
         dagNodesExpanded: 200,
-        dagEdgesEvaluated: 400
+        dagEdgesEvaluated: 400,
+        dagExploredWorkItems: 150,
+        dagLiveFrontierWorkItems: 150
     },
     heartbeat: false
 };
@@ -134,11 +144,63 @@ const dagAdvanceSameDepth: SearchProgressState = {
     telemetry: {
         ...dagStart.telemetry,
         dagNodesExpanded: 380,
-        dagEdgesEvaluated: 820
+        dagEdgesEvaluated: 820,
+        dagExploredWorkItems: 270,
+        dagLiveFrontierWorkItems: 130
     }
 };
 const dagDisplay = computeSearchProgressDisplay(dagAdvanceSameDepth, accumulatorAfterDagTransition);
 assert.match(dagDisplay.throughputLabel, /Rate \d+\.\d nodes\/s/, 'DAG throughput should use operation counters and node-denominated units.');
 assert.match(dagDisplay.etaLabel, /ETA (?:<1s|\d+s|\d+\.\dm)/, 'DAG ETA should remain finite when operation counters advance despite constant depth.');
+assert.equal(dagDisplay.depthAxisPercent, 50, 'Depth axis percent should remain unchanged when max depth does not advance.');
+assert.equal(dagDisplay.traversalCompletionPercent, 68, 'Traversal heuristic should advance even when depth remains constant.');
+
+const dagStageThreeEntry: SearchProgressState = {
+    elapsedMs: 8000,
+    stage: 'dag',
+    completedUnits: 0,
+    totalUnits: 8,
+    terminal: false,
+    telemetry: {
+        ...dagStart.telemetry,
+        maxDepthReached: 1,
+        dagExploredWorkItems: 10,
+        dagLiveFrontierWorkItems: 30
+    },
+    heartbeat: false
+};
+const dagStageThreeEntryAccumulator = nextSearchProgressAccumulator(dagStageThreeEntry, accumulatorAfterTripletTransition);
+const dagStageThreeEntryDisplay = computeSearchProgressDisplay(dagStageThreeEntry, dagStageThreeEntryAccumulator);
+assert.equal(dagStageThreeEntryDisplay.overallEstimatePercent, 67, 'Stage 3 entry should render at 67% overall estimate.');
+
+const dagStageThreeEntryDepthAdvance: SearchProgressState = {
+    ...dagStageThreeEntry,
+    elapsedMs: 9000,
+    telemetry: {
+        ...dagStageThreeEntry.telemetry,
+        maxDepthReached: 2,
+        dagExploredWorkItems: 16,
+        dagLiveFrontierWorkItems: 24
+    }
+};
+const dagStageThreeEntryDepthAdvanceDisplay = computeSearchProgressDisplay(dagStageThreeEntryDepthAdvance, dagStageThreeEntryAccumulator);
+assert.equal(dagStageThreeEntryDepthAdvanceDisplay.overallEstimatePercent, 67, 'Overall estimate should remain pinned at stage-3 entry when unit completion is unchanged.');
+assert.equal(dagStageThreeEntryDepthAdvanceDisplay.depthAxisPercent, 25, 'Depth axis should increase while overall estimate remains fixed.');
+
+const dagDepthStaticTraversalAdvance: SearchProgressState = {
+    ...dagStageThreeEntryDepthAdvance,
+    elapsedMs: 10000,
+    telemetry: {
+        ...dagStageThreeEntryDepthAdvance.telemetry,
+        maxDepthReached: 2,
+        dagNodesExpanded: dagStageThreeEntryDepthAdvance.telemetry.dagNodesExpanded + 100,
+        dagEdgesEvaluated: dagStageThreeEntryDepthAdvance.telemetry.dagEdgesEvaluated + 250,
+        dagExploredWorkItems: 22,
+        dagLiveFrontierWorkItems: 18
+    }
+};
+const dagDepthStaticTraversalAdvanceDisplay = computeSearchProgressDisplay(dagDepthStaticTraversalAdvance, dagStageThreeEntryAccumulator);
+assert.equal(dagDepthStaticTraversalAdvanceDisplay.depthAxisPercent, 25, 'Depth axis should stay constant when max depth does not move.');
+assert.equal(dagDepthStaticTraversalAdvanceDisplay.traversalCompletionPercent, 55, 'Traversal heuristic should continue to advance under non-zero DAG operations.');
 
 console.log('searchProgressModel test passed.');

@@ -1,4 +1,4 @@
-export type MetricEstimateClass = 'exact' | 'lower-bound' | 'heuristic';
+export type MetricEstimateClass = 'exact' | 'heuristic';
 
 export interface TelemetryGlossaryEntry {
   label: string;
@@ -28,7 +28,7 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
     formalDefinition: 'Ratio of maximum realized chain depth to requested target depth, clamped to [0, 100].',
     unit: 'percent (%)',
     incrementSite: 'Recomputed from report.maxDepthReached and targetChainLength when status panel renders.',
-    estimateClass: 'lower-bound'
+    estimateClass: 'heuristic'
   },
   maxDepthReached: {
     label: 'Max depth reached',
@@ -109,10 +109,24 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
   },
   completionRatioLowerBound: {
     label: 'Completion lower bound',
-    formalDefinition: 'Lower-bound estimator of completion derived from explored-frontier coverage statistics.',
+    formalDefinition: 'Heuristic lower-bound estimator exploredWorkItems / (exploredWorkItems + liveFrontierWorkItems); exact only for discovered queue coverage, not global search completion.',
     unit: 'percent (%)',
     incrementSite: 'Derived from termination frontier coverage metrics.',
-    estimateClass: 'lower-bound'
+    estimateClass: 'heuristic'
+  },
+  exploredWorkItems: {
+    label: 'Explored work items',
+    formalDefinition: 'Count of queued DAG work items removed from the frontier and processed.',
+    unit: 'count (work items)',
+    incrementSite: 'Incremented once at frontier-pop/start of each DAG work item.',
+    estimateClass: 'exact'
+  },
+  liveFrontierWorkItems: {
+    label: 'Live frontier work items',
+    formalDefinition: 'Current number of queued DAG work items not yet processed.',
+    unit: 'count (work items)',
+    incrementSite: 'Incremented when work items are queued and decremented when processing starts.',
+    estimateClass: 'exact'
   },
   maxFrontierSize: {
     label: 'Max frontier size',
@@ -182,6 +196,13 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
     formalDefinition: 'Configured required chain length used as termination criterion for successful candidates.',
     unit: 'count (entries)',
     incrementSite: 'Set by user configuration before run start.',
+    estimateClass: 'exact'
+  },
+  depthHistogram: {
+    label: 'Depth histogram',
+    formalDefinition: 'Map from depth index to count of explored work items processed at that depth.',
+    unit: 'map(depth→count)',
+    incrementSite: 'Updated when each DAG work item starts processing.',
     estimateClass: 'exact'
   }
 };
