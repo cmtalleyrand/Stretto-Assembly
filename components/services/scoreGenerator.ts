@@ -1,3 +1,17 @@
+/**
+ * LEGACY / NOT IN ACTIVE STRETTO-CANON PATH.
+ * The report-generation and harmony-mode orchestration in this module are not
+ * part of active Stretto/Canon search execution.
+ *
+ * Active Stretto/Canon execution path lives in:
+ * - components/services/strettoGenerator.ts
+ * - components/services/canonSearch.ts
+ * - components/StrettoView.tsx
+ *
+ * Modification constraint:
+ * - Compatibility-only edits are allowed.
+ * - Behavioral or algorithmic changes require an approved migration plan.
+ */
 import { Midi } from '@tonejs/midi';
 import { ConversionOptions, RawNote, TrackAnalysisData, ChordEvent, AnalysisSection, HybridVoiceRole } from '../../types';
 import { analyzeTrack, analyzeTrackSelection, generateAnalysisReport, analyzePreparedNotes } from './midiAnalysis';
@@ -207,6 +221,10 @@ function getDissonanceCellContent(
     return outputParts.join(', ');
 }
 
+/**
+ * @warning Legacy entry point; not used in the active Stretto/Canon search path.
+ * Modify only for compatibility unless a migration plan is formally approved.
+ */
 export function generateGeminiScore(midi: Midi, selectedTrackIds: number[], options: ConversionOptions, contextText: string = ''): { report: string, auditLog: string | null } {
     const ppq = midi.header.ppq;
     const ts = options.timeSignature;
