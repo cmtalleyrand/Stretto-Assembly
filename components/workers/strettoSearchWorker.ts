@@ -25,6 +25,9 @@ interface StrettoSearchWorkerProgress {
     tripletOperationsProcessed: number;
     dagNodesExpanded: number;
     dagEdgesEvaluated: number;
+    dagExploredWorkItems: number;
+    dagLiveFrontierWorkItems: number;
+    dagHeuristicCompletionRatio?: number;
   };
   heartbeat: boolean;
   progressPercent: number;
@@ -103,7 +106,10 @@ self.onmessage = async (event: MessageEvent<StrettoSearchWorkerRequest>) => {
           pairwiseOperationsProcessed: 0,
           tripletOperationsProcessed: 0,
           dagNodesExpanded: 0,
-          dagEdgesEvaluated: 0
+          dagEdgesEvaluated: 0,
+          dagExploredWorkItems: 0,
+          dagLiveFrontierWorkItems: 0,
+          dagHeuristicCompletionRatio: 0
         },
         heartbeat: true,
         progressPercent: boundedPercent,
