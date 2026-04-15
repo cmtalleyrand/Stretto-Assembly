@@ -637,6 +637,15 @@ export interface StrettoSearchOptions {
 
 export type CanonInversionPattern = 'none' | 'alternating' | 'all-inverted';
 
+/**
+ * 'independent' — enumerate all valid V-tuples where each voice slot may use
+ *                 any allowed interval, subject to voice-spacing rules.
+ * 'cumulative'  — for every T in the allowed interval set, build the tuple
+ *                 [0, T, 2T, 3T, …]; only tuples that satisfy voice-spacing
+ *                 rules are kept.
+ */
+export type CanonTranspositionMode = 'independent' | 'cumulative';
+
 export interface CanonSearchOptions {
     ensembleTotal: number;
     delayMinBeats: number;
@@ -650,6 +659,7 @@ export interface CanonSearchOptions {
     scaleRoot: number;
     scaleMode: string;
     subjectVoiceIndex: number;
+    transpositionMode: CanonTranspositionMode;
     voiceNames?: Record<number, string>;
 }
 
@@ -659,7 +669,8 @@ export interface CanonChainResult {
     score: number;
     scoreLog?: ScoreLog;
     delayBeats: number;
-    transpositionStep: number;
+    /** One transposition value per voice slot (index = voice index 0…V-1). */
+    transpositionSteps: number[];
     chainLength: number;
     inversionPattern: CanonInversionPattern;
     detectedChords?: string[];

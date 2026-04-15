@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { CanonSearchOptions } from '../../types';
+import { CanonSearchOptions, CanonTranspositionMode } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 
 interface CanonSearchPanelProps {
@@ -216,13 +216,44 @@ export default function CanonSearchPanel({
                     )}
                 </div>
 
-                {/* Info / stats */}
+                {/* Transposition mode + Info */}
                 <div className="bg-gray-900 p-3 rounded border border-gray-700 flex flex-col gap-2 justify-between">
                     <div>
-                        <label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block">Search Info</label>
+                        <label className="text-[10px] font-bold text-gray-400 uppercase mb-2 block">Transposition model</label>
+                        <div className="flex flex-col gap-1.5">
+                            <label className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="transpositionMode"
+                                    value="independent"
+                                    checked={(options.transpositionMode ?? 'independent') !== 'cumulative'}
+                                    onChange={() => set('transpositionMode', 'independent' as CanonTranspositionMode)}
+                                    className="mt-0.5 h-3 w-3"
+                                />
+                                <span className="text-[10px] text-gray-300">
+                                    <span className="font-bold">Independent</span>
+                                    <span className="text-gray-500 block">Each voice slot gets any valid interval; all combinations enumerated</span>
+                                </span>
+                            </label>
+                            <label className="flex items-start gap-2 cursor-pointer">
+                                <input
+                                    type="radio"
+                                    name="transpositionMode"
+                                    value="cumulative"
+                                    checked={options.transpositionMode === 'cumulative'}
+                                    onChange={() => set('transpositionMode', 'cumulative' as CanonTranspositionMode)}
+                                    className="mt-0.5 h-3 w-3"
+                                />
+                                <span className="text-[10px] text-gray-300">
+                                    <span className="font-bold">Cumulative</span>
+                                    <span className="text-gray-500 block">Voice i at i×T for every T in the interval set</span>
+                                </span>
+                            </label>
+                        </div>
+                    </div>
+                    <div className="border-t border-gray-700 pt-2 mt-1">
                         <div className="flex flex-col gap-1 text-[10px] text-gray-500">
-                            <span>No pre-filtering — all combinations scored.</span>
-                            <span>Delays: traditional intervals{options.allowThirdSixth ? ' + 3rds/6ths' : ''}.</span>
+                            <span>Traditional: P1/P4/P5/P8/P11/P12/P15/P18/P19/P22{options.allowThirdSixth ? ' + 3rds/6ths &amp; compounds' : ''}.</span>
                             <span>Inversion: {options.allowInversions ? 'none / alternating / all' : 'none'}.</span>
                             <span>Auto-truncation when required.</span>
                         </div>

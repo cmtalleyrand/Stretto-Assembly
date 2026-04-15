@@ -192,6 +192,7 @@ export default function StrettoView({
         scaleRoot: 0,
         scaleMode: 'Major',
         subjectVoiceIndex: 0,
+        transpositionMode: 'independent',
     });
     const [canonReport, setCanonReport] = useState<CanonSearchReport | null>(null);
     const [isCanonSearching, setIsCanonSearching] = useState(false);
@@ -562,6 +563,83 @@ export default function StrettoView({
             }
         }, 20);
     };
+
+    // Build a StrettoCandidate from the selected canon result for playback/download
+    const canonToCandidate = useMemo((): StrettoCandidate | null => {
+        if (!selectedCanonResult) return null;
+        const validSubjectNotes = subjectNotes.filter(n => !!n);
+        const currentPpq = ppq || 480;
+        if (validSubjectNotes.length === 0) return null;
+        const sortedSubj = [...validSubjectNotes].sort((a, b) => a.ticks - b.ticks);
+        const startTick = sortedSubj[0].ticks;
+
+        const invertPitchChromatic = (pitch: number, pivot: number) => pivot - (pitch - pivot);
+        const SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11];
+        const invertPitchDiatonic = (pitch: number, pivot: number) => {
+            const diff = pitch - pivot;
+            const oct = Math.floor(diff / 12);
+            const semi = (diff % 12 + 12) % 12;
+            let degree = -1, minErr = 99;
+            SCALE_STEPS.forEach((s, i) => { if (Math.abs(s - semi) < minErr) { minErr = Math.abs(s - semi); degree = i; } });
+            const absDegree = (oct * 7) + degree;
+            const invAbsDegree = -absDegree;
+            const invOct = Math.floor(invAbsDegree / 7);
+            const invIndex = (invAbsDegree % 7 + 7) % 7;
+            return pivot + (invOct * 12) + SCALE_STEPS[invIndex];
+        };
+
+        let allNotes: RawNote[] = [];
+        selectedCanonResult.entries.forEach((entry) => {
+            const entryStartTick = Math.round(entry.startBeat * currentPpq);
+            // entry.length is in ticks (set by canonSearch.ts from variant.lengthTicks)
+            const entryEndTick = entryStartTick + entry.length;
+
+            const transformed = sortedSubj.map(n => {
+                let pitch = n.midi;
+                if (entry.type === 'I') {
+                    const rawInverted = canonOptions.useChromaticInversion
+                        ? invertPitchChromatic(n.midi, canonOptions.pivotMidi)
+                        : invertPitchDiatonic(n.midi, canonOptions.pivotMidi);
+                    const subjectFirst = sortedSubj[0].midi;
+                    const invertedFirst = canonOptions.useChromaticInversion
+                        ? invertPitchChromatic(subjectFirst, canonOptions.pivotMidi)
+                        : invertPitchDiatonic(subjectFirst, canonOptions.pivotMidi);
+                    const targetStart = subjectFirst + entry.transposition;
+                    pitch = rawInverted + (targetStart - invertedFirst);
+                } else {
+                    pitch += entry.transposition;
+                }
+                return {
+                    ...n,
+                    ticks: (n.ticks - startTick) + entryStartTick,
+                    midi: pitch,
+                    name: getStrictPitchName(pitch),
+                    voiceIndex: entry.voiceIndex,
+                };
+            });
+
+            const clipped = transformed
+                .filter(n => n.ticks < entryEndTick)
+                .map(n => ({ ...n, durationTicks: Math.min(n.durationTicks, entryEndTick - n.ticks) }));
+            allNotes = [...allNotes, ...clipped];
+        });
+
+        const regions = generatePolyphonicHarmonicRegions(allNotes, canonOptions.scaleRoot);
+        return {
+            id: selectedCanonResult.id,
+            intervalLabel: 'Canon',
+            intervalSemis: selectedCanonResult.transpositionStep,
+            delayBeats: selectedCanonResult.delayBeats,
+            delayTicks: Math.round(selectedCanonResult.delayBeats * currentPpq),
+            grade: 'STRONG',
+            errors: [],
+            notes: allNotes,
+            regions,
+            dissonanceRatio: 0,
+            pairDissonanceScore: 0,
+            endsOnDissonance: false,
+        };
+    }, [selectedCanonResult, subjectNotes, ppq, canonOptions]);
 
     const chainToCandidate = useMemo((): StrettoCandidate | null => {
         if (!selectedChain) return null;
@@ -935,6 +1013,14 @@ export default function StrettoView({
                         results={canonReport?.results ?? []}
                         selectedId={selectedCanonResult?.id ?? null}
                         onSelect={setSelectedCanonResult}
+                        isPlaying={isPlaying}
+                        onPlay={(_res) => {
+                            // canonToCandidate is derived from selectedCanonResult which is _res
+                            if (canonToCandidate) handlePlay(canonToCandidate.notes);
+                        }}
+                        onDownload={(_res) => {
+                            if (canonToCandidate) downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den });
+                        }}
                     />
                 </div>
             ) : viewMode === 'pairwise' ? (
