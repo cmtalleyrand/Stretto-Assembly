@@ -681,6 +681,8 @@ export interface CanonSearchOptions {
     scaleMode: string;
     subjectVoiceIndex: number;
     transpositionMode: CanonTranspositionMode;
+    /** 0–1: maximum allowed dissonant-duration fraction between adjacent voice pairs. Default 0.5. */
+    dissonanceThreshold: number;
     voiceNames?: Record<number, string>;
 }
 

@@ -14,6 +14,7 @@
  *   - Transposition for entry i = transpositionTuple[i mod ensembleTotal].
  *   - Voice spacing rules (B-rules) are pre-enforced when building tuples.
  *   - Auto-truncation applied when delay × voices < subject length.
+ *   - Adjacent voice-pair dissonance is pre-checked and pruned against threshold.
  */
 
 import {
@@ -28,6 +29,7 @@ import {
 import { SubjectVariant, InternalNote } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
 import { calculateCanonScore } from './canonScoring';
+import { checkCounterpointStructure } from './strettoGenerator';
 
 // ---------------------------------------------------------------------------
 // Transposition step sets
@@ -116,7 +118,8 @@ function enumerateTranspositionTuples(
     // Unique steps sorted descending so iteration naturally starts with larger values
     const steps = [...new Set(tSteps)].sort((a, b) => b - a);
     const results: number[][] = [];
-    const current: number[] = [];
+    // Voice 0 is always pinned to 0 — only relative transpositions matter.
+    const current: number[] = [0];
 
     function backtrack(vi: number): void {
         if (vi === voiceCount) {
@@ -152,7 +155,7 @@ function enumerateTranspositionTuples(
         }
     }
 
-    backtrack(0);
+    backtrack(1); // voice 0 is already placed at 0
     return results;
 }
 
@@ -193,6 +196,41 @@ function buildCumulativeTuple(T: number, V: number, roles: CanonRole[]): number[
     }
 
     return tuple;
+}
+
+// ---------------------------------------------------------------------------
+// Pairwise dissonance pre-filter
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the dissonance ratio for two adjacent canon voices using the
+ * shared checkCounterpointStructure scan already used by the stretto search.
+ *
+ * Only the *relative* transposition matters for interval content, so the
+ * cache key is (delayTicks, tB − tA) rather than (delayTicks, tA, tB).
+ */
+function pairDissonanceRatio(
+    baseVariant: SubjectVariant,
+    delayTicks: number,
+    tA: number,
+    tB: number,
+    ppq: number,
+    cache: Map<string, number>
+): number {
+    const relT = tB - tA;
+    const key = `${delayTicks}:${relT}`;
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+
+    // checkCounterpointStructure applies `transposition` to voice B, giving
+    // the correct interval between A (at pitch p) and B (at pitch p + relT).
+    // maxDissonanceRatio=1 so it never short-circuits; skipSpans=true for speed.
+    const result = checkCounterpointStructure(
+        baseVariant, baseVariant, delayTicks, relT, 1, ppq, 4, 4, true
+    );
+
+    cache.set(key, result.dissonanceRatio);
+    return result.dissonanceRatio;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,14 +306,15 @@ function computeAutoTruncation(
 }
 
 // ---------------------------------------------------------------------------
-// Main search function
+// Main search function (async — yields between delay batches)
 // ---------------------------------------------------------------------------
 
-export function runCanonSearch(
+export async function runCanonSearch(
     subjectNotes: RawNote[],
     options: CanonSearchOptions,
-    ppq: number
-): CanonSearchReport {
+    ppq: number,
+    onProgress?: (pct: number, msg: string) => void
+): Promise<CanonSearchReport> {
     const startTime = Date.now();
 
     if (subjectNotes.length === 0) {
@@ -290,6 +329,14 @@ export function runCanonSearch(
 
     const baseNotes = buildBaseNotes(sorted, ppq);
     const invNotes = buildInvertedNotes(baseNotes, options);
+
+    // SubjectVariant wrapping baseNotes — used by the pairwise dissonance pre-filter.
+    const baseVariant: SubjectVariant = {
+        type: 'N',
+        truncationBeats: 0,
+        lengthTicks: subjectLengthTicks,
+        notes: baseNotes,
+    };
 
     // Delay range at 0.5-beat resolution
     const minDelay = Math.max(0.5, options.delayMinBeats);
@@ -317,39 +364,65 @@ export function runCanonSearch(
     const V = options.ensembleTotal;
     const roles = getVoiceRoles(V);
     const mode: CanonTranspositionMode = options.transpositionMode ?? 'independent';
+    const dissonanceThreshold = options.dissonanceThreshold ?? 0.5;
 
     // Build the set of transposition V-tuples to search over.
-    //
-    // 'independent': enumerate all V-tuples whose per-voice transpositions
-    //   satisfy the B-rule voice-spacing constraints.
-    //
-    // 'cumulative': for every T in the allowed step list build tuple [0,T,2T,…];
-    //   only tuples that satisfy voice-spacing rules are retained.
     let tTuples: number[][];
 
     if (mode === 'cumulative') {
-        // For each T, step each consecutive voice by T (same interval class),
-        // adjusting by ±octaves as needed to satisfy voice-spacing rules.
         const seen = new Set<string>();
         tTuples = [];
         for (const T of tSteps) {
             const tuple = buildCumulativeTuple(T, V, roles);
             if (tuple === null) continue;
             const key = tuple.join(',');
-            if (seen.has(key)) continue; // different T values can produce the same tuple
+            if (seen.has(key)) continue;
             seen.add(key);
             tTuples.push(tuple);
         }
     } else {
-        // 'independent': full enumeration of valid V-tuples
         tTuples = enumerateTranspositionTuples(tSteps, V, roles);
     }
 
+    // Per-search dissonance cache (keyed by offsetTicks:tA:tB)
+    const dissonanceCache = new Map<string, number>();
+
     const results: CanonChainResult[] = [];
     let totalEvaluated = 0;
+    let prunedByDissonance = 0;
 
-    for (const delayBeats of delays) {
+    for (let di = 0; di < delays.length; di++) {
+        const delayBeats = delays[di];
+        const delayTicks = Math.round(delayBeats * ppq);
+
+        // Yield to the browser between delay batches so the UI stays responsive.
+        await new Promise<void>(r => setTimeout(r, 0));
+        onProgress?.(
+            (di / delays.length) * 100,
+            `Delay ${delayBeats}b (${di + 1}/${delays.length}) — ${results.length} passing so far`
+        );
+
         for (const tTuple of tTuples) {
+            // ------------------------------------------------------------------
+            // Pairwise dissonance pre-filter (adjacent voice slot pairs only).
+            // For a canon the offset between adjacent slots is always delayTicks,
+            // so we reuse the same cache key for all adjacent pairs with the same
+            // transpositions and delay.
+            // ------------------------------------------------------------------
+            let tooDissonant = false;
+            for (let vi = 0; vi < V - 1 && !tooDissonant; vi++) {
+                const ratio = pairDissonanceRatio(
+                    baseVariant, delayTicks,
+                    tTuple[vi], tTuple[vi + 1],
+                    ppq, dissonanceCache
+                );
+                if (ratio > dissonanceThreshold) tooDissonant = true;
+            }
+            if (tooDissonant) {
+                prunedByDissonance++;
+                continue;
+            }
+
             for (const pattern of patterns) {
                 for (let chainLen = minLen; chainLen <= maxLen; chainLen++) {
                     totalEvaluated++;
@@ -423,7 +496,6 @@ export function runCanonSearch(
                     for (let i = 0; i < chainLen; i++) {
                         const voiceIndex = i % V;
 
-                        // Inversion determined by pattern and entry position
                         const isInverted = (() => {
                             if (!options.allowInversions) return false;
                             switch (pattern) {
@@ -475,5 +547,7 @@ export function runCanonSearch(
     }
 
     const timeMs = Date.now() - startTime;
+    console.log(`Canon search: ${totalEvaluated} scored, ${prunedByDissonance} pruned by dissonance, ${results.length} results, ${timeMs}ms`);
+    onProgress?.(100, `Done — ${results.length} results in ${timeMs}ms`);
     return { results, totalEvaluated, timeMs };
 }

@@ -189,6 +189,7 @@ export default function StrettoView({
         ensembleTotal: 4,
         delayMinBeats: 1,
         delayMaxBeats: 4,
+        dissonanceThreshold: 0.5,
         chainLengthMin: 4,
         chainLengthMax: 8,
         allowInversions: false,
@@ -203,6 +204,7 @@ export default function StrettoView({
     const [canonReport, setCanonReport] = useState<CanonSearchReport | null>(null);
     const [isCanonSearching, setIsCanonSearching] = useState(false);
     const [selectedCanonResult, setSelectedCanonResult] = useState<CanonChainResult | null>(null);
+    const [canonProgress, setCanonProgress] = useState<{ pct: number; msg: string } | null>(null);
 
     const [isPlaying, setIsPlaying] = useState(false);
 
@@ -553,23 +555,27 @@ export default function StrettoView({
         }, 100);
     };
 
-    const handleCanonSearch = () => {
+    const handleCanonSearch = async () => {
         const validNotes = subjectNotes.filter(n => !!n);
         if (validNotes.length === 0) return;
         setIsCanonSearching(true);
         setCanonReport(null);
         setSelectedCanonResult(null);
-        // Run synchronously in next tick so the UI can update first
-        setTimeout(() => {
-            try {
-                const report = runCanonSearch(validNotes, canonOptions, ppq || 480);
-                setCanonReport(report);
-            } catch (e) {
-                console.error('Canon search failed:', e);
-            } finally {
-                setIsCanonSearching(false);
-            }
-        }, 20);
+        setCanonProgress({ pct: 0, msg: 'Starting…' });
+        try {
+            const report = await runCanonSearch(
+                validNotes,
+                canonOptions,
+                ppq || 480,
+                (pct, msg) => setCanonProgress({ pct, msg })
+            );
+            setCanonReport(report);
+        } catch (e) {
+            console.error('Canon search failed:', e);
+        } finally {
+            setIsCanonSearching(false);
+            setCanonProgress(null);
+        }
     };
 
     // Build a StrettoCandidate from the selected canon result for playback/download
@@ -636,7 +642,7 @@ export default function StrettoView({
         return {
             id: selectedCanonResult.id,
             intervalLabel: 'Canon',
-            intervalSemis: selectedCanonResult.transpositionStep,
+            intervalSemis: selectedCanonResult.transpositionSteps[0] ?? 0,
             delayBeats: selectedCanonResult.delayBeats,
             delayTicks: Math.round(selectedCanonResult.delayBeats * currentPpq),
             grade: 'STRONG',
@@ -1017,19 +1023,45 @@ export default function StrettoView({
                         totalEvaluated={canonReport?.totalEvaluated}
                         timeMs={canonReport?.timeMs}
                     />
+                    {isCanonSearching && canonProgress && (
+                        <div className="bg-gray-900 border border-gray-700 rounded p-3">
+                            <div className="flex justify-between items-center mb-1.5">
+                                <span className="text-[10px] text-gray-400 font-mono">{canonProgress.msg}</span>
+                                <span className="text-[10px] text-gray-500 font-mono">{canonProgress.pct.toFixed(0)}%</span>
+                            </div>
+                            <div className="w-full bg-gray-700 rounded-full h-1.5">
+                                <div
+                                    className="bg-brand-primary h-1.5 rounded-full transition-all duration-200"
+                                    style={{ width: `${canonProgress.pct}%` }}
+                                />
+                            </div>
+                        </div>
+                    )}
                     <CanonResultsList
                         results={canonReport?.results ?? []}
                         selectedId={selectedCanonResult?.id ?? null}
                         onSelect={setSelectedCanonResult}
                         isPlaying={isPlaying}
                         onPlay={(_res) => {
-                            // canonToCandidate is derived from selectedCanonResult which is _res
                             if (canonToCandidate) handlePlay(canonToCandidate.notes);
                         }}
                         onDownload={(_res) => {
                             if (canonToCandidate) downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den });
                         }}
                     />
+                    {canonToCandidate && (
+                        <StrettoInspector
+                            candidate={canonToCandidate}
+                            ppq={ppq || 480}
+                            ts={activeMeter}
+                            isPlaying={isPlaying}
+                            onPlay={handlePlay}
+                            assemblyResult=""
+                            assemblyLog={[]}
+                            onClearAssembly={() => {}}
+                            onDownloadChain={() => downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })}
+                        />
+                    )}
                 </div>
             ) : viewMode === 'pairwise' ? (
                 <>
