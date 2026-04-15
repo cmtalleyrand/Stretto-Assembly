@@ -10,6 +10,8 @@ import { createCompatMatrix } from './stretto-opt/compatMatrix';
 // Node budget removed — time is the only search limit.
 const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
+const FINALIZATION_TIMEOUT_GRACE_MS = 1500;
+const MIN_TIMEOUT_FINALIZATION_CANDIDATES = 64;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 1024;
 // Removed EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY — no longer needed with active-tail DAG keys.
@@ -2473,6 +2475,38 @@ export async function searchStrettoChains(
         return chain.map((e, i) => ({ ...e, voiceIndex: voices[i] }));
     }
 
+    // Timeout-only fallback used for user-facing continuity when strict voice assignment
+    // fails under hard runtime limits. This preserves non-overlap per voice but does not
+    // enforce the full pairwise transposition-domain constraints.
+    function assignVoicesGreedyFallback(chain: StrettoChainOption[]): StrettoChainOption[] | null {
+        const assigned: StrettoChainOption[] = [];
+        for (let i = 0; i < chain.length; i++) {
+            const entry = chain[i];
+            const entryStart = Math.round(entry.startBeat * ppq);
+            const entryEnd = entryStart + entry.length;
+            let chosenVoice = -1;
+            for (let v = 0; v < options.ensembleTotal; v++) {
+                let overlapsVoice = false;
+                for (const prior of assigned) {
+                    if (prior.voiceIndex !== v) continue;
+                    const priorStart = Math.round(prior.startBeat * ppq);
+                    const priorEnd = priorStart + prior.length;
+                    if (entryStart < priorEnd - ppq && priorStart < entryEnd - ppq) {
+                        overlapsVoice = true;
+                        break;
+                    }
+                }
+                if (!overlapsVoice) {
+                    chosenVoice = v;
+                    break;
+                }
+            }
+            if (chosenVoice < 0) return null;
+            assigned.push({ ...entry, voiceIndex: chosenVoice });
+        }
+        return assigned;
+    }
+
     function buildChainNoteEvents(chain: StrettoChainOption[], variantIndices: number[]): NoteEvent[] {
         const events: NoteEvent[] = [];
         for (let k = 0; k < chain.length; k++) {
@@ -3493,11 +3527,31 @@ export async function searchStrettoChains(
     sourceUnscored.sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
 
     const scoredResults: StrettoChainResult[] = [];
+    const timeoutFallbackResults: StrettoChainResult[] = [];
+    const finalizationDeadlineMs = terminationReason === 'Timeout'
+        ? activeTimeLimitMs + FINALIZATION_TIMEOUT_GRACE_MS
+        : activeTimeLimitMs;
+    let timeoutFinalizationCandidatesRemaining = terminationReason === 'Timeout'
+        ? MIN_TIMEOUT_FINALIZATION_CANDIDATES
+        : 0;
     for (const uc of sourceUnscored) {
-        if (Date.now() - startTime >= configuredTimeLimitMs) break;
+        const elapsedMs = Date.now() - startTime;
+        const timeoutGraceExhausted = elapsedMs >= finalizationDeadlineMs;
+        if (timeoutGraceExhausted && timeoutFinalizationCandidatesRemaining <= 0) break;
+        if (timeoutFinalizationCandidatesRemaining > 0) timeoutFinalizationCandidatesRemaining--;
         const assigned = assignVoices([...uc.entries], [...uc.variantIndices]);
         if (assigned === null) {
             finalizationRejectedVoiceAssignment++;
+            if (terminationReason === 'Timeout' && timeoutFallbackResults.length < MAX_RESULTS) {
+                const provisional = assignVoicesGreedyFallback([...uc.entries]);
+                if (provisional) {
+                    const scoredFallback = calculateStrettoScore(provisional, variants, uc.variantIndices, options, ppq);
+                    timeoutFallbackResults.push({
+                        ...scoredFallback,
+                        warnings: [...scoredFallback.warnings, 'Timeout fallback: provisional voice assignment used.']
+                    });
+                }
+            }
             continue;
         }
         finalizationScoredCount++;
@@ -3506,9 +3560,19 @@ export async function searchStrettoChains(
             scoredResults.push(scored);
         } else {
             finalizationRejectedScoringInvalid++;
+            if (terminationReason === 'Timeout' && timeoutFallbackResults.length < MAX_RESULTS) {
+                timeoutFallbackResults.push({
+                    ...scored,
+                    warnings: [...scored.warnings, 'Timeout fallback: chain shown despite scoring invalid under strict constraints.']
+                });
+            }
         }
     }
     fullChainsFound = structurallyCompleteChainsFound;
+
+    const finalizedResults: StrettoChainResult[] = scoredResults.length > 0
+        ? scoredResults
+        : (terminationReason === 'Timeout' ? timeoutFallbackResults : scoredResults);
 
     // Group by delay pattern + type sequence to avoid similar chains clogging display
     function getGroupKey(entries: StrettoChainOption[]): string {
@@ -3521,7 +3585,7 @@ export async function searchStrettoChains(
     }
 
     const groupedMap = new Map<string, StrettoChainResult[]>();
-    for (const res of scoredResults) {
+    for (const res of finalizedResults) {
         const key = getGroupKey(res.entries);
         if (!groupedMap.has(key)) groupedMap.set(key, []);
         groupedMap.get(key)!.push(res);
