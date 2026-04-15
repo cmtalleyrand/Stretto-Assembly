@@ -11,7 +11,7 @@
     "diagnose:stretto": "node --import tsx components/services/strettoDiagnostics.ts",
     "diagnose:stretto:full": "STRETTO_DIAGNOSTIC_FULL=1 node --import tsx components/services/strettoDiagnostics.ts",
     "test": "npm run test:stretto:dag:invariants",
-    "test:integration": "node --import tsx components/services/strettoIntegrationTest.ts && node --import tsx components/services/strettoPairwiseLogicCheck.ts && node --import tsx components/services/strettoPrecomputeBackendRegression.test.ts",
+    "test:integration": "node --import tsx components/services/strettoIntegrationTest.ts && node --import tsx components/services/strettoPairwiseLogicCheck.ts && node --import tsx components/services/strettoPrecomputeBackendRegression.test.ts && node --import tsx components/services/strettoInAppFunctionality.test.ts",
     "test:heavy": "npm run test:stretto:dag:heavy",
     "test:all": "npm run test && npm run test:integration && npm run test:heavy",
     "test:stretto:scoring-regression": "node --import tsx components/services/strettoScoringRegression.ts",
@@ -25,7 +25,8 @@
     "bench:stretto:precompute": "node --import tsx scripts/bench/stretto-precompute-bench.ts",
     "test:assembly-proxy": "node --import tsx server/assemblyProxyCore.test.ts",
     "test:stretto:dag:invariants": "node --import tsx components/services/strettoDagInvariants.test.ts",
-    "test:stretto:dag:heavy": "node --import tsx components/services/strettoDagTraversal.heavy.test.ts"
+    "test:stretto:dag:heavy": "node --import tsx components/services/strettoDagTraversal.heavy.test.ts",
+    "test:stretto:in-app-functionality": "node --import tsx components/services/strettoInAppFunctionality.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",
