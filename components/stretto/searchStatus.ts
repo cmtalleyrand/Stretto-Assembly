@@ -69,9 +69,12 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
     if (typeof coverage.nodeBudgetUsedPercent === 'number') {
       coverageTerms.push(`nodeBudget=${coverage.nodeBudgetUsedPercent}%`);
     }
-    if (typeof coverage.completionRatioLowerBound === 'number') {
-      coverageTerms.push(`completionLowerBound=${coverage.completionRatioLowerBound}%`);
+    const completionAssumptionsHold = coverage.completionLowerBoundAssumptions?.monotoneQueuedWorkItems === true;
+    if (completionAssumptionsHold && typeof coverage.completionLowerBound === 'number') {
+      coverageTerms.push(`completionLowerBound(heuristic)=${Math.round(coverage.completionLowerBound * 100)}%`);
     }
+    coverageTerms.push(`explored=${coverage.exploredWorkItems.toLocaleString()}`);
+    coverageTerms.push(`live=${coverage.liveFrontierWorkItems.toLocaleString()}`);
     coverageTerms.push(`maxFrontier=${coverage.maxFrontierSize.toLocaleString()}`);
     coverageTerms.push(`classes=${coverage.maxFrontierClassCount.toLocaleString()}`);
     coverageTerms.push(`terminationFrontier=${coverage.frontierSizeAtTermination.toLocaleString()} (${coverage.frontierClassesAtTermination.toLocaleString()} classes)`);

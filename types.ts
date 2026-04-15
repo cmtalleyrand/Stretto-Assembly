@@ -567,8 +567,16 @@ export interface StrettoSearchReport {
         timeoutExtensionAppliedMs?: number;
         coverage?: {
             nodeBudgetUsedPercent: number | null;
+            exploredWorkItems: number;
+            liveFrontierWorkItems: number;
             maxFrontierSize: number;
             maxFrontierClassCount: number;
+            depthHistogram: Record<string, number>;
+            completionLowerBound?: number | null;
+            completionLowerBoundIsHeuristic?: boolean;
+            completionLowerBoundAssumptions?: {
+                monotoneQueuedWorkItems: boolean;
+            };
             edgesTraversed: number;
             frontierSizeAtTermination: number;
             frontierClassesAtTermination: number;
