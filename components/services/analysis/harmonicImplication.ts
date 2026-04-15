@@ -1,3 +1,14 @@
+/**
+ * LEGACY / NOT IN ACTIVE STRETTO-CANON PATH.
+ * Active Stretto/Canon execution path lives in:
+ * - components/services/strettoGenerator.ts
+ * - components/services/canonSearch.ts
+ * - components/StrettoView.tsx
+ *
+ * Modification constraint:
+ * - Compatibility-only edits are allowed.
+ * - Behavioral or algorithmic changes require an approved migration plan.
+ */
 import { RawNote, ChordEvent } from '../../../types';
 import { getFormattedTime } from '../midiHarmony';
 import { getStrictPitchName } from '../midiSpelling';
@@ -9,6 +20,10 @@ import { getPhysicalBass, buildVoiceLinks, isSuspension } from './hia/hiaContext
 import { generateCandidates } from './hia/hiaCandidates';
 import { scoreCandidate } from './hia/hiaScoring';
 
+/**
+ * @warning Legacy entry point; not used in the active Stretto/Canon search path.
+ * Modify only for compatibility unless a migration plan is formally approved.
+ */
 export function detectChordsHIA(notes: RawNote[], ppq: number, tsNum: number, tsDenom: number): ChordEvent[] {
     const sortedNotes = [...notes].sort((a,b) => a.ticks - b.ticks);
     const voiceTracker: Record<number, number> = {};

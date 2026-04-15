@@ -1,3 +1,14 @@
+/**
+ * LEGACY / NOT IN ACTIVE STRETTO-CANON PATH.
+ * Active Stretto/Canon execution path lives in:
+ * - components/services/strettoGenerator.ts
+ * - components/services/canonSearch.ts
+ * - components/StrettoView.tsx
+ *
+ * Modification constraint:
+ * - Compatibility-only edits are allowed.
+ * - Behavioral or algorithmic changes require an approved migration plan.
+ */
 import { Midi } from '@tonejs/midi';
 import { TrackAnalysisData, NoteValueStat, ConversionOptions, RawNote, PitchAnalysisMode, PitchStats } from '../../types';
 import { detectAndTagOrnaments, NOTE_NAMES } from './midiCore';
@@ -278,6 +289,10 @@ export function analyzePreparedNotes(notes: any[], trackName: string, ppq: numbe
     };
 }
 
+/**
+ * @warning Legacy entry point; not used in the active Stretto/Canon search path.
+ * Modify only for compatibility unless a migration plan is formally approved.
+ */
 export function analyzeTrack(midi: Midi, trackId: number, options?: ConversionOptions): TrackAnalysisData {
     const track = midi.tracks[trackId];
     const ppq = midi.header.ppq || 480;
