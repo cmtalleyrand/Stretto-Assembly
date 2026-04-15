@@ -163,11 +163,12 @@ for (const fixture of traversalFixtures) {
   const coverage = report.stats.coverage;
   if (coverage) {
     assert.equal(coverage.nodeBudgetUsedPercent, null);
-    const isMathematicallyExhaustive = report.stats.stopReason === 'Exhausted' && coverage.frontierSizeAtTermination === 0;
-    if (isMathematicallyExhaustive) {
-      assert.equal(coverage.completionRatioLowerBound, 100);
-    } else {
-      assert.equal(coverage.completionRatioLowerBound, null);
+    assert.ok(coverage.exploredWorkItems >= 0);
+    assert.ok(coverage.liveFrontierWorkItems >= 0);
+    assert.ok(coverage.completionLowerBound == null || (coverage.completionLowerBound >= 0 && coverage.completionLowerBound <= 1));
+    if (coverage.completionLowerBound != null) {
+      const expected = coverage.exploredWorkItems / Math.max(1, coverage.exploredWorkItems + coverage.liveFrontierWorkItems);
+      assert.ok(Math.abs(coverage.completionLowerBound - expected) < 1e-12);
     }
   }
 

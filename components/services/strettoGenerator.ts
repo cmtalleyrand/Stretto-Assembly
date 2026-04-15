@@ -2720,9 +2720,11 @@ export async function searchStrettoChains(
         if (count <= 0) return;
         dagLiveFrontierWorkItems += count;
     };
-    const startDagWorkItem = (): void => {
+    const dagDepthHistogram: Map<number, number> = new Map();
+    const startDagWorkItem = (depth: number): void => {
         dagExploredWorkItems++;
         dagLiveFrontierWorkItems = Math.max(0, dagLiveFrontierWorkItems - 1);
+        dagDepthHistogram.set(depth, (dagDepthHistogram.get(depth) ?? 0) + 1);
     };
     const emitDagProgress = (force: boolean = false, terminal: boolean = false): void => {
         // Monotone heuristic completion: explored / (explored + live frontier).
@@ -2817,7 +2819,7 @@ export async function searchStrettoChains(
     // Long-range pair checks are sparse: cumulative delay typically exceeds Sb,
     // so entries 3+ apart rarely overlap.
     function dfsExtend(node: DagNode): void {
-        startDagWorkItem();
+        startDagWorkItem(node.chain.length);
         nodesVisited++;
         dagNodesExpanded++;
         operationCounter++;
@@ -3242,13 +3244,13 @@ export async function searchStrettoChains(
                                     let queueIndex = 0;
                                     while (queueIndex < extensionQueue.length) {
                                         if (terminationReason) break;
-                                        startDagWorkItem();
+                                        const current = extensionQueue[queueIndex++];
+                                        startDagWorkItem(current.chain.length);
                                         operationCounter++;
                                         if (shouldYieldToEventLoop(operationCounter)) {
                                             await new Promise<void>((resolve) => setTimeout(resolve, 0));
                                         }
                                         if (checkLimits()) break;
-                                        const current = extensionQueue[queueIndex++];
                                         const currentDepth = current.chain.length;
 
                                         if (currentDepth >= 7) {
@@ -3319,7 +3321,7 @@ export async function searchStrettoChains(
             let stopTraversal = false;
 
             for (const node of frontier) {
-                startDagWorkItem();
+                startDagWorkItem(node.chain.length);
                 nodesVisited++;
                 dagNodesExpanded++;
                 operationCounter++;
@@ -3447,8 +3449,21 @@ export async function searchStrettoChains(
     });
 
     emitDagProgress(true, true);
-    const isExhaustivelyComplete = stopReason === 'Exhausted' && frontierSizeAtTermination === 0;
-    const completionRatioLowerBound = isExhaustivelyComplete ? 100 : null;
+    const totalKnownWorkItems = dagExploredWorkItems + dagLiveFrontierWorkItems;
+    const completionLowerBound = totalKnownWorkItems > 0
+        ? (dagExploredWorkItems / totalKnownWorkItems)
+        : null;
+    const completionLowerBoundAssumptions = {
+        monotoneQueuedWorkItems: true
+    };
+    const completionLowerBoundIsHeuristic = true;
+    const depthHistogram = Array.from(dagDepthHistogram.entries())
+        .sort(([depthA], [depthB]) => depthA - depthB)
+        .reduce<Record<string, number>>((acc, [depth, count]) => {
+            acc[String(depth)] = count;
+            return acc;
+        }, {});
+    const completionRatioLowerBound = completionLowerBound == null ? null : Math.round(completionLowerBound * 100);
 
     return {
         results: finalResults.sort((a, b) => b.score - a.score).slice(0, MAX_RESULTS),
@@ -3472,12 +3487,17 @@ export async function searchStrettoChains(
             },
             coverage: {
                 nodeBudgetUsedPercent: null, // No node budget — time-only gating
+                exploredWorkItems: dagExploredWorkItems,
+                liveFrontierWorkItems: dagLiveFrontierWorkItems,
                 maxFrontierSize,
                 maxFrontierClassCount,
+                depthHistogram,
+                completionLowerBound,
+                completionLowerBoundIsHeuristic,
+                completionLowerBoundAssumptions,
                 edgesTraversed,
                 frontierSizeAtTermination,
                 frontierClassesAtTermination,
-                // Completion lower bound is only mathematically valid when the traversal is proven exhaustive.
                 completionRatioLowerBound
             },
             stageStats

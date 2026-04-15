@@ -12,6 +12,60 @@ import { computeHarmonicRegionDissonanceAudit, computeMaxConsecutiveDissonanceRe
 import { metricHelpText } from './telemetryGlossary';
 import { STAGE_LABELS } from './searchProgressModel';
 
+type CoverageDiagnostics = NonNullable<NonNullable<StrettoSearchReport['stats']['coverage']>>;
+
+export interface CoverageDisplayMetric {
+    metricKey: Parameters<typeof metricHelpText>[0];
+    label: string;
+    value: string;
+    show: boolean;
+}
+
+export function deriveCoverageDisplayMetrics(coverage: CoverageDiagnostics): CoverageDisplayMetric[] {
+    const completionAssumptionsHold = coverage.completionLowerBoundAssumptions?.monotoneQueuedWorkItems === true;
+    const completionLowerBoundPercent = coverage.completionLowerBound != null
+        ? Math.round(coverage.completionLowerBound * 100)
+        : null;
+    return [
+        {
+            metricKey: 'nodeBudgetUsedPercent',
+            label: 'node budget',
+            value: coverage.nodeBudgetUsedPercent != null ? `${coverage.nodeBudgetUsedPercent}%` : 'n/a',
+            show: true
+        },
+        {
+            metricKey: 'completionRatioLowerBound',
+            label: 'completion lower bound (heuristic)',
+            value: completionLowerBoundPercent != null ? `${completionLowerBoundPercent}%` : 'n/a',
+            show: completionAssumptionsHold
+        },
+        {
+            metricKey: 'exploredWorkItems',
+            label: 'explored',
+            value: coverage.exploredWorkItems.toLocaleString(),
+            show: true
+        },
+        {
+            metricKey: 'liveFrontierWorkItems',
+            label: 'live frontier',
+            value: coverage.liveFrontierWorkItems.toLocaleString(),
+            show: true
+        },
+        {
+            metricKey: 'maxFrontierSize',
+            label: 'max frontier',
+            value: `${coverage.maxFrontierSize.toLocaleString()} (${coverage.maxFrontierClassCount.toLocaleString()} classes)`,
+            show: true
+        },
+        {
+            metricKey: 'depthHistogram',
+            label: 'depth histogram',
+            value: Object.entries(coverage.depthHistogram).map(([depth, count]) => `${depth}:${count}`).join(', ') || 'n/a',
+            show: true
+        }
+    ];
+}
+
 interface StrettoChainViewProps {
     searchOptions: StrettoSearchOptions;
     setSearchOptions: (opt: StrettoSearchOptions) => void;
@@ -275,7 +329,18 @@ export default function StrettoChainView({
                                 </span>
                             </div>
                             {diagnostics.coverage && (
-                                <div>Coverage → node budget: {diagnostics.coverage.nodeBudgetUsedPercent != null ? `${diagnostics.coverage.nodeBudgetUsedPercent}%` : 'n/a'}<MetricHelp metricKey="nodeBudgetUsedPercent" /> · completion lower bound: {diagnostics.coverage.completionRatioLowerBound != null ? `${diagnostics.coverage.completionRatioLowerBound}%` : 'n/a'}<MetricHelp metricKey="completionRatioLowerBound" /> · max frontier: {diagnostics.coverage.maxFrontierSize.toLocaleString()}<MetricHelp metricKey="maxFrontierSize" /> ({diagnostics.coverage.maxFrontierClassCount.toLocaleString()} classes)</div>
+                                <div>
+                                    Coverage →
+                                    {deriveCoverageDisplayMetrics(diagnostics.coverage)
+                                        .filter((metric) => metric.show)
+                                        .map((metric, index) => (
+                                            <React.Fragment key={metric.metricKey}>
+                                                {index === 0 ? ' ' : ' · '}
+                                                {metric.label}: {metric.value}
+                                                <MetricHelp metricKey={metric.metricKey} />
+                                            </React.Fragment>
+                                        ))}
+                                </div>
                             )}
                             {diagnostics.timeoutExtensionAppliedMs > 0 && (
                                 <div>Timeout extension applied: +{diagnostics.timeoutExtensionAppliedMs}ms near completion.</div>
