@@ -793,9 +793,9 @@ export default function StrettoView({
 
             {viewMode === 'pairwise' ? (
                 <>
-                    <StrettoConfig 
-                        selectedIntervals={configIntervals} 
-                        setSelectedIntervals={setConfigIntervals} 
+                    <StrettoConfig
+                        selectedIntervals={configIntervals}
+                        setSelectedIntervals={setConfigIntervals}
                         searchRes={searchRes} 
                         setSearchRes={setSearchRes} 
                         includeInversions={includeInversions} 
@@ -805,6 +805,7 @@ export default function StrettoView({
                         pivotMidi={searchOptions.pivotMidi}
                         setPivotMidi={(val) => setSearchOptions((prev) => ({...prev, pivotMidi: val}))}
                         pivotOptions={pivotOptions}
+                        constrainedPivotCount={constrainedPivotOptions.length}
                         onFindOptimalPivot={runOptimalPivotSearch}
                         pivotSearchResults={pivotSearchResults}
                     />

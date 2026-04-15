@@ -30,6 +30,7 @@ interface StrettoConfigProps {
     pivotMidi: number;
     setPivotMidi: (val: number) => void;
     pivotOptions: number[];
+    constrainedPivotCount: number;
     onFindOptimalPivot: () => void;
     pivotSearchResults: PivotSearchMetric[];
 }
@@ -80,6 +81,7 @@ export default function StrettoConfig({
     includeExtensions, setIncludeExtensions,
     pivotMidi, setPivotMidi,
     pivotOptions,
+    constrainedPivotCount,
     onFindOptimalPivot,
     pivotSearchResults
 }: StrettoConfigProps) {
@@ -96,7 +98,8 @@ export default function StrettoConfig({
     };
 
     const best = pivotSearchResults[0] ?? null;
-    const activeRow = pivotSearchResults.find((r) => r.pivotMidi === activeRowPivot) ?? best;
+    const activeRow = pivotSearchResults.find((r) => r.pivotMidi === activeRowPivot) ?? null;
+    const metricRow = activeRow ?? best;
 
     React.useEffect(() => {
         setActiveRowPivot(resolveActiveRowPivot(pivotMidi, pivotSearchResults));
@@ -160,7 +163,7 @@ export default function StrettoConfig({
                     <div className="flex items-center justify-between">
                         <div>
                             <div className="text-[10px] text-gray-400 font-bold uppercase">Optimal Pivot Search</div>
-                            <div className="text-[10px] text-gray-500">Subject-note constrained candidates: <span className="font-mono text-gray-300">{pivotOptions.length}</span></div>
+                            <div className="text-[10px] text-gray-500">Subject-note constrained candidates: <span className="font-mono text-gray-300">{constrainedPivotCount}</span></div>
                         </div>
                         <button
                             type="button"
@@ -200,11 +203,12 @@ export default function StrettoConfig({
                             </div>
                         </details>
 
-                        {activeRow && (
+                        {metricRow && (
                             <div className="text-[10px] text-gray-300 bg-gray-900/60 border border-gray-700 rounded px-2 py-1.5">
-                                <span className="text-gray-400">Selected:</span> <span className="font-semibold text-brand-primary">{getStrictPitchName(activeRow.pivotMidi)}</span>
+                                <span className="text-gray-400">Search pivot:</span> <span className="font-semibold text-brand-primary">{getStrictPitchName(pivotMidi)}</span>
+                                <span className="text-gray-500"> · Metric row:</span> <span className="font-semibold text-gray-200">{getStrictPitchName(metricRow.pivotMidi)}</span>
                                 <span className="text-gray-500"> · {metricLabel(activeMetric)}</span>
-                                <div className="mt-1 font-mono text-[10px] text-gray-200">{metricCalculation(activeRow, activeMetric)}</div>
+                                <div className="mt-1 font-mono text-[10px] text-gray-200">{metricCalculation(metricRow, activeMetric)}</div>
                             </div>
                         )}
 
