@@ -29,6 +29,7 @@ import {
 import { SubjectVariant, InternalNote } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
 import { calculateCanonScore } from './canonScoring';
+import { checkCounterpointStructure } from './strettoGenerator';
 
 // ---------------------------------------------------------------------------
 // Transposition step sets
@@ -200,99 +201,35 @@ function buildCumulativeTuple(T: number, V: number, roles: CanonRole[]): number[
 // Pairwise dissonance pre-filter
 // ---------------------------------------------------------------------------
 
-/** Dissonant interval classes (semitones mod 12). */
-const DISSONANT_IC = new Set([1, 2, 6, 10, 11]);
-
 /**
- * Compute the fraction of simultaneously-sounding time (within the overlap
- * region of the two adjacent voice entries) that is harmonically dissonant.
+ * Returns the dissonance ratio for two adjacent canon voices using the
+ * shared checkCounterpointStructure scan already used by the stretto search.
  *
- * Voice A plays baseNotes transposed by tA, starting at tick 0.
- * Voice B plays baseNotes transposed by tB, starting at tick offsetTicks.
- * The overlap region is [offsetTicks, subjectLengthTicks].
- *
- * Returns a number in [0, 1].  Returns 0 if the two voices never overlap
- * or never sound simultaneously in the overlap window.
+ * Only the *relative* transposition matters for interval content, so the
+ * cache key is (delayTicks, tB − tA) rather than (delayTicks, tA, tB).
  */
-function computePairDissonance(
-    baseNotes: InternalNote[],
-    subjectLengthTicks: number,
-    offsetTicks: number,
+function pairDissonanceRatio(
+    baseVariant: SubjectVariant,
+    delayTicks: number,
     tA: number,
     tB: number,
+    ppq: number,
     cache: Map<string, number>
 ): number {
-    const key = `${offsetTicks}:${tA}:${tB}`;
+    const relT = tB - tA;
+    const key = `${delayTicks}:${relT}`;
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
 
-    const overlapStart = offsetTicks;
-    const overlapEnd = subjectLengthTicks;
+    // checkCounterpointStructure applies `transposition` to voice B, giving
+    // the correct interval between A (at pitch p) and B (at pitch p + relT).
+    // maxDissonanceRatio=1 so it never short-circuits; skipSpans=true for speed.
+    const result = checkCounterpointStructure(
+        baseVariant, baseVariant, delayTicks, relT, 1, ppq, 4, 4, true
+    );
 
-    if (overlapStart >= overlapEnd) {
-        cache.set(key, 0);
-        return 0;
-    }
-
-    // Collect all tick boundaries within [overlapStart, overlapEnd].
-    const eventSet = new Set<number>([overlapStart, overlapEnd]);
-
-    for (const n of baseNotes) {
-        // Voice A note boundaries
-        if (n.relTick > overlapStart && n.relTick < overlapEnd) eventSet.add(n.relTick);
-        const aEnd = n.relTick + n.durationTicks;
-        if (aEnd > overlapStart && aEnd < overlapEnd) eventSet.add(aEnd);
-
-        // Voice B note boundaries (B's relTick maps to absolute tick relTick + offsetTicks)
-        const bAbsStart = n.relTick + offsetTicks;
-        const bAbsEnd = bAbsStart + n.durationTicks;
-        if (bAbsStart > overlapStart && bAbsStart < overlapEnd) eventSet.add(bAbsStart);
-        if (bAbsEnd > overlapStart && bAbsEnd < overlapEnd) eventSet.add(bAbsEnd);
-    }
-
-    const events = Array.from(eventSet).sort((a, b) => a - b);
-
-    let dissonantTicks = 0;
-    let bothSoundingTicks = 0;
-
-    for (let i = 0; i < events.length - 1; i++) {
-        const t0 = events[i];
-        const t1 = events[i + 1];
-        const dur = t1 - t0;
-        const tMid = (t0 + t1) / 2;
-
-        // Find sounding note in Voice A at tMid (A's subject-relative tick = tMid)
-        let noteAPitch: number | null = null;
-        for (const n of baseNotes) {
-            if (n.relTick <= tMid && tMid < n.relTick + n.durationTicks) {
-                noteAPitch = n.pitch + tA;
-                break;
-            }
-        }
-
-        // Find sounding note in Voice B at tMid
-        // B's subject-relative tick at absolute tMid = tMid - offsetTicks
-        const bRelTick = tMid - offsetTicks;
-        let noteBPitch: number | null = null;
-        for (const n of baseNotes) {
-            if (n.relTick <= bRelTick && bRelTick < n.relTick + n.durationTicks) {
-                noteBPitch = n.pitch + tB;
-                break;
-            }
-        }
-
-        if (noteAPitch !== null && noteBPitch !== null) {
-            bothSoundingTicks += dur;
-            const ic = Math.abs(noteAPitch - noteBPitch) % 12;
-            if (DISSONANT_IC.has(ic)) {
-                dissonantTicks += dur;
-            }
-        }
-    }
-
-    const ratio = bothSoundingTicks > 0 ? dissonantTicks / bothSoundingTicks : 0;
-    cache.set(key, ratio);
-    return ratio;
+    cache.set(key, result.dissonanceRatio);
+    return result.dissonanceRatio;
 }
 
 // ---------------------------------------------------------------------------
@@ -392,6 +329,14 @@ export async function runCanonSearch(
     const baseNotes = buildBaseNotes(sorted, ppq);
     const invNotes = buildInvertedNotes(baseNotes, options);
 
+    // SubjectVariant wrapping baseNotes — used by the pairwise dissonance pre-filter.
+    const baseVariant: SubjectVariant = {
+        type: 'N',
+        truncationBeats: 0,
+        lengthTicks: subjectLengthTicks,
+        notes: baseNotes,
+    };
+
     // Delay range at 0.5-beat resolution
     const minDelay = Math.max(0.5, options.delayMinBeats);
     const maxDelay = Math.max(minDelay, options.delayMaxBeats);
@@ -465,10 +410,10 @@ export async function runCanonSearch(
             // ------------------------------------------------------------------
             let tooDissonant = false;
             for (let vi = 0; vi < V - 1 && !tooDissonant; vi++) {
-                const ratio = computePairDissonance(
-                    baseNotes, subjectLengthTicks,
-                    delayTicks, tTuple[vi], tTuple[vi + 1],
-                    dissonanceCache
+                const ratio = pairDissonanceRatio(
+                    baseVariant, delayTicks,
+                    tTuple[vi], tTuple[vi + 1],
+                    ppq, dissonanceCache
                 );
                 if (ratio > dissonanceThreshold) tooDissonant = true;
             }
