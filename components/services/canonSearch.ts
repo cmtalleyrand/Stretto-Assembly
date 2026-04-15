@@ -14,6 +14,7 @@
  *   - Transposition for entry i = transpositionTuple[i mod ensembleTotal].
  *   - Voice spacing rules (B-rules) are pre-enforced when building tuples.
  *   - Auto-truncation applied when delay × voices < subject length.
+ *   - Adjacent voice-pair dissonance is pre-checked and pruned against threshold.
  */
 
 import {
@@ -196,6 +197,105 @@ function buildCumulativeTuple(T: number, V: number, roles: CanonRole[]): number[
 }
 
 // ---------------------------------------------------------------------------
+// Pairwise dissonance pre-filter
+// ---------------------------------------------------------------------------
+
+/** Dissonant interval classes (semitones mod 12). */
+const DISSONANT_IC = new Set([1, 2, 6, 10, 11]);
+
+/**
+ * Compute the fraction of simultaneously-sounding time (within the overlap
+ * region of the two adjacent voice entries) that is harmonically dissonant.
+ *
+ * Voice A plays baseNotes transposed by tA, starting at tick 0.
+ * Voice B plays baseNotes transposed by tB, starting at tick offsetTicks.
+ * The overlap region is [offsetTicks, subjectLengthTicks].
+ *
+ * Returns a number in [0, 1].  Returns 0 if the two voices never overlap
+ * or never sound simultaneously in the overlap window.
+ */
+function computePairDissonance(
+    baseNotes: InternalNote[],
+    subjectLengthTicks: number,
+    offsetTicks: number,
+    tA: number,
+    tB: number,
+    cache: Map<string, number>
+): number {
+    const key = `${offsetTicks}:${tA}:${tB}`;
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+
+    const overlapStart = offsetTicks;
+    const overlapEnd = subjectLengthTicks;
+
+    if (overlapStart >= overlapEnd) {
+        cache.set(key, 0);
+        return 0;
+    }
+
+    // Collect all tick boundaries within [overlapStart, overlapEnd].
+    const eventSet = new Set<number>([overlapStart, overlapEnd]);
+
+    for (const n of baseNotes) {
+        // Voice A note boundaries
+        if (n.relTick > overlapStart && n.relTick < overlapEnd) eventSet.add(n.relTick);
+        const aEnd = n.relTick + n.durationTicks;
+        if (aEnd > overlapStart && aEnd < overlapEnd) eventSet.add(aEnd);
+
+        // Voice B note boundaries (B's relTick maps to absolute tick relTick + offsetTicks)
+        const bAbsStart = n.relTick + offsetTicks;
+        const bAbsEnd = bAbsStart + n.durationTicks;
+        if (bAbsStart > overlapStart && bAbsStart < overlapEnd) eventSet.add(bAbsStart);
+        if (bAbsEnd > overlapStart && bAbsEnd < overlapEnd) eventSet.add(bAbsEnd);
+    }
+
+    const events = Array.from(eventSet).sort((a, b) => a - b);
+
+    let dissonantTicks = 0;
+    let bothSoundingTicks = 0;
+
+    for (let i = 0; i < events.length - 1; i++) {
+        const t0 = events[i];
+        const t1 = events[i + 1];
+        const dur = t1 - t0;
+        const tMid = (t0 + t1) / 2;
+
+        // Find sounding note in Voice A at tMid (A's subject-relative tick = tMid)
+        let noteAPitch: number | null = null;
+        for (const n of baseNotes) {
+            if (n.relTick <= tMid && tMid < n.relTick + n.durationTicks) {
+                noteAPitch = n.pitch + tA;
+                break;
+            }
+        }
+
+        // Find sounding note in Voice B at tMid
+        // B's subject-relative tick at absolute tMid = tMid - offsetTicks
+        const bRelTick = tMid - offsetTicks;
+        let noteBPitch: number | null = null;
+        for (const n of baseNotes) {
+            if (n.relTick <= bRelTick && bRelTick < n.relTick + n.durationTicks) {
+                noteBPitch = n.pitch + tB;
+                break;
+            }
+        }
+
+        if (noteAPitch !== null && noteBPitch !== null) {
+            bothSoundingTicks += dur;
+            const ic = Math.abs(noteAPitch - noteBPitch) % 12;
+            if (DISSONANT_IC.has(ic)) {
+                dissonantTicks += dur;
+            }
+        }
+    }
+
+    const ratio = bothSoundingTicks > 0 ? dissonantTicks / bothSoundingTicks : 0;
+    cache.set(key, ratio);
+    return ratio;
+}
+
+// ---------------------------------------------------------------------------
 // Subject helpers
 // ---------------------------------------------------------------------------
 
@@ -268,14 +368,15 @@ function computeAutoTruncation(
 }
 
 // ---------------------------------------------------------------------------
-// Main search function
+// Main search function (async — yields between delay batches)
 // ---------------------------------------------------------------------------
 
-export function runCanonSearch(
+export async function runCanonSearch(
     subjectNotes: RawNote[],
     options: CanonSearchOptions,
-    ppq: number
-): CanonSearchReport {
+    ppq: number,
+    onProgress?: (pct: number, msg: string) => void
+): Promise<CanonSearchReport> {
     const startTime = Date.now();
 
     if (subjectNotes.length === 0) {
@@ -317,39 +418,65 @@ export function runCanonSearch(
     const V = options.ensembleTotal;
     const roles = getVoiceRoles(V);
     const mode: CanonTranspositionMode = options.transpositionMode ?? 'independent';
+    const dissonanceThreshold = options.dissonanceThreshold ?? 0.5;
 
     // Build the set of transposition V-tuples to search over.
-    //
-    // 'independent': enumerate all V-tuples whose per-voice transpositions
-    //   satisfy the B-rule voice-spacing constraints.
-    //
-    // 'cumulative': for every T in the allowed step list build tuple [0,T,2T,…];
-    //   only tuples that satisfy voice-spacing rules are retained.
     let tTuples: number[][];
 
     if (mode === 'cumulative') {
-        // For each T, step each consecutive voice by T (same interval class),
-        // adjusting by ±octaves as needed to satisfy voice-spacing rules.
         const seen = new Set<string>();
         tTuples = [];
         for (const T of tSteps) {
             const tuple = buildCumulativeTuple(T, V, roles);
             if (tuple === null) continue;
             const key = tuple.join(',');
-            if (seen.has(key)) continue; // different T values can produce the same tuple
+            if (seen.has(key)) continue;
             seen.add(key);
             tTuples.push(tuple);
         }
     } else {
-        // 'independent': full enumeration of valid V-tuples
         tTuples = enumerateTranspositionTuples(tSteps, V, roles);
     }
 
+    // Per-search dissonance cache (keyed by offsetTicks:tA:tB)
+    const dissonanceCache = new Map<string, number>();
+
     const results: CanonChainResult[] = [];
     let totalEvaluated = 0;
+    let prunedByDissonance = 0;
 
-    for (const delayBeats of delays) {
+    for (let di = 0; di < delays.length; di++) {
+        const delayBeats = delays[di];
+        const delayTicks = Math.round(delayBeats * ppq);
+
+        // Yield to the browser between delay batches so the UI stays responsive.
+        await new Promise<void>(r => setTimeout(r, 0));
+        onProgress?.(
+            (di / delays.length) * 100,
+            `Delay ${delayBeats}b (${di + 1}/${delays.length}) — ${results.length} passing so far`
+        );
+
         for (const tTuple of tTuples) {
+            // ------------------------------------------------------------------
+            // Pairwise dissonance pre-filter (adjacent voice slot pairs only).
+            // For a canon the offset between adjacent slots is always delayTicks,
+            // so we reuse the same cache key for all adjacent pairs with the same
+            // transpositions and delay.
+            // ------------------------------------------------------------------
+            let tooDissonant = false;
+            for (let vi = 0; vi < V - 1 && !tooDissonant; vi++) {
+                const ratio = computePairDissonance(
+                    baseNotes, subjectLengthTicks,
+                    delayTicks, tTuple[vi], tTuple[vi + 1],
+                    dissonanceCache
+                );
+                if (ratio > dissonanceThreshold) tooDissonant = true;
+            }
+            if (tooDissonant) {
+                prunedByDissonance++;
+                continue;
+            }
+
             for (const pattern of patterns) {
                 for (let chainLen = minLen; chainLen <= maxLen; chainLen++) {
                     totalEvaluated++;
@@ -423,7 +550,6 @@ export function runCanonSearch(
                     for (let i = 0; i < chainLen; i++) {
                         const voiceIndex = i % V;
 
-                        // Inversion determined by pattern and entry position
                         const isInverted = (() => {
                             if (!options.allowInversions) return false;
                             switch (pattern) {
@@ -475,5 +601,7 @@ export function runCanonSearch(
     }
 
     const timeMs = Date.now() - startTime;
+    console.log(`Canon search: ${totalEvaluated} scored, ${prunedByDissonance} pruned by dissonance, ${results.length} results, ${timeMs}ms`);
+    onProgress?.(100, `Done — ${results.length} results in ${timeMs}ms`);
     return { results, totalEvaluated, timeMs };
 }

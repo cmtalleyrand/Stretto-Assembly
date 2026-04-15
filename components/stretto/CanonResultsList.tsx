@@ -50,6 +50,48 @@ function labelPattern(p: CanonInversionPattern): string {
 }
 
 // ---------------------------------------------------------------------------
+// Grouping helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Equivalence key: the intervals relative to voice 0.
+ * E.g. tuple [0, 7, 17, 24] → "7,17,24"
+ * Chains with identical keys have the same harmonic structure; only the
+ * absolute pitch level differs (globally transposed versions).
+ */
+function getEquivKey(steps: number[]): string {
+    if (steps.length <= 1) return '0';
+    const t0 = steps[0];
+    return steps.slice(1).map(t => t - t0).join(',');
+}
+
+/**
+ * Similarity key: interval classes (mod 12) relative to voice 0.
+ * E.g. tuple [0, 7, 17, 24] → "7,5,0"
+ * Chains with identical keys use the same interval classes but different
+ * octave compounds — they may have different scores.
+ */
+function getSimilarityKey(steps: number[]): string {
+    if (steps.length <= 1) return '0';
+    const t0 = steps[0];
+    return steps.slice(1).map(t => ((t - t0) % 12 + 12) % 12).join(',');
+}
+
+/** Human-readable similarity key label for group headers. */
+function similarityKeyLabel(key: string): string {
+    if (key === '0') return 'Unison family';
+    return key.split(',').map(v => {
+        const ic = parseInt(v);
+        const names: Record<number, string> = {
+            0: 'P1/P8', 1: 'm2', 2: 'M2', 3: 'm3', 4: 'M3',
+            5: 'P4', 6: 'A4/d5', 7: 'P5', 8: 'm6', 9: 'M6',
+            10: 'm7', 11: 'M7',
+        };
+        return names[ic] ?? `ic${ic}`;
+    }).join(' / ');
+}
+
+// ---------------------------------------------------------------------------
 // Condensed score tooltip
 // ---------------------------------------------------------------------------
 
@@ -141,6 +183,176 @@ function buildSummaryStats(results: CanonChainResult[]): { byDelay: DelayStat[];
 }
 
 // ---------------------------------------------------------------------------
+// Grouped data structures
+// ---------------------------------------------------------------------------
+
+interface EquivGroup {
+    equivKey: string;
+    /** Best-scoring result in this equivalence group (representative). */
+    best: CanonChainResult;
+    /** All results sharing this equivalence key (sorted best-first). */
+    all: CanonChainResult[];
+}
+
+interface SimilarityGroup {
+    simKey: string;
+    label: string;
+    best: CanonChainResult;
+    equivGroups: EquivGroup[];
+    totalCount: number;
+}
+
+function buildGroups(results: CanonChainResult[]): SimilarityGroup[] {
+    // Build equivalence groups first
+    const equivMap = new Map<string, CanonChainResult[]>();
+    for (const r of results) {
+        const k = getEquivKey(r.transpositionSteps);
+        const arr = equivMap.get(k) ?? [];
+        arr.push(r);
+        equivMap.set(k, arr);
+    }
+
+    // Build similarity groups from equivalence groups
+    const simMap = new Map<string, EquivGroup[]>();
+    for (const [eKey, members] of equivMap) {
+        const sorted = [...members].sort((a, b) => b.score - a.score);
+        const eg: EquivGroup = { equivKey: eKey, best: sorted[0], all: sorted };
+        const sKey = getSimilarityKey(sorted[0].transpositionSteps);
+        const arr = simMap.get(sKey) ?? [];
+        arr.push(eg);
+        simMap.set(sKey, arr);
+    }
+
+    // Sort similarity groups by best score, then sort equiv groups within each
+    return Array.from(simMap.entries())
+        .map(([sKey, eGroups]) => {
+            const sortedEG = [...eGroups].sort((a, b) => b.best.score - a.best.score);
+            return {
+                simKey: sKey,
+                label: similarityKeyLabel(sKey),
+                best: sortedEG[0].best,
+                equivGroups: sortedEG,
+                totalCount: sortedEG.reduce((s, eg) => s + eg.all.length, 0),
+            };
+        })
+        .sort((a, b) => b.best.score - a.best.score);
+}
+
+// ---------------------------------------------------------------------------
+// Single result row (shared between grouped and flat views)
+// ---------------------------------------------------------------------------
+
+function ResultRow({
+    res,
+    rank,
+    isSelected,
+    showTooltip,
+    onSelect,
+    onTooltipEnter,
+    onTooltipLeave,
+    equivCount,
+}: {
+    res: CanonChainResult;
+    rank: number;
+    isSelected: boolean;
+    showTooltip: boolean;
+    onSelect: () => void;
+    onTooltipEnter: () => void;
+    onTooltipLeave: () => void;
+    equivCount?: number;
+}) {
+    return (
+        <div
+            onClick={onSelect}
+            className={`
+                border-b border-gray-700 p-2 cursor-pointer hover:bg-gray-800 transition-colors
+                ${isSelected ? 'bg-gray-800 border-l-4 border-l-brand-primary' : ''}
+            `}
+        >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+                {/* Rank + key params */}
+                <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] text-gray-500">#{rank}</span>
+                    <span className="text-xs font-bold text-gray-200">
+                        {res.delayBeats}b delay
+                    </span>
+                    <span className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded font-mono">
+                        {res.chainLength} entries
+                    </span>
+                    <div className="flex gap-0.5 flex-wrap">
+                        {res.transpositionSteps.map((t, si) => (
+                            <span key={si} className="text-[10px] bg-gray-700 text-brand-primary px-1 py-0.5 rounded font-mono">
+                                {labelStep(t)}
+                            </span>
+                        ))}
+                    </div>
+                    <span className="text-[10px] text-gray-500">
+                        {labelPattern(res.inversionPattern)}
+                    </span>
+                    {res.autoTruncatedBeats > 0 && (
+                        <span className="text-[9px] bg-orange-900/40 text-orange-300 px-1 rounded">
+                            trunc {res.autoTruncatedBeats.toFixed(1)}b
+                        </span>
+                    )}
+                    {equivCount !== undefined && equivCount > 1 && (
+                        <span className="text-[9px] bg-blue-900/30 text-blue-300 border border-blue-700/40 px-1 rounded" title="Equivalent transpositions (globally shifted variants)">
+                            ×{equivCount}
+                        </span>
+                    )}
+                </div>
+
+                {/* Score badge */}
+                <div className="relative flex items-center gap-2">
+                    {res.detectedChords && res.detectedChords.length > 0 && (
+                        <div className="hidden md:flex gap-1 overflow-hidden max-w-[160px]">
+                            {res.detectedChords.slice(0, 3).map((c, ci) => (
+                                <span key={ci} className="text-[8px] text-gray-500 bg-black/30 px-1 rounded whitespace-nowrap">{c}</span>
+                            ))}
+                        </div>
+                    )}
+                    <button
+                        onMouseEnter={onTooltipEnter}
+                        onMouseLeave={onTooltipLeave}
+                        onClick={e => e.stopPropagation()}
+                        className={`text-sm font-bold px-2.5 py-0.5 rounded cursor-help font-mono border transition-colors
+                            ${res.score >= 0
+                                ? 'bg-green-900/30 text-green-300 border-green-700/40 hover:border-green-500'
+                                : 'bg-red-900/20 text-red-300 border-red-700/40 hover:border-red-500'}`}
+                    >
+                        {res.score.toFixed(0)}
+                    </button>
+                    {showTooltip && res.scoreLog && (
+                        <div className="relative">
+                            {renderScoreTooltip(res.scoreLog)}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Entry badges */}
+            <div className="flex flex-wrap gap-1 mt-1.5">
+                {res.entries.map((e, ei) => {
+                    const delay = ei === 0 ? 0 : e.startBeat - res.entries[ei - 1].startBeat;
+                    return (
+                        <div
+                            key={ei}
+                            className={`flex flex-col items-center bg-gray-800 px-1.5 py-0.5 rounded border text-[9px] min-w-[44px] ${e.type === 'I' ? 'border-brand-primary' : 'border-gray-600'}`}
+                        >
+                            <span className="font-bold text-gray-300">V{e.voiceIndex}</span>
+                            {ei > 0 && (
+                                <span className="text-gray-500 font-mono">+{delay.toFixed(1)}b</span>
+                            )}
+                            <span className="text-brand-primary font-mono">{getIntervalLabel(e.transposition)}</span>
+                            {e.type === 'I' && <span className="text-blue-400">INV</span>}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -156,6 +368,10 @@ export default function CanonResultsList({
     const [lengthFilter, setLengthFilter] = useState<number | null>(null);
     const [tooltipId, setTooltipId] = useState<string | null>(null);
     const [showStats, setShowStats] = useState(false);
+    /** Similarity keys whose groups are collapsed (default: all expanded). */
+    const [collapsedSimKeys, setCollapsedSimKeys] = useState<Set<string>>(new Set());
+    /** Equivalence keys whose sub-results are expanded beyond the best one. */
+    const [expandedEquivKeys, setExpandedEquivKeys] = useState<Set<string>>(new Set());
 
     const uniqueDelays = useMemo(
         () => Array.from(new Set(results.map(r => r.delayBeats))).sort((a, b) => a - b),
@@ -171,12 +387,30 @@ export default function CanonResultsList({
         let base = results;
         if (delayFilter !== null) base = base.filter(r => r.delayBeats === delayFilter);
         if (lengthFilter !== null) base = base.filter(r => r.chainLength === lengthFilter);
-        return [...base].sort((a, b) => b.score - a.score);
+        return base;
     }, [results, delayFilter, lengthFilter]);
+
+    const groups = useMemo(() => buildGroups(filtered), [filtered]);
 
     const stats = useMemo(() => buildSummaryStats(results), [results]);
 
     const selectedResult = results.find(r => r.id === selectedId) ?? null;
+
+    const toggleSimGroup = (key: string) => {
+        setCollapsedSimKeys(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            return next;
+        });
+    };
+
+    const toggleEquivGroup = (key: string) => {
+        setExpandedEquivKeys(prev => {
+            const next = new Set(prev);
+            if (next.has(key)) next.delete(key); else next.add(key);
+            return next;
+        });
+    };
 
     if (results.length === 0) {
         return (
@@ -185,6 +419,9 @@ export default function CanonResultsList({
             </div>
         );
     }
+
+    // Running rank counter across all visible rows
+    let rowRank = 0;
 
     return (
         <div className="flex flex-col gap-2">
@@ -257,7 +494,7 @@ export default function CanonResultsList({
 
                 <div className="flex items-center justify-between">
                     <span className="text-[9px] text-gray-600 font-mono">
-                        {filtered.length} / {results.length} shown
+                        {filtered.length} / {results.length} shown · {groups.length} interval families
                     </span>
                     <button
                         onClick={() => setShowStats(s => !s)}
@@ -298,99 +535,75 @@ export default function CanonResultsList({
                 </div>
             )}
 
-            {/* Results list */}
-            <div className="overflow-y-auto max-h-[480px]">
-                {filtered.map((res, i) => {
-                    const isSelected = selectedId === res.id;
-                    const showTooltip = tooltipId === res.id;
+            {/* Grouped results list */}
+            <div className="overflow-y-auto max-h-[520px] border border-gray-700 rounded">
+                {groups.map(sg => {
+                    const isCollapsed = collapsedSimKeys.has(sg.simKey);
 
                     return (
-                        <div
-                            key={res.id}
-                            onClick={() => onSelect(res)}
-                            className={`
-                                border-b border-gray-700 p-2 cursor-pointer hover:bg-gray-800 transition-colors
-                                ${isSelected ? 'bg-gray-800 border-l-4 border-l-brand-primary' : ''}
-                            `}
-                        >
-                            <div className="flex items-center justify-between gap-2 flex-wrap">
-                                {/* Rank + key params */}
+                        <div key={sg.simKey}>
+                            {/* Similarity group header */}
+                            <button
+                                onClick={() => toggleSimGroup(sg.simKey)}
+                                className="w-full flex items-center justify-between px-3 py-1.5 bg-gray-800 hover:bg-gray-700 transition-colors border-b border-gray-700 sticky top-0 z-10"
+                            >
                                 <div className="flex items-center gap-2">
-                                    <span className="text-[10px] text-gray-500">#{i + 1}</span>
-                                    <span className="text-xs font-bold text-gray-200">
-                                        {res.delayBeats}b delay
+                                    <span className="text-[9px] text-gray-400">{isCollapsed ? '▶' : '▼'}</span>
+                                    <span className="text-[10px] font-bold text-gray-300">{sg.label}</span>
+                                    <span className="text-[9px] text-gray-500 font-mono">
+                                        {sg.equivGroups.length} variant{sg.equivGroups.length !== 1 ? 's' : ''}
+                                        {' · '}{sg.totalCount} chain{sg.totalCount !== 1 ? 's' : ''}
                                     </span>
-                                    <span className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded font-mono">
-                                        {res.chainLength} entries
-                                    </span>
-                                    <div className="flex gap-0.5 flex-wrap">
-                                        {res.transpositionSteps.map((t, si) => (
-                                            <span key={si} className="text-[10px] bg-gray-700 text-brand-primary px-1 py-0.5 rounded font-mono">
-                                                {labelStep(t)}
-                                            </span>
-                                        ))}
+                                </div>
+                                <span className={`text-[10px] font-bold font-mono px-2 py-0.5 rounded border
+                                    ${sg.best.score >= 0
+                                        ? 'text-green-300 border-green-700/40 bg-green-900/20'
+                                        : 'text-red-300 border-red-700/40 bg-red-900/10'}`}>
+                                    best {sg.best.score.toFixed(0)}
+                                </span>
+                            </button>
+
+                            {!isCollapsed && sg.equivGroups.map(eg => {
+                                const isExpanded = expandedEquivKeys.has(eg.equivKey);
+                                const rowsToShow = isExpanded ? eg.all : [eg.best];
+
+                                return (
+                                    <div key={eg.equivKey}>
+                                        {/* Equivalence group: show representative + expand toggle */}
+                                        {rowsToShow.map((res) => {
+                                            rowRank++;
+                                            return (
+                                                <ResultRow
+                                                    key={res.id}
+                                                    res={res}
+                                                    rank={rowRank}
+                                                    isSelected={selectedId === res.id}
+                                                    showTooltip={tooltipId === res.id}
+                                                    onSelect={() => onSelect(res)}
+                                                    onTooltipEnter={() => setTooltipId(res.id)}
+                                                    onTooltipLeave={() => setTooltipId(null)}
+                                                    equivCount={eg.all.length}
+                                                />
+                                            );
+                                        })}
+                                        {eg.all.length > 1 && (
+                                            <button
+                                                onClick={() => toggleEquivGroup(eg.equivKey)}
+                                                className="w-full text-[9px] text-gray-500 hover:text-gray-300 py-0.5 bg-gray-900/50 border-b border-gray-700 transition-colors"
+                                            >
+                                                {isExpanded
+                                                    ? `▲ Collapse ${eg.all.length} equivalent variants`
+                                                    : `▼ Show ${eg.all.length - 1} more equivalent variant${eg.all.length > 2 ? 's' : ''}`}
+                                            </button>
+                                        )}
                                     </div>
-                                    <span className="text-[10px] text-gray-500">
-                                        {labelPattern(res.inversionPattern)}
-                                    </span>
-                                    {res.autoTruncatedBeats > 0 && (
-                                        <span className="text-[9px] bg-orange-900/40 text-orange-300 px-1 rounded">
-                                            trunc {res.autoTruncatedBeats.toFixed(1)}b
-                                        </span>
-                                    )}
-                                </div>
-
-                                {/* Score — larger and color-coded, condensed tooltip on hover */}
-                                <div className="relative flex items-center gap-2">
-                                    {res.detectedChords && res.detectedChords.length > 0 && (
-                                        <div className="hidden md:flex gap-1 overflow-hidden max-w-[160px]">
-                                            {res.detectedChords.slice(0, 3).map((c, ci) => (
-                                                <span key={ci} className="text-[8px] text-gray-500 bg-black/30 px-1 rounded whitespace-nowrap">{c}</span>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <button
-                                        onMouseEnter={() => setTooltipId(res.id)}
-                                        onMouseLeave={() => setTooltipId(null)}
-                                        onClick={e => e.stopPropagation()}
-                                        className={`text-sm font-bold px-2.5 py-0.5 rounded cursor-help font-mono border transition-colors
-                                            ${res.score >= 0
-                                                ? 'bg-green-900/30 text-green-300 border-green-700/40 hover:border-green-500'
-                                                : 'bg-red-900/20 text-red-300 border-red-700/40 hover:border-red-500'}`}
-                                    >
-                                        {res.score.toFixed(0)}
-                                    </button>
-                                    {showTooltip && res.scoreLog && (
-                                        <div className="relative">
-                                            {renderScoreTooltip(res.scoreLog)}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Entry badges */}
-                            <div className="flex flex-wrap gap-1 mt-1.5">
-                                {res.entries.map((e, ei) => {
-                                    const delay = ei === 0 ? 0 : e.startBeat - res.entries[ei - 1].startBeat;
-                                    return (
-                                        <div
-                                            key={ei}
-                                            className={`flex flex-col items-center bg-gray-800 px-1.5 py-0.5 rounded border text-[9px] min-w-[44px] ${e.type === 'I' ? 'border-brand-primary' : 'border-gray-600'}`}
-                                        >
-                                            <span className="font-bold text-gray-300">V{e.voiceIndex}</span>
-                                            {ei > 0 && (
-                                                <span className="text-gray-500 font-mono">+{delay.toFixed(1)}b</span>
-                                            )}
-                                            <span className="text-brand-primary font-mono">{getIntervalLabel(e.transposition)}</span>
-                                            {e.type === 'I' && <span className="text-blue-400">INV</span>}
-                                        </div>
-                                    );
-                                })}
-                            </div>
+                                );
+                            })}
                         </div>
                     );
                 })}
-                {filtered.length === 0 && (
+
+                {groups.length === 0 && (
                     <div className="text-center text-gray-600 py-6 text-sm">
                         No results for this filter.
                     </div>
