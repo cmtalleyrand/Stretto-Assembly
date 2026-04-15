@@ -242,16 +242,7 @@ function buildGroups(results: CanonChainResult[]): SimilarityGroup[] {
 // Single result row (shared between grouped and flat views)
 // ---------------------------------------------------------------------------
 
-function ResultRow({
-    res,
-    rank,
-    isSelected,
-    showTooltip,
-    onSelect,
-    onTooltipEnter,
-    onTooltipLeave,
-    equivCount,
-}: {
+interface ResultRowProps {
     res: CanonChainResult;
     rank: number;
     isSelected: boolean;
@@ -260,7 +251,18 @@ function ResultRow({
     onTooltipEnter: () => void;
     onTooltipLeave: () => void;
     equivCount?: number;
-}) {
+}
+
+const ResultRow: React.FC<ResultRowProps> = ({
+    res,
+    rank,
+    isSelected,
+    showTooltip,
+    onSelect,
+    onTooltipEnter,
+    onTooltipLeave,
+    equivCount,
+}) => {
     return (
         <div
             onClick={onSelect}
@@ -537,7 +539,7 @@ export default function CanonResultsList({
 
             {/* Grouped results list */}
             <div className="overflow-y-auto max-h-[520px] border border-gray-700 rounded">
-                {groups.map(sg => {
+                {groups.map((sg: SimilarityGroup) => {
                     const isCollapsed = collapsedSimKeys.has(sg.simKey);
 
                     return (
@@ -563,14 +565,14 @@ export default function CanonResultsList({
                                 </span>
                             </button>
 
-                            {!isCollapsed && sg.equivGroups.map(eg => {
+                            {!isCollapsed && sg.equivGroups.map((eg: EquivGroup) => {
                                 const isExpanded = expandedEquivKeys.has(eg.equivKey);
                                 const rowsToShow = isExpanded ? eg.all : [eg.best];
 
                                 return (
                                     <div key={eg.equivKey}>
                                         {/* Equivalence group: show representative + expand toggle */}
-                                        {rowsToShow.map((res) => {
+                                        {rowsToShow.map((res: CanonChainResult) => {
                                             rowRank++;
                                             return (
                                                 <ResultRow
@@ -580,8 +582,8 @@ export default function CanonResultsList({
                                                     isSelected={selectedId === res.id}
                                                     showTooltip={tooltipId === res.id}
                                                     onSelect={() => onSelect(res)}
-                                                    onTooltipEnter={() => setTooltipId(res.id)}
-                                                    onTooltipLeave={() => setTooltipId(null)}
+                                                    onTooltipEnter={(): void => { setTooltipId(res.id); }}
+                                                    onTooltipLeave={(): void => { setTooltipId(null); }}
                                                     equivCount={eg.all.length}
                                                 />
                                             );

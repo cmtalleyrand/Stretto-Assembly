@@ -1035,13 +1035,25 @@ export default function StrettoView({
                         onSelect={setSelectedCanonResult}
                         isPlaying={isPlaying}
                         onPlay={(_res) => {
-                            // canonToCandidate is derived from selectedCanonResult which is _res
                             if (canonToCandidate) handlePlay(canonToCandidate.notes);
                         }}
                         onDownload={(_res) => {
                             if (canonToCandidate) downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den });
                         }}
                     />
+                    {canonToCandidate && (
+                        <StrettoInspector
+                            candidate={canonToCandidate}
+                            ppq={ppq || 480}
+                            ts={activeMeter}
+                            isPlaying={isPlaying}
+                            onPlay={handlePlay}
+                            assemblyResult=""
+                            assemblyLog={[]}
+                            onClearAssembly={() => {}}
+                            onDownloadChain={() => downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })}
+                        />
+                    )}
                 </div>
             ) : viewMode === 'pairwise' ? (
                 <>

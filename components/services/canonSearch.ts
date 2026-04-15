@@ -118,7 +118,8 @@ function enumerateTranspositionTuples(
     // Unique steps sorted descending so iteration naturally starts with larger values
     const steps = [...new Set(tSteps)].sort((a, b) => b - a);
     const results: number[][] = [];
-    const current: number[] = [];
+    // Voice 0 is always pinned to 0 — only relative transpositions matter.
+    const current: number[] = [0];
 
     function backtrack(vi: number): void {
         if (vi === voiceCount) {
@@ -154,7 +155,7 @@ function enumerateTranspositionTuples(
         }
     }
 
-    backtrack(0);
+    backtrack(1); // voice 0 is already placed at 0
     return results;
 }
 
