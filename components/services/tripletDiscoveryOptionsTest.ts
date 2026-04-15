@@ -10,7 +10,6 @@ assert.ok(withInversions.some((p) => p.firstIsInverted && p.secondIsInverted) ==
 assert.ok(withInversions.some((p) => p.firstIsInverted && !p.secondIsInverted), 'State (I,N) must be present.');
 assert.ok(withInversions.some((p) => !p.firstIsInverted && p.secondIsInverted), 'State (N,I) must be present.');
 
-assert.equal(computeSecondDelayStart(480, 240, 'ordered'), 480, 'Constrained mode must enforce d2>=d1.');
-assert.equal(computeSecondDelayStart(480, 240, 'unconstrained'), 240, 'Unconstrained mode must allow d2<d1 by scanning from the minimum delay.');
+assert.equal(computeSecondDelayStart(480, 240), 240, 'Second-delay enumeration must always start at the minimum delay step.');
 
 console.log('PASS tripletDiscoveryOptionsTest');

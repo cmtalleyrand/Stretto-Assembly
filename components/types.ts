@@ -348,9 +348,31 @@ export interface StrettoSearchReport {
     results: StrettoChainResult[];
     stats: {
         nodesVisited: number;
+        edgesTraversed?: number;
         timeMs: number;
         stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
         maxDepthReached: number;
+        stageStats?: {
+            tripleCandidates: number;
+            triplePairwiseRejected: number;
+            tripleLowerBoundRejected: number;
+            tripleParallelRejected: number;
+            tripleVoiceRejected: number;
+            tripleP4BassRejected: number;
+            tripletRejectA10?: number;
+            tripletRejectA8?: number;
+            tripletRejectDelayShape?: number;
+            tripletRejectPairBCMissing?: number;
+            tripletRejectAdjSepBC?: number;
+            tripletRejectPairACMissing?: number;
+            tripletRejectLowerBound?: number;
+            tripletRejectParallel?: number;
+            tripletRejectVoice?: number;
+            tripletRejectP4Bass?: number;
+            tripletRejectNoDelayContext?: number;
+            tripletRejectedTotal?: number;
+            tripletAcceptedTotal?: number;
+        };
     };
 }
 
