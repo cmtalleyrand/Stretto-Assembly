@@ -20,6 +20,7 @@ import StrettoChainView from './stretto/StrettoChainView';
 import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import PianoRoll from './PianoRoll';
 import { computeSecondDelayStart, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
+import { buildVisiblePivotOptions } from './stretto/pivotOptions';
 
 interface StrettoViewProps {
     notes: RawNote[]; 
@@ -193,18 +194,11 @@ export default function StrettoView({
     }, [mode, abcInput, initialNotes, ppq]);
 
 
-    const pivotOptions = useMemo(() => {
-        const candidates = computeSubjectPivotCandidates(subjectNotes);
-        if (candidates.length > 0) return candidates;
-        return [searchOptions.pivotMidi];
-    }, [subjectNotes, searchOptions.pivotMidi]);
-
-    useEffect(() => {
-        if (pivotOptions.length === 0) return;
-        if (!pivotOptions.includes(searchOptions.pivotMidi)) {
-            setSearchOptions((prev) => ({ ...prev, pivotMidi: pivotOptions[0] }));
-        }
-    }, [pivotOptions, searchOptions.pivotMidi]);
+    const constrainedPivotOptions = useMemo(() => computeSubjectPivotCandidates(subjectNotes), [subjectNotes]);
+    const pivotOptions = useMemo(
+        () => buildVisiblePivotOptions(constrainedPivotOptions, searchOptions.pivotMidi),
+        [constrainedPivotOptions, searchOptions.pivotMidi]
+    );
 
     const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
     const abcKeyLabel = useMemo(() => {
@@ -572,7 +566,7 @@ export default function StrettoView({
 
 
     const runOptimalPivotSearch = () => {
-        if (!includeInversions || subjectNotes.length === 0 || pivotOptions.length === 0) {
+        if (!includeInversions || subjectNotes.length === 0 || constrainedPivotOptions.length === 0) {
             setPivotSearchResults([]);
             return;
         }
@@ -597,7 +591,7 @@ export default function StrettoView({
         }
 
         const ranked = rankPivotCandidates({
-            pivots: pivotOptions,
+            pivots: constrainedPivotOptions,
             referencePivot: searchOptions.pivotMidi,
             evaluatePivot: (pivotMidi) => {
                 const observations: PivotCandidateObservation[] = [];
@@ -809,7 +803,7 @@ export default function StrettoView({
                         includeExtensions={includeExtensions} 
                         setIncludeExtensions={setIncludeExtensions} 
                         pivotMidi={searchOptions.pivotMidi}
-                        setPivotMidi={(val) => setSearchOptions({...searchOptions, pivotMidi: val})}
+                        setPivotMidi={(val) => setSearchOptions((prev) => ({...prev, pivotMidi: val}))}
                         pivotOptions={pivotOptions}
                         onFindOptimalPivot={runOptimalPivotSearch}
                         pivotSearchResults={pivotSearchResults}
