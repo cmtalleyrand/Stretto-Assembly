@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { StrettoChainResult, StrettoChainOption, ScoreLog } from '../../types';
 import { getIntervalLabel } from '../services/midiSpelling';
-import { getVoiceLabel } from '../services/midiVoices';
+import { getVoiceCode } from '../services/midiVoices';
 import { formatQuarterNoteUnits } from './quarterNoteUnits';
 
 interface StrettoResultsListProps {
@@ -34,17 +34,6 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
 
     const formatInterval = (semis: number) => {
         return getIntervalLabel(semis);
-    };
-
-    const getVoiceCode = (idx: number, total: number) => {
-        if (voiceNames && voiceNames[idx]) return voiceNames[idx];
-        
-        const label = getVoiceLabel(idx, total);
-        if (label.includes(' ')) {
-            const parts = label.split(' ');
-            return `${parts[0].charAt(0)}${parts[1]}`;
-        }
-        return label.charAt(0);
     };
 
     const renderScoreTooltip = (log?: ScoreLog) => {
@@ -116,7 +105,7 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
         const totalEstimate = Math.max(4, maxV); 
 
         return entries.map((e, idx) => {
-            const vCode = getVoiceCode(e.voiceIndex, totalEstimate);
+            const vCode = getVoiceCode(e.voiceIndex, totalEstimate, voiceNames);
             
             if (idx === 0) {
                 return (
