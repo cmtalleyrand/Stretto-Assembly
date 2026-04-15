@@ -116,8 +116,8 @@ async function assertAdmissibilityPruningParity(
     thirdSixthMode: 'None',
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
-    maxPairwiseDissonance: 0.75,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.5,
     scaleRoot: 0,
     scaleMode: 'Major'
   };
@@ -159,7 +159,7 @@ async function assertAdmissibilityPruningParity(
     thirdSixthMode: 'None',
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
+    disallowComplexExceptions: true,
     maxPairwiseDissonance: 0.05,
     scaleRoot: 0,
     scaleMode: 'Major'
@@ -203,8 +203,8 @@ async function assertAdmissibilityPruningParity(
     thirdSixthMode: 'None',
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
-    maxPairwiseDissonance: 0.75,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.5,
     maxSearchTimeMs: 1,
     scaleRoot: 0,
     scaleMode: 'Major'
@@ -243,8 +243,8 @@ async function assertAdmissibilityPruningParity(
     thirdSixthMode: 'None',
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
-    maxPairwiseDissonance: 0.75,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.5,
     scaleRoot: 0,
     scaleMode: 'Major'
   };
@@ -294,8 +294,8 @@ async function assertAdmissibilityPruningParity(
     thirdSixthMode: 1,
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
-    maxPairwiseDissonance: 0.75,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.5,
     maxSearchTimeMs: 8000,
     scaleRoot: 0,
     scaleMode: 'Major'
@@ -353,8 +353,8 @@ console.log('stretto integration tests passed');
     thirdSixthMode: 'None',
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
-    maxPairwiseDissonance: 0.75,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 0.5,
     maxSearchTimeMs: 5000,
     scaleRoot: 0,
     scaleMode: 'Major'
@@ -396,7 +396,7 @@ console.log('stretto integration tests passed');
     thirdSixthMode: 'None',
     pivotMidi: 60,
     requireConsonantEnd: false,
-    disallowComplexExceptions: false,
+    disallowComplexExceptions: true,
     maxPairwiseDissonance: 0.3,
     maxSearchTimeMs: 200,
     scaleRoot: 0,

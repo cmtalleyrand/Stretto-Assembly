@@ -47,8 +47,8 @@ const FIXTURES: Record<string, { subject: RawNote[]; options: StrettoSearchOptio
       thirdSixthMode: 'None',
       pivotMidi: 60,
       requireConsonantEnd: false,
-      disallowComplexExceptions: false,
-      maxPairwiseDissonance: 0.75,
+      disallowComplexExceptions: true,
+      maxPairwiseDissonance: 0.5,
       scaleRoot: 0,
       scaleMode: 'Major'
     }
@@ -77,8 +77,8 @@ const FIXTURES: Record<string, { subject: RawNote[]; options: StrettoSearchOptio
       thirdSixthMode: 'None',
       pivotMidi: 60,
       requireConsonantEnd: false,
-      disallowComplexExceptions: false,
-      maxPairwiseDissonance: 0.75,
+      disallowComplexExceptions: true,
+      maxPairwiseDissonance: 0.5,
       scaleRoot: 0,
       scaleMode: 'Major'
     }
