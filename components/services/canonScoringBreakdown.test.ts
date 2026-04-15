@@ -43,4 +43,22 @@ assert.ok((dissonantResult.scoreLog.breakdown?.nctBeats ?? 0) >= 0, 'NCT duratio
 assert.ok((dissonantResult.scoreLog.breakdown?.contributions.nctPenalty ?? 0) >= 0, 'NCT penalty contribution must be present as a non-negative magnitude.');
 assert.ok((dissonantResult.scoreLog.breakdown?.chordSequence.length ?? 0) > 0, 'Chord sequence spans must be available for UI rendering.');
 
+const dyadConsonantChain: StrettoChainOption[] = [
+  { startBeat: 0, transposition: 0, type: 'N', length: ppq * 2, voiceIndex: 0 },
+  { startBeat: 0, transposition: 4, type: 'N', length: ppq * 2, voiceIndex: 1 },
+];
+
+const dyadConsonantResult = calculateCanonScore(dyadConsonantChain, variants, [0, 0], 0, ppq);
+assert.ok(dyadConsonantResult.scoreLog.breakdown, 'Score breakdown must exist for consonant dyad coverage.');
+assert.equal(
+  dyadConsonantResult.scoreLog.breakdown?.harmonyCounts.full7thOr6th,
+  0,
+  'A two-pitch-class simultaneity must never be counted as a full 7th/6th chord.'
+);
+assert.equal(
+  dyadConsonantResult.scoreLog.breakdown?.harmonyCounts.incomplete7thOr6th,
+  0,
+  'A two-pitch-class simultaneity must never be counted as an incomplete 7th/6th chord.'
+);
+
 console.log('canon scoring breakdown: all assertions passed');

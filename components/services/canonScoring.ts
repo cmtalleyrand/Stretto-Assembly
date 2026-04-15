@@ -98,8 +98,9 @@ function detectChordQuality(pitches: number[]): ChordMatchResult {
         for (const template of templates) {
             for (let root = 0; root < 12; root++) {
                 const shifted = template.map(i => (i + root) % 12);
-                if (pcs.every(pc => shifted.includes(pc))) {
-                    // All pitch classes in template; count NCTs = pcs not in shifted
+                if (shifted.every(intervalPc => pcs.includes(intervalPc))) {
+                    // Template must be fully present in the active slice.
+                    // NCTs are extra pitch classes beyond the matched template.
                     const nct = pcs.filter(pc => !shifted.includes(pc)).length;
                     if (nct < bestNct) bestNct = nct;
                 }
