@@ -145,8 +145,16 @@ function identifyChordWithNCT(pitches: number[]): { name: string, quality: strin
     // Dyad/Cluster handling for 2 unique PCs (even if multiple octaves)
     if (uniquePCs.length === 2) {
         const sortedInput = [...pitches].sort((a,b) => a-b);
-        const lowPitch = sortedInput[0];
-        const highPitch = sortedInput[sortedInput.length - 1];
+        const bassPC = ((sortedInput[0] % 12) + 12) % 12;
+        const upperPC = uniquePCs.find(pc => pc !== bassPC);
+
+        if (upperPC === undefined) return null;
+
+        // Build an interval prototype from unique pitch classes rather than extreme absolute pitches.
+        // This preserves inversion semantics in analyzeDyad while preventing octave-duplication artifacts.
+        const directedInterval = (upperPC - bassPC + 12) % 12;
+        const lowPitch = bassPC;
+        const highPitch = bassPC + directedInterval;
         const dyadAnalysis = analyzeDyad(lowPitch, highPitch);
         if (dyadAnalysis) {
             return {
