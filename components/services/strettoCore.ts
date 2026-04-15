@@ -408,7 +408,7 @@ export function analyzeStrettoCandidate(
     pivotMidi: number = 60,
     useChromaticInversion: boolean = false,
     keyRoot: number = 0, // New param for spelling
-    maxPairwiseDissonance: number = 1,
+    maxPairwiseDissonance: number = 0.5,
     scaleMode: string = 'Major'
 ): StrettoCandidate {
     
@@ -607,7 +607,7 @@ export function analyzeStrettoTripletCandidate(
     pivotMidi: number = 60,
     useChromaticInversion: boolean = false,
     keyRoot: number = 0,
-    maxPairwiseDissonance: number = 1,
+    maxPairwiseDissonance: number = 0.5,
     scaleMode: string = 'Major'
 ): StrettoCandidate {
     if (subject.length === 0) {

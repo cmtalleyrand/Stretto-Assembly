@@ -75,7 +75,7 @@ const transformConstrainedOptions = {
   truncationTargetBeats: 2,
   thirdSixthMode: 'Unlimited' as const,
   useChromaticInversion: true,
-  maxPairwiseDissonance: 1,
+  maxPairwiseDissonance: 0.5,
   targetChainLength: 4
 };
 const transformAdmissibleTranspositions = new Set<number>([

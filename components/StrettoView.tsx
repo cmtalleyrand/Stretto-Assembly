@@ -169,9 +169,9 @@ export default function StrettoView({
         useChromaticInversion: false,
         thirdSixthMode: 1,
         pivotMidi: 60, // Placeholder, updated in effect
-        requireConsonantEnd: true,
-        disallowComplexExceptions: false,
-        maxPairwiseDissonance: 1.0, // Default to Allow All
+        requireConsonantEnd: false,
+        disallowComplexExceptions: true,
+        maxPairwiseDissonance: 0.5, // Default hard cap: 50% dissonant overlap
         scaleRoot: 0,
         scaleMode: 'Major',
         maxSearchTimeMs: 30000

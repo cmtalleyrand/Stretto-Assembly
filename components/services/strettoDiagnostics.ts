@@ -23,9 +23,9 @@ const BASE_OPTIONS: Omit<StrettoSearchOptions, 'targetChainLength' | 'inversionM
   truncationTargetBeats: 4,
   useChromaticInversion: false,
   pivotMidi: 60,
-  requireConsonantEnd: true,
-  disallowComplexExceptions: false,
-  maxPairwiseDissonance: 1,
+  requireConsonantEnd: false,
+  disallowComplexExceptions: true,
+  maxPairwiseDissonance: 0.5,
   scaleRoot: 0,
   scaleMode: 'Major'
 };
@@ -127,8 +127,8 @@ async function runDiagnostics() {
       thirdSixthMode: 'None',
       pivotMidi: 60,
       requireConsonantEnd: false,
-      disallowComplexExceptions: false,
-      maxPairwiseDissonance: 0.75,
+      disallowComplexExceptions: true,
+      maxPairwiseDissonance: 0.5,
       scaleRoot: 0,
       scaleMode: 'Major'
     };

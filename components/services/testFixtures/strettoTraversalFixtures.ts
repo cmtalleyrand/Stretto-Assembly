@@ -22,8 +22,8 @@ export const baseOptions: StrettoSearchOptions = {
   thirdSixthMode: 'None',
   pivotMidi: 60,
   requireConsonantEnd: false,
-  disallowComplexExceptions: false,
-  maxPairwiseDissonance: 0.75,
+  disallowComplexExceptions: true,
+  maxPairwiseDissonance: 0.5,
   scaleRoot: 0,
   scaleMode: 'Major'
 };
@@ -48,7 +48,7 @@ export const fixtureEntry7Regime: TraversalFixture = {
     maxSearchTimeMs: 90000,
     targetChainLength: 7,
     thirdSixthMode: 'None',
-    maxPairwiseDissonance: 0.75
+    maxPairwiseDissonance: 0.5
   }
 };
 
@@ -69,7 +69,7 @@ export const fixtureBeyondEntry7: TraversalFixture = {
     thirdSixthMode: 'None',
     inversionMode: 'None',
     truncationMode: 'None',
-    maxPairwiseDissonance: 0.75
+    maxPairwiseDissonance: 0.5
   }
 };
 

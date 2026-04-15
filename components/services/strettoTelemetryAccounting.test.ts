@@ -19,9 +19,9 @@ const FIXTURE_OPTIONS: StrettoSearchOptions = {
   useChromaticInversion: false,
   thirdSixthMode: 1,
   pivotMidi: 60,
-  requireConsonantEnd: true,
-  disallowComplexExceptions: false,
-  maxPairwiseDissonance: 1,
+  requireConsonantEnd: false,
+  disallowComplexExceptions: true,
+  maxPairwiseDissonance: 0.5,
   scaleRoot: 0,
   scaleMode: 'Major'
 };
