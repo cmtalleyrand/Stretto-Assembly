@@ -254,6 +254,8 @@ interface StageStats {
     tripletRejectNoDelayContext: number;
     tripletRejectedTotal: number;
     tripletAcceptedTotal: number;
+    tripletCandidatesAccepted: number;
+    tripletDistinctShapesAccepted: number;
     harmonicallyValidTriples: number;
     deterministicDagMergedNodes: number;
     pairStageRejected: number;
@@ -1458,6 +1460,8 @@ export async function searchStrettoChains(
                     tripletRejectNoDelayContext: 0,
                     tripletRejectedTotal: 0,
                     tripletAcceptedTotal: 0,
+                    tripletCandidatesAccepted: 0,
+                    tripletDistinctShapesAccepted: 0,
                     harmonicallyValidTriples: 0,
                     deterministicDagMergedNodes: 0,
                     pairStageRejected: 0,
@@ -1639,6 +1643,8 @@ export async function searchStrettoChains(
         tripletRejectNoDelayContext: 0,
         tripletRejectedTotal: 0,
         tripletAcceptedTotal: 0,
+        tripletCandidatesAccepted: 0,
+        tripletDistinctShapesAccepted: 0,
         harmonicallyValidTriples: 0,
         deterministicDagMergedNodes: 0,
         pairStageRejected: 0,
@@ -2099,9 +2105,10 @@ export async function searchStrettoChains(
         + stageStats.tripletRejectVoice
         + stageStats.tripletRejectP4Bass
         + stageStats.tripletRejectNoDelayContext;
-    stageStats.tripletAcceptedTotal = stageStats.tripleCandidates - stageStats.tripletRejectedTotal;
-
-    stageStats.harmonicallyValidTriples = precomputeIndex.getTripletShapeCount();
+    stageStats.tripletCandidatesAccepted = stageStats.tripleCandidates - stageStats.tripletRejectedTotal;
+    stageStats.tripletAcceptedTotal = stageStats.tripletCandidatesAccepted;
+    stageStats.tripletDistinctShapesAccepted = precomputeIndex.getTripletShapeCount();
+    stageStats.harmonicallyValidTriples = stageStats.tripletDistinctShapesAccepted;
 
     // --- Triplet records for triplet-join Phase A ---
     // Each TripletRecord captures a valid (A,B,C) triplet with its pairwise records

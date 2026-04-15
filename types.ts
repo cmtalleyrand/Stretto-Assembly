@@ -606,6 +606,8 @@ export interface StrettoSearchReport {
             tripletRejectNoDelayContext?: number;
             tripletRejectedTotal?: number;
             tripletAcceptedTotal?: number;
+            tripletCandidatesAccepted?: number;
+            tripletDistinctShapesAccepted?: number;
             tripleLowerBoundRejected: number;
             tripleParallelRejected: number;
             tripleVoiceRejected: number;

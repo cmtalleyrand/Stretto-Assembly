@@ -372,6 +372,8 @@ export interface StrettoSearchReport {
             tripletRejectNoDelayContext?: number;
             tripletRejectedTotal?: number;
             tripletAcceptedTotal?: number;
+            tripletCandidatesAccepted?: number;
+            tripletDistinctShapesAccepted?: number;
         };
     };
 }

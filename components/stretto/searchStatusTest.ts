@@ -50,6 +50,9 @@ function mkReport(
             tripleParallelRejected: 12,
             tripleVoiceRejected: 8,
             tripleP4BassRejected: 7,
+            tripletRejectedTotal: 62,
+            tripletCandidatesAccepted: 18,
+            tripletDistinctShapesAccepted: 18,
             harmonicallyValidTriples: 18,
             deterministicDagMergedNodes: 11,
             pairStageRejected: 90,
@@ -89,6 +92,12 @@ if (!diagnostics.summary.includes('Stage-level counts only')) {
 }
 if (!diagnostics.constraintSignals.some((signal) => signal.includes('120 total; 30 compatible (25%), 90 rejected (75%)'))) {
   throw new Error('Diagnostics must expose pairwise total/compatible/rejected signal.');
+}
+if (!diagnostics.constraintSignals.some((signal) => signal.includes('80 total; 18 accepted'))) {
+  throw new Error('Diagnostics must expose accepted-candidate triplet totals.');
+}
+if (!diagnostics.constraintSignals.some((signal) => signal.includes('Distinct accepted shapes=18'))) {
+  throw new Error('Diagnostics must expose accepted distinct-shape cardinality.');
 }
 if (!diagnostics.constraintSignals.some((signal) => signal.includes('Triplet reject breakdown: pairwise=25, lowerBound=10, parallel=12, voice=8, p4Bass=7'))) {
   throw new Error('Diagnostics must expose triplet reject breakdown signal.');
