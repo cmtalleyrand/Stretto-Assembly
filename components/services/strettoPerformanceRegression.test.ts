@@ -159,17 +159,17 @@ printComparisonTable();
   };
   const pressuredReport = await searchStrettoChains(FIXTURES.target8_scale8.subject, pressuredOptions, ppq);
   assert.ok(
-    (pressuredReport.stats.finalizationBudgetMs ?? 0) > 0,
-    'finalization budget must be reserved under timeout pressure.'
+    (pressuredReport.stats.tripletBudgetMs ?? 0) > 0,
+    'triplet budget must be computed under timeout pressure.'
   );
   assert.ok(
     (pressuredReport.stats.finalizationScoredCount ?? 0) >= 0,
     'finalization counters must be present under timeout pressure.'
   );
-  if (pressuredReport.stats.enumerationStoppedForFinalization) {
+  if (pressuredReport.stats.tripletEnumerationTruncated) {
     assert.ok(
       pressuredReport.stats.finalizationScoredCount !== undefined,
-      'when enumeration is stopped for reserved finalization, finalization must still execute.'
+      'when triplet enumeration is truncated, finalization must still execute.'
     );
   }
 }

@@ -565,9 +565,9 @@ export interface StrettoSearchReport {
         maxDepthReached: number;
         metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
-        finalizationBudgetMs?: number;
         finalizationScoredCount?: number;
-        enumerationStoppedForFinalization?: boolean;
+        tripletEnumerationTruncated?: boolean;
+        tripletBudgetMs?: number;
         completionDiagnostics?: {
             structurallyCompleteChainsFound: number;
             prefixAdmissibleCompleteChainsFound: number;
