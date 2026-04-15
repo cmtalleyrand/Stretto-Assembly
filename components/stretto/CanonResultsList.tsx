@@ -13,19 +13,26 @@ interface CanonResultsListProps {
 }
 
 const STEP_LABELS: Array<[number, string]> = [
-    [0, 'Unison'],
-    [5, 'P4↑'],   [-5, 'P4↓'],
-    [7, 'P5↑'],   [-7, 'P5↓'],
-    [12, 'P8↑'],  [-12, 'P8↓'],
-    [15, 'm10↑'], [-15, 'm10↓'],
-    [16, 'M10↑'], [-16, 'M10↓'],
-    [17, 'P11↑'], [-17, 'P11↓'],
-    [19, 'P12↑'], [-19, 'P12↓'],
-    [24, 'P15↑'], [-24, 'P15↓'],
-    [3, 'm3↑'],   [-3, 'm3↓'],
-    [4, 'M3↑'],   [-4, 'M3↓'],
-    [8, 'm6↑'],   [-8, 'm6↓'],
-    [9, 'M6↑'],   [-9, 'M6↓'],
+    // Perfect consonances and their octave compounds
+    [0,   'P1'],
+    [5,   'P4↑'],  [-5,  'P4↓'],
+    [7,   'P5↑'],  [-7,  'P5↓'],
+    [12,  'P8↑'],  [-12, 'P8↓'],
+    [17,  'P11↑'], [-17, 'P11↓'],
+    [19,  'P12↑'], [-19, 'P12↓'],
+    [24,  'P15↑'], [-24, 'P15↓'],
+    [29,  'P18↑'], [-29, 'P18↓'],
+    [31,  'P19↑'], [-31, 'P19↓'],
+    [36,  'P22↑'], [-36, 'P22↓'],
+    // Thirds and sixths, with compounds
+    [3,   'm3↑'],  [-3,  'm3↓'],
+    [4,   'M3↑'],  [-4,  'M3↓'],
+    [8,   'm6↑'],  [-8,  'm6↓'],
+    [9,   'M6↑'],  [-9,  'M6↓'],
+    [15,  'm10↑'], [-15, 'm10↓'],
+    [16,  'M10↑'], [-16, 'M10↓'],
+    [20,  'm13↑'], [-20, 'm13↓'],
+    [21,  'M13↑'], [-21, 'M13↓'],
 ];
 
 function labelStep(t: number): string {
@@ -186,7 +193,8 @@ export default function CanonResultsList({
                 <div className="flex items-center gap-2 bg-gray-900 border border-gray-700 rounded px-3 py-1.5">
                     <span className="text-[10px] text-gray-500 mr-1">Selected:</span>
                     <span className="text-xs font-bold text-gray-200 mr-auto">
-                        {selectedResult.delayBeats}b · {selectedResult.chainLength} entries · {labelStep(selectedResult.transpositionStep)}
+                        {selectedResult.delayBeats}b · {selectedResult.chainLength} entries
+                        {' '}[{selectedResult.transpositionSteps.map(labelStep).join(' / ')}]
                     </span>
                     {onPlay && (
                         <button
@@ -315,9 +323,13 @@ export default function CanonResultsList({
                                     <span className="text-[10px] bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded font-mono">
                                         {res.chainLength} entries
                                     </span>
-                                    <span className="text-[10px] bg-gray-700 text-brand-primary px-1.5 py-0.5 rounded font-mono">
-                                        {labelStep(res.transpositionStep)}
-                                    </span>
+                                    <div className="flex gap-0.5 flex-wrap">
+                                        {res.transpositionSteps.map((t, si) => (
+                                            <span key={si} className="text-[10px] bg-gray-700 text-brand-primary px-1 py-0.5 rounded font-mono">
+                                                {labelStep(t)}
+                                            </span>
+                                        ))}
+                                    </div>
                                     <span className="text-[10px] text-gray-500">
                                         {labelPattern(res.inversionPattern)}
                                     </span>

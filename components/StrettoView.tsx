@@ -192,7 +192,7 @@ export default function StrettoView({
         scaleRoot: 0,
         scaleMode: 'Major',
         subjectVoiceIndex: 0,
-        transpositionMode: 'absolute',
+        transpositionMode: 'independent',
     });
     const [canonReport, setCanonReport] = useState<CanonSearchReport | null>(null);
     const [isCanonSearching, setIsCanonSearching] = useState(false);
