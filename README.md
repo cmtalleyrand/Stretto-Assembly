@@ -196,6 +196,14 @@ Deprecation intent:
 - **Legacy** pathways are retained for compatibility/testing only and should not be used as design anchors for new behavior.
 - Migration target is consolidation on Stretto pairwise discovery, Stretto chain search worker execution, Canon search, and their associated result displays.
 
+## Temporary pairwise admissibility baseline
+
+For current profiling and regression baselines, pairwise precomputation defaults to **full-domain evaluation** (equivalent to the historical `STRETTO_DIAGNOSTIC_FULL_PAIRWISE=1` behavior), so no admissibility matrix pruning is applied in the pairwise hot loop.
+
+- Default (`STRETTO_ENABLE_ADMISSIBILITY` unset or `0`): admissibility pruning disabled.
+- Opt-in (`STRETTO_ENABLE_ADMISSIBILITY=1`): re-enable admissibility matrix pruning for A/B comparison runs.
+- Diagnostic override (`STRETTO_DIAGNOSTIC_FULL_PAIRWISE=1`): always force full-domain pairwise precompute.
+
 ## Test Tiering and Change-Type Mapping
 
 The test scripts are partitioned by deterministic cost and failure-surface breadth to minimize unnecessary runtime while preserving regression guarantees.

@@ -1802,20 +1802,21 @@ export async function searchStrettoChains(
 
     const collectSpans = options.collectDiagnosticSpans === true;
     const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
+    const enablePairwiseAdmissibilityPruning = process.env.STRETTO_ENABLE_ADMISSIBILITY === '1' && !forceFullPairwiseDiagnostic;
     // Emit concrete stage metadata before structural admissibility precompute begins.
     // This phase can be expensive for larger option spaces; emitting here ensures
     // UI transitions out of heartbeat-only status immediately.
     emitStageProgress('pairwise', 0, 1, true);
-    const entryStateAdmissibilityModel = forceFullPairwiseDiagnostic
-        ? { admissiblePairKeys: null, statesVisited: 0 }
-        : await buildEntryStateAdmissibilityModel(
+    const entryStateAdmissibilityModel = enablePairwiseAdmissibilityPruning
+        ? await buildEntryStateAdmissibilityModel(
             variants,
             transpositions,
             relativeTranspositionDeltas,
             delayStep,
             options.targetChainLength,
             options
-        );
+        )
+        : { admissiblePairKeys: null, statesVisited: 0 };
 
     // Translate the admissibility model's nested-Map structure into a dense compat matrix
     // so the pairwise hot-loop uses a single byte-array probe instead of 4-level Map chaining.

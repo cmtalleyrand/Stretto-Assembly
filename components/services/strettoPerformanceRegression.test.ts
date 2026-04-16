@@ -174,5 +174,47 @@ printComparisonTable();
   }
 }
 
+{
+  const previousEnableAdmissibility = process.env.STRETTO_ENABLE_ADMISSIBILITY;
+  const previousDiagnosticFullPairwise = process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE;
+  try {
+    process.env.STRETTO_ENABLE_ADMISSIBILITY = '0';
+    process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE = '0';
+    const stagesSeen = new Set<string>();
+    const report = await searchStrettoChains(
+      FIXTURES.target8_scale8.subject,
+      FIXTURES.target8_scale8.options,
+      ppq,
+      (progress) => {
+        stagesSeen.add(progress.stage);
+      }
+    );
+    assert.ok(
+      report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
+      `admissibility-disabled run must complete with Exhausted/Timeout stopReason, got '${report.stats.stopReason}'`
+    );
+    assert.ok(Array.isArray(report.results), 'admissibility-disabled run must return an array of results.');
+    for (const result of report.results) {
+      assert.ok(Array.isArray(result.entries), 'each result must include an entries array.');
+      assert.equal(typeof result.id, 'string', 'each result must include a stable string id.');
+      assert.equal(typeof result.score, 'number', 'each result must include a numeric score.');
+    }
+    assert.ok(stagesSeen.has('pairwise'), 'progress callback must report pairwise stage.');
+    assert.ok(stagesSeen.has('triplet'), 'progress callback must report triplet stage.');
+    assert.ok(stagesSeen.has('dag'), 'progress callback must report dag stage.');
+  } finally {
+    if (previousEnableAdmissibility === undefined) {
+      delete process.env.STRETTO_ENABLE_ADMISSIBILITY;
+    } else {
+      process.env.STRETTO_ENABLE_ADMISSIBILITY = previousEnableAdmissibility;
+    }
+    if (previousDiagnosticFullPairwise === undefined) {
+      delete process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE;
+    } else {
+      process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE = previousDiagnosticFullPairwise;
+    }
+  }
+}
+
 console.log('stretto performance regression test passed');
 console.log('Baseline update guidance:', baseline.updateGuidance.join(' '));

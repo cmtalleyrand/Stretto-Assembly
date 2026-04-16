@@ -34,3 +34,10 @@ This document defines the intended execution pathways for analysis and discovery
 
 - New feature work should route through active modules and maintain compatibility with `strettoSearchWorker` + pairwise/Canon discovery.
 - Legacy modules should be preserved unless removal is explicitly scheduled, because they still support compatibility regressions and historical test expectations.
+
+## Pairwise precompute baseline for profiling
+
+To keep profiling comparisons stable, the current default for `searchStrettoChains` is full-domain pairwise precompute without admissibility matrix pruning (equivalent to historical `STRETTO_DIAGNOSTIC_FULL_PAIRWISE=1` behavior).
+
+- `STRETTO_ENABLE_ADMISSIBILITY=1` explicitly reactivates admissibility matrix pruning for A/B testing.
+- `STRETTO_DIAGNOSTIC_FULL_PAIRWISE=1` remains a hard override to force full-domain pairwise evaluation.

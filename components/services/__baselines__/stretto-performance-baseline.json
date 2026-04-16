@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "updateGuidance": [
     "Update this baseline only when a deliberate algorithmic change alters precomputation or search architecture.",
     "Stage stats are deterministic and must match exactly \u2014 they depend only on the input fixture, not search traversal.",
@@ -9,19 +9,19 @@
     "target8_scale8": {
       "depthLowerBound": 7,
       "stageStats": {
-        "pairwiseTotal": 731,
-        "pairwiseCompatible": 504,
-        "tripleCandidates": 93025,
-        "harmonicallyValidTriples": 15589
+        "pairwiseTotal": 795,
+        "pairwiseCompatible": 454,
+        "tripleCandidates": 77490,
+        "harmonicallyValidTriples": 12047
       }
     },
     "target8_scale10": {
       "depthLowerBound": 7,
       "stageStats": {
-        "pairwiseTotal": 934,
-        "pairwiseCompatible": 585,
-        "tripleCandidates": 161604,
-        "harmonicallyValidTriples": 25490
+        "pairwiseTotal": 1007,
+        "pairwiseCompatible": 527,
+        "tripleCandidates": 134212,
+        "harmonicallyValidTriples": 19631
       }
     }
   }
