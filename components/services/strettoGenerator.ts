@@ -229,6 +229,38 @@ function transpositionIntervalClass(transposition: number): number {
     return ((transposition % 12) + 12) % 12;
 }
 
+export function isPerfectBehaviorSensitiveIntervalClass(intervalClass: number): boolean {
+    return intervalClass === 0 || intervalClass === 5 || intervalClass === 7;
+}
+
+export function foldTranspositionWithinSpan(transposition: number, subjectSpanSemitones: number): number {
+    if (!Number.isFinite(subjectSpanSemitones) || subjectSpanSemitones < 0) return transposition;
+    let best = transposition;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (let k = -4; k <= 4; k++) {
+        const candidate = transposition + (12 * k);
+        if (Math.abs(candidate) > subjectSpanSemitones) continue;
+        const distance = Math.abs(candidate);
+        if (distance < bestDistance || (distance === bestDistance && candidate < best)) {
+            best = candidate;
+            bestDistance = distance;
+        }
+    }
+    if (bestDistance !== Number.POSITIVE_INFINITY) return best;
+
+    // Fallback: choose nearest octave-equivalent transposition to 0 when span is too narrow.
+    const nearest = transposition - (12 * Math.round(transposition / 12));
+    return Object.is(nearest, -0) ? 0 : nearest;
+}
+
+export function shouldReuseCanonicalPairwiseScan(
+    intervalClass: number,
+    canonicalFlags?: { hasFourth: boolean; hasParallelPerfect58: boolean }
+): boolean {
+    if (!isPerfectBehaviorSensitiveIntervalClass(intervalClass)) return true;
+    return Boolean(canonicalFlags && !canonicalFlags.hasFourth && !canonicalFlags.hasParallelPerfect58);
+}
+
 function buildDiversifiedPriorityOrder(
     pairs: PairTuple[],
     pairQuality: (pair: PairTuple) => number
@@ -1615,6 +1647,9 @@ export async function searchStrettoChains(
     }
     
     const subjectLengthTicks = Math.max(...baseNotes.map(n => n.relTick + n.durationTicks));
+    const subjectMinPitch = Math.min(...baseNotes.map((n) => n.pitch));
+    const subjectMaxPitch = Math.max(...baseNotes.map((n) => n.pitch));
+    const subjectSpanSemitones = Math.max(0, subjectMaxPitch - subjectMinPitch);
     
     const variants: SubjectVariant[] = [];
     variants.push({ type: 'N', truncationBeats: 0, lengthTicks: subjectLengthTicks, notes: baseNotes });
@@ -1869,6 +1904,9 @@ export async function searchStrettoChains(
     let pairwiseCompletedUnits = 0;
     emitStageProgress('pairwise', 0, pairwiseTotalUnits, true);
 
+    const scanCache = new Map<string, PairwiseScanResult>();
+    const canonicalPerfectGuardFlags = new Map<string, { hasFourth: boolean; hasParallelPerfect58: boolean }>();
+
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
     // Also precompute interval class metadata for quota checks.
@@ -1904,11 +1942,53 @@ export async function searchStrettoChains(
                         await new Promise<void>((resolve) => setTimeout(resolve, 0));
                     }
 
-                    // Neutral scan (P4 treated as provisionally consonant)
-                    stageStats.structuralScanInvocations++;
+                    const intervalClass = transpositionRuleTable.intervalClassAt(tIdx as RuleTranspositionIndex);
+                    const canonicalT = foldTranspositionWithinSpan(t, subjectSpanSemitones);
+                    const cachePrefix = `${iA}|${iB}|${d}`;
+                    const canonicalFlagKey = `${cachePrefix}|${canonicalT}`;
+                    const canonicalFlags = canonicalPerfectGuardFlags.get(canonicalFlagKey);
+
                     const timelineA = sortedVariantTimelines[iA];
                     const timelineB = sortedVariantTimelines[iB];
-                    const pairScan = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'none', ppq, tsNum, tsDenom, !collectSpans, timelineA, timelineB);
+
+                    const resolvePairwiseScan = (bassRoleMode: PairwiseBassRole, skipSpans: boolean): PairwiseScanResult => {
+                        const exactKey = `${cachePrefix}|${t}|${bassRoleMode}`;
+                        const canonicalKey = `${cachePrefix}|${canonicalT}|${bassRoleMode}`;
+                        const canReuseCanonical = shouldReuseCanonicalPairwiseScan(intervalClass, canonicalFlags);
+                        const useCanonicalKey = canReuseCanonical || (t === canonicalT);
+                        const selectedKey = useCanonicalKey ? canonicalKey : exactKey;
+
+                        const cached = scanCache.get(selectedKey);
+                        if (cached) return cached;
+
+                        stageStats.structuralScanInvocations++;
+                        const scanTransposition = useCanonicalKey ? canonicalT : t;
+                        const computed = checkCounterpointStructureWithBassRole(
+                            vA,
+                            vB,
+                            d,
+                            scanTransposition,
+                            options.maxPairwiseDissonance,
+                            bassRoleMode,
+                            ppq,
+                            tsNum,
+                            tsDenom,
+                            skipSpans,
+                            timelineA,
+                            timelineB
+                        );
+                        scanCache.set(selectedKey, computed);
+                        return computed;
+                    };
+
+                    // Neutral scan (P4 treated as provisionally consonant)
+                    const pairScan = resolvePairwiseScan('none', !collectSpans);
+                    if (!canonicalFlags && t === canonicalT) {
+                        canonicalPerfectGuardFlags.set(canonicalFlagKey, {
+                            hasFourth: pairScan.hasFourth,
+                            hasParallelPerfect58: pairScan.hasParallelPerfect58
+                        });
+                    }
                     if (collectSpans) {
                         appendUniqueSpansCapped(stageStats.dissonanceSpans, pairScan.dissonanceSpans);
                         appendUniqueSpansCapped(stageStats.p4Spans, pairScan.p4Spans);
@@ -1932,16 +2012,10 @@ export async function searchStrettoChains(
                     // so neutral scan data is exact for roles a/b as well.
                     const requiresBassRoleRescan = pairScan.hasFourth;
                     const bassStrictA = requiresBassRoleRescan
-                        ? (() => {
-                            stageStats.structuralScanInvocations++;
-                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom, true, timelineA, timelineB);
-                        })()
+                        ? resolvePairwiseScan('a', true)
                         : pairScan;
                     const bassStrictB = requiresBassRoleRescan
-                        ? (() => {
-                            stageStats.structuralScanInvocations++;
-                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom, true, timelineA, timelineB);
-                        })()
+                        ? resolvePairwiseScan('b', true)
                         : pairScan;
 
                     const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
@@ -1956,7 +2030,6 @@ export async function searchStrettoChains(
                     // tIdx aligns with the rule table index because both use the same
                     // deduplicated relativeTranspositionDeltas as their source array.
                     const tRule = tIdx as RuleTranspositionIndex;
-                    const intervalClass = transpositionRuleTable.intervalClassAt(tRule);
                     const isRestrictedInterval = transpositionRuleTable.isRestrictedAt(tRule);
                     const isFreeInterval = transpositionRuleTable.isFreeAt(tRule);
 
