@@ -481,7 +481,7 @@ export default function StrettoSearchPanel({
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {searchProgress.stage === 'dag'
-                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · traversal ${progressDisplay.traversalCompletionPercent ?? 0}%`
+                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · queue coverage lower bound ${progressDisplay.dagCompletionLowerBoundPercent ?? 0}% · edges/node ${(progressDisplay.dagEdgesPerExpandedNode ?? 0).toFixed(2)}`
                             : `Stage progress: ${progressDisplay.stageEstimatePercent}% · units ${progressDisplay.unitLabel}`}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
@@ -515,8 +515,11 @@ export default function StrettoSearchPanel({
                             <div className="mt-1 h-1.5 rounded bg-gray-700 overflow-hidden">
                                 <div
                                     className="h-full bg-cyan-500 transition-all duration-200"
-                                    style={{ width: `${Math.max(2, progressDisplay.traversalCompletionPercent ?? 0)}%` }}
+                                    style={{ width: `${Math.max(2, progressDisplay.dagCompletionLowerBoundPercent ?? progressDisplay.traversalCompletionPercent ?? 0)}%` }}
                                 />
+                            </div>
+                            <div className="mt-1 text-[9px] text-gray-400 font-mono">
+                                Frontier pressure {(progressDisplay.dagFrontierPressurePercent ?? 0).toFixed(1)}% · explored share {progressDisplay.traversalCompletionPercent ?? 0}%
                             </div>
                         </>
                     )}
