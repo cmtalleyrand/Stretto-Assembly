@@ -45,6 +45,9 @@ export interface SearchProgressDisplay {
     depthAxisPercent: number;
     traversalCompletionPercent: number | null;
     countersLabel: string;
+    dagEdgesPerExpandedNode: number | null;
+    dagFrontierPressurePercent: number | null;
+    dagCompletionLowerBoundPercent: number | null;
 }
 
 const STAGE_ORDER: SearchProgressStage[] = ['pairwise', 'triplet', 'dag'];
@@ -104,6 +107,9 @@ export function computeSearchProgressDisplay(
             depthAxisPercent: 0,
             traversalCompletionPercent: null,
             countersLabel: 'explored 0 · live 0 · nodes 0 · edges 0 · maxDepth 0',
+            dagEdgesPerExpandedNode: null,
+            dagFrontierPressurePercent: null,
+            dagCompletionLowerBoundPercent: null,
         };
     }
 
@@ -159,7 +165,23 @@ export function computeSearchProgressDisplay(
     const traversalCompletionPercent = queueDenominator > 0
         ? Math.max(0, Math.min(100, Math.round((progress.telemetry.dagExploredWorkItems / queueDenominator) * 100)))
         : null;
-    const countersLabel = `explored ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · live ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · nodes ${progress.telemetry.dagNodesExpanded.toLocaleString()} · edges ${progress.telemetry.dagEdgesEvaluated.toLocaleString()} · maxDepth ${progress.telemetry.maxDepthReached.toLocaleString()}`;
+    const dagEdgesPerExpandedNode = progress.telemetry.dagNodesExpanded > 0
+        ? progress.telemetry.dagEdgesEvaluated / progress.telemetry.dagNodesExpanded
+        : null;
+    const dagFrontierPressurePercent = queueDenominator > 0
+        ? Math.max(0, Math.min(100, (progress.telemetry.dagLiveFrontierWorkItems / queueDenominator) * 100))
+        : null;
+    const lowerBoundRatio = Number.isFinite(progress.telemetry.dagHeuristicCompletionRatio ?? Number.NaN)
+        ? Math.max(0, Math.min(1, progress.telemetry.dagHeuristicCompletionRatio as number))
+        : queueDenominator > 0
+            ? progress.telemetry.dagExploredWorkItems / queueDenominator
+            : 0;
+    const dagCompletionLowerBoundPercent = Math.round(lowerBoundRatio * 100);
+    const countersLabel = progress.stage === 'dag'
+        ? `DAG explored ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · live ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · edges/node ${(dagEdgesPerExpandedNode ?? 0).toFixed(2)} · frontier pressure ${(dagFrontierPressurePercent ?? 0).toFixed(1)}% · completion lower bound ${dagCompletionLowerBoundPercent}% · maxDepth ${progress.telemetry.maxDepthReached.toLocaleString()}`
+        : progress.stage === 'triplet'
+            ? `Triplet operations ${progress.telemetry.tripletOperationsProcessed.toLocaleString()} · valid triplets ${progress.telemetry.validTriplets.toLocaleString()} · valid pairs ${progress.telemetry.validPairs.toLocaleString()}`
+            : `Pairwise operations ${progress.telemetry.pairwiseOperationsProcessed.toLocaleString()} · valid pairs ${progress.telemetry.validPairs.toLocaleString()}`;
 
     return {
         stageLabel: progress.heartbeat ? 'Search active (collecting stage metrics)' : STAGE_LABELS[progress.stage],
@@ -176,5 +198,8 @@ export function computeSearchProgressDisplay(
         depthAxisPercent,
         traversalCompletionPercent,
         countersLabel,
+        dagEdgesPerExpandedNode,
+        dagFrontierPressurePercent,
+        dagCompletionLowerBoundPercent,
     };
 }
