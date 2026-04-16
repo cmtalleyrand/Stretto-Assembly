@@ -99,6 +99,17 @@ interface NextTransition {
 
 type PairwiseBassRole = 'none' | 'a' | 'b';
 
+interface SortedNote {
+    start: number;
+    end: number;
+    pitch: number;
+}
+
+interface SortedNoteTimeline {
+    notes: readonly SortedNote[];
+    boundaryTicks: readonly number[];
+}
+
 interface PairwiseTripletPrecomputeIndex {
     setPairRecord(vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void;
     getPairRecord(vA: number, vB: number, d: number, t: number): PairwiseCompatibilityRecord | undefined;
@@ -649,6 +660,46 @@ function isForbiddenParallelPerfectMotion(
         && deltaVoice1 === deltaVoice2;
 }
 
+function buildSortedNoteTimeline(variant: SubjectVariant): SortedNoteTimeline {
+    const notes = variant.notes
+        .map((n) => ({
+            start: n.relTick,
+            end: n.relTick + n.durationTicks,
+            pitch: n.pitch
+        }))
+        .sort((a, b) => a.start - b.start);
+
+    const boundaryTicks: number[] = [];
+    for (const n of notes) {
+        boundaryTicks.push(n.start, n.end);
+    }
+    boundaryTicks.sort((a, b) => a - b);
+    const uniqueBoundaries: number[] = [];
+    for (let i = 0; i < boundaryTicks.length; i++) {
+        if (i === 0 || boundaryTicks[i] !== boundaryTicks[i - 1]) uniqueBoundaries.push(boundaryTicks[i]);
+    }
+    return { notes, boundaryTicks: uniqueBoundaries };
+}
+
+function mergeTimelineBoundariesWithShift(
+    boundariesA: readonly number[],
+    boundariesB: readonly number[],
+    shiftB: number
+): number[] {
+    const merged: number[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < boundariesA.length || j < boundariesB.length) {
+        const a = i < boundariesA.length ? boundariesA[i] : Number.POSITIVE_INFINITY;
+        const b = j < boundariesB.length ? boundariesB[j] + shiftB : Number.POSITIVE_INFINITY;
+        const next = a <= b ? a : b;
+        if (merged.length === 0 || merged[merged.length - 1] !== next) merged.push(next);
+        if (a === next) i++;
+        if (b === next) j++;
+    }
+    return merged;
+}
+
 
 /**
  * PHASE 1 CHECK: Structural Validity (Pairwise)
@@ -678,35 +729,19 @@ export function checkCounterpointStructureWithBassRole(
     ppqParam: number = 480,
     tsNum: number = 4,
     tsDenom: number = 4,
-    skipSpans: boolean = false
+    skipSpans: boolean = false,
+    timelineA?: SortedNoteTimeline,
+    timelineB?: SortedNoteTimeline
  ): PairwiseScanResult {
-    
-    // Collect all time points
-    const timePoints = new Set<number>();
-    
-    interface SortedNote {
-        start: number;
-        end: number;
-        pitch: number;
-    }
-
-    // Pre-sort notes by start tick for sweep-line pointer advancement
-    const notesA: SortedNote[] = variantA.notes.map(n => ({
-        start: n.relTick,
-        end: n.relTick + n.durationTicks,
-        pitch: n.pitch
-    })).sort((a, b) => a.start - b.start);
-
-    const notesB: SortedNote[] = variantB.notes.map(n => ({
-        start: n.relTick + delayTicks,
-        end: n.relTick + delayTicks + n.durationTicks,
-        pitch: n.pitch + transposition
-    })).sort((a, b) => a.start - b.start);
-
-    for (const n of notesA) { timePoints.add(n.start); timePoints.add(n.end); }
-    for (const n of notesB) { timePoints.add(n.start); timePoints.add(n.end); }
-
-    const sortedPoints = Array.from(timePoints).sort((a, b) => a - b);
+    const resolvedTimelineA = timelineA ?? buildSortedNoteTimeline(variantA);
+    const resolvedTimelineB = timelineB ?? buildSortedNoteTimeline(variantB);
+    const notesA = resolvedTimelineA.notes;
+    const notesB = resolvedTimelineB.notes;
+    const sortedPoints = mergeTimelineBoundariesWithShift(
+        resolvedTimelineA.boundaryTicks,
+        resolvedTimelineB.boundaryTicks,
+        delayTicks
+    );
 
     let prevP1: number | null = null;
     let prevP2: number | null = null;
@@ -747,10 +782,10 @@ export function checkCounterpointStructureWithBassRole(
 
         // Advance pointers to find active note at 'start'
         while (ptrA < notesA.length - 1 && notesA[ptrA].end <= start) ptrA++;
-        while (ptrB < notesB.length - 1 && notesB[ptrB].end <= start) ptrB++;
+        while (ptrB < notesB.length - 1 && (notesB[ptrB].end + delayTicks) <= start) ptrB++;
 
         const activeA = (ptrA < notesA.length && notesA[ptrA].start <= start && notesA[ptrA].end > start) ? notesA[ptrA] : null;
-        const activeB = (ptrB < notesB.length && notesB[ptrB].start <= start && notesB[ptrB].end > start) ? notesB[ptrB] : null;
+        const activeB = (ptrB < notesB.length && (notesB[ptrB].start + delayTicks) <= start && (notesB[ptrB].end + delayTicks) > start) ? notesB[ptrB] : null;
 
         if (!activeA || !activeB) {
             // Monophony: consecutive parallel tracking is broken by a rest; tick-duration clock restarts.
@@ -765,7 +800,7 @@ export function checkCounterpointStructureWithBassRole(
         overlapTicks += dur;
 
         const p1 = activeA.pitch;
-        const p2 = activeB.pitch;
+        const p2 = activeB.pitch + transposition;
         const orderingSign = Math.sign(p1 - p2);
         if (orderingSign !== 0) {
             if (previousOrderingSign !== 0 && previousOrderingSign !== orderingSign) hasVoiceCrossing = true;
@@ -1619,6 +1654,7 @@ export async function searchStrettoChains(
             }
         }
     }
+    const sortedVariantTimelines = variants.map((variant) => buildSortedNoteTimeline(variant));
 
     // Delays happen in half-beat intervals (8th notes)
     const delayStep = ppq / 2;
@@ -1870,7 +1906,9 @@ export async function searchStrettoChains(
 
                     // Neutral scan (P4 treated as provisionally consonant)
                     stageStats.structuralScanInvocations++;
-                    const pairScan = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'none', ppq, tsNum, tsDenom, !collectSpans);
+                    const timelineA = sortedVariantTimelines[iA];
+                    const timelineB = sortedVariantTimelines[iB];
+                    const pairScan = checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'none', ppq, tsNum, tsDenom, !collectSpans, timelineA, timelineB);
                     if (collectSpans) {
                         appendUniqueSpansCapped(stageStats.dissonanceSpans, pairScan.dissonanceSpans);
                         appendUniqueSpansCapped(stageStats.p4Spans, pairScan.p4Spans);
@@ -1896,13 +1934,13 @@ export async function searchStrettoChains(
                     const bassStrictA = requiresBassRoleRescan
                         ? (() => {
                             stageStats.structuralScanInvocations++;
-                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom, true);
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'a', ppq, tsNum, tsDenom, true, timelineA, timelineB);
                         })()
                         : pairScan;
                     const bassStrictB = requiresBassRoleRescan
                         ? (() => {
                             stageStats.structuralScanInvocations++;
-                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom, true);
+                            return checkCounterpointStructureWithBassRole(vA, vB, d, t, options.maxPairwiseDissonance, 'b', ppq, tsNum, tsDenom, true, timelineA, timelineB);
                         })()
                         : pairScan;
 
