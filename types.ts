@@ -705,6 +705,8 @@ export interface StrettoSearchOptions {
     scaleMode: string; // 'Major', 'Natural Minor', 'Harmonic Minor', etc.
     maxSearchTimeMs?: number;
     collectDiagnosticSpans?: boolean;
+    strettoMinDelayBeats?: number;
+    useAutoTruncation?: boolean;
 }
 
 // --- Canon Search Types ---

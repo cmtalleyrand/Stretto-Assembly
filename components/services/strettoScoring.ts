@@ -150,7 +150,8 @@ export function calculateStrettoScore(
     variants: SubjectVariant[],
     variantIndices: number[],
     options: StrettoSearchOptions,
-    ppq: number = 480
+    ppq: number = 480,
+    autoTruncBeats: number = 0
 ): StrettoChainResult {
 
     const PPQ = ppq;
@@ -423,6 +424,13 @@ export function calculateStrettoScore(
             score -= truncPenalty;
             penalties.push({ reason: `P_truncation: ${truncBeats} beat(s) removed entry ${i+1}`, points: truncPenalty });
         }
+    }
+
+    // P_autoTruncation: penalise beats removed by voice-capacity auto-truncation
+    if (autoTruncBeats > 0) {
+        const autoTruncPenalty = autoTruncBeats * SCORING.TRUNCATION_PENALTY_PER_BEAT;
+        score -= autoTruncPenalty;
+        penalties.push({ reason: `P_autoTruncation: ${autoTruncBeats.toFixed(1)} beat(s) auto-truncated`, points: autoTruncPenalty });
     }
 
     // P_missing_steps: penalize short fallback chains relative to configured target length

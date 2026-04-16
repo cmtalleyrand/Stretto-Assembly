@@ -174,7 +174,9 @@ export default function StrettoView({
         maxPairwiseDissonance: 0.5, // Default hard cap: 50% dissonant overlap
         scaleRoot: 0,
         scaleMode: 'Major',
-        maxSearchTimeMs: 30000
+        maxSearchTimeMs: 30000,
+        strettoMinDelayBeats: undefined,
+        useAutoTruncation: false,
     });
     
     const [chainResults, setChainResults] = useState<StrettoChainResult[]>([]);

@@ -1727,6 +1727,10 @@ export async function searchStrettoChains(
     const halfSubjectTicks = subjectLengthTicks / 2;
     const oneQuarterSubjectTicks = subjectLengthTicks / 4;
     const oneThirdSubjectTicks = subjectLengthTicks / 3;
+    // User-specified floor on every d_i (independent of depth-1 0.5×Sb rule).
+    const userMinDelayTicks = options.strettoMinDelayBeats != null
+        ? Math.ceil(Math.round(options.strettoMinDelayBeats * ppq) / delayStep) * delayStep
+        : 0;
     const satisfiesHalfLengthTrigger = (previousDelayTicks: number, nextDelayTicks: number): boolean => (
         !((previousDelayTicks >= halfSubjectTicks || nextDelayTicks >= halfSubjectTicks) && nextDelayTicks >= previousDelayTicks)
     );
@@ -2531,11 +2535,13 @@ export async function searchStrettoChains(
         const bassIdx = options.ensembleTotal - 1;
 
         // Two entries conflict in time if they sound simultaneously (with 1-beat re-entry window).
+        // Uses chain[i].length rather than variants[...].lengthTicks so auto-truncation
+        // overrides (which shorten chain[i].length) are respected.
         function conflicts(i: number, j: number): boolean {
             const iStart = Math.round(chain[i].startBeat * ppq);
             const jStart = Math.round(chain[j].startBeat * ppq);
             if (iStart > jStart) return conflicts(j, i);
-            const iEnd = iStart + variants[vIndices[i]].lengthTicks;
+            const iEnd = iStart + chain[i].length;
             return jStart < iEnd - ppq;
         }
 
@@ -2618,6 +2624,57 @@ export async function searchStrettoChains(
         return assigned;
     }
 
+    // Returns how many chain entries are still active (voice not yet freed) at `atTicks`.
+    function countActiveVoices(chain: StrettoChainOption[], vIdxs: number[], atTicks: number): number {
+        let count = 0;
+        for (let k = 0; k < chain.length; k++) {
+            const startK = Math.round(chain[k].startBeat * ppq);
+            const endK   = startK + variants[vIdxs[k]].lengthTicks;
+            if (startK < atTicks && endK - ppq > atTicks) count++;
+        }
+        return count;
+    }
+
+    // When useAutoTruncation is enabled, find entries where voice capacity is exceeded
+    // and shorten the oldest still-active entry to the minimum length that frees a voice.
+    // Returns the modified chain copies plus the total beats of auto-truncation applied.
+    function resolveAutoTruncations(
+        chain: StrettoChainOption[],
+        vIdxs: number[]
+    ): { chain: StrettoChainOption[]; autoTruncBeats: number } {
+        let autoTruncBeats = 0;
+        const outChain = [...chain];
+
+        for (let i = options.ensembleTotal; i < outChain.length; i++) {
+            const startI = Math.round(outChain[i].startBeat * ppq);
+            const active = countActiveVoices(outChain, vIdxs, startI);
+            if (active < options.ensembleTotal) continue;
+
+            // Find the oldest active entry (earliest end time that still occupies a voice at startI)
+            let oldestK = -1;
+            let oldestEnd = Infinity;
+            for (let k = 0; k < i; k++) {
+                const startK = Math.round(outChain[k].startBeat * ppq);
+                const endK   = startK + variants[vIdxs[k]].lengthTicks;
+                if (startK < startI && endK - ppq > startI && endK < oldestEnd) {
+                    oldestEnd = endK;
+                    oldestK = k;
+                }
+            }
+            if (oldestK === -1) continue;
+
+            const startOldest  = Math.round(outChain[oldestK].startBeat * ppq);
+            const neededLength = startI + ppq - startOldest;
+            const fullLength   = subjectLengthTicks;
+            if (neededLength <= 0 || neededLength >= fullLength) continue;
+
+            const truncBeats = (fullLength - neededLength) / ppq;
+            autoTruncBeats  += truncBeats;
+            outChain[oldestK] = { ...outChain[oldestK], length: neededLength };
+        }
+        return { chain: outChain, autoTruncBeats };
+    }
+
     function buildChainNoteEvents(chain: StrettoChainOption[], variantIndices: number[]): NoteEvent[] {
         const events: NoteEvent[] = [];
         for (let k = 0; k < chain.length; k++) {
@@ -2693,10 +2750,30 @@ export async function searchStrettoChains(
             }
         }
 
+        if (!isCanonDelaySearch && userMinDelayTicks > 0) minD = Math.max(minD, userMinDelayTicks);
         minD = Math.ceil(minD / delayStep) * delayStep;
         maxD = Math.floor(maxD / delayStep) * delayStep;
         for (let d = minD; d <= maxD; d += delayStep) possibleDelaysTicks.push(d);
         possibleDelaysTicks.sort((a, b) => a - b);
+
+        // Deprioritise delays that would likely dead-end due to voice exhaustion:
+        // when d_{i-1} was short (< Sb/N), delays where d_i + d_{i-1} < (N-2)*Sb/N
+        // are moved to the back so preferred continuations are explored first.
+        if (!isCanonDelaySearch && depth >= 2) {
+            const prevDelayTicks = Math.round(chain[depth - 1].startBeat * ppq)
+                - Math.round(chain[depth - 2].startBeat * ppq);
+            const shortThreshold = subjectLengthTicks / options.ensembleTotal;
+            if (prevDelayTicks < shortThreshold) {
+                const sumFloor = (options.ensembleTotal - 2) * subjectLengthTicks / options.ensembleTotal;
+                const preferred: number[] = [];
+                const deprioritised: number[] = [];
+                for (const d of possibleDelaysTicks) {
+                    (d + prevDelayTicks >= sumFloor ? preferred : deprioritised).push(d);
+                }
+                possibleDelaysTicks.length = 0;
+                possibleDelaysTicks.push(...preferred, ...deprioritised);
+            }
+        }
 
         let indexedTransitionsByDelay: TransitionBucketsByDelay | null = null;
         if (depth >= 2) {
@@ -3286,7 +3363,10 @@ export async function searchStrettoChains(
         // --- Seed: iterate firstDelay × e1 transposition × window transitions ---
         // tAB/tBC in TripletRecord are RELATIVE transposition deltas, so we enumerate
         // absolute tE1 first, then derive tE2 = tE1 + tAB, tE3 = tE2 + tBC.
-        const minFirstDelay = Math.ceil(halfSubjectTicks / delayStep) * delayStep;
+        const minFirstDelay = Math.max(
+            Math.ceil(halfSubjectTicks / delayStep) * delayStep,
+            userMinDelayTicks
+        );
         const maxFirstDelay = Math.floor(subjectLengthTicks * (2 / 3) / delayStep) * delayStep;
         const tripletsByVA = new Map<number, typeof allTripletRecords>();
         for (const tripletRecord of allTripletRecords) {
@@ -3650,7 +3730,19 @@ export async function searchStrettoChains(
         const timeoutGraceExhausted = elapsedMs >= finalizationDeadlineMs;
         if (timeoutGraceExhausted && timeoutFinalizationCandidatesRemaining <= 0) break;
         if (timeoutFinalizationCandidatesRemaining > 0) timeoutFinalizationCandidatesRemaining--;
-        const assigned = assignVoices([...uc.entries], [...uc.variantIndices]);
+        // Auto-truncation: when enabled, attempt to resolve voice-capacity conflicts by
+        // shortening the oldest still-active entry before re-trying voice assignment.
+        let workEntries = [...uc.entries];
+        let autoTruncBeats = 0;
+        if (options.useAutoTruncation) {
+            const resolved = resolveAutoTruncations(workEntries, uc.variantIndices);
+            if (resolved.autoTruncBeats > 0) {
+                workEntries = resolved.chain;
+                autoTruncBeats = resolved.autoTruncBeats;
+            }
+        }
+
+        const assigned = assignVoices(workEntries, [...uc.variantIndices]);
         if (assigned === null) {
             finalizationRejectedVoiceAssignment++;
             if (terminationReason === 'Timeout' && timeoutFallbackResults.length < MAX_RESULTS) {
@@ -3666,7 +3758,7 @@ export async function searchStrettoChains(
             continue;
         }
         finalizationScoredCount++;
-        const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq);
+        const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
         if (scored.isValid) {
             scoredResults.push(scored);
         } else {

@@ -1,5 +1,5 @@
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { StrettoSearchOptions, StrettoConstraintMode, RawNote } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 import { getVoiceLabel } from '../services/midiVoices';
@@ -95,8 +95,33 @@ export default function StrettoSearchPanel({
         setOptions(next);
     };
 
-    const availableAbove = options.subjectVoiceIndex; 
+    const availableAbove = options.subjectVoiceIndex;
     const availableBelow = (options.ensembleTotal - 1) - options.subjectVoiceIndex;
+
+    // Local string state for inline canon delay inputs (avoid snap-back on clear)
+    const [canonMinStr, setCanonMinStr] = useState(String(options.canonDelayMinBeats ?? 1));
+    const [canonMaxStr, setCanonMaxStr] = useState(String(options.canonDelayMaxBeats ?? 4));
+    useEffect(() => { setCanonMinStr(String(options.canonDelayMinBeats ?? 1)); }, [options.canonDelayMinBeats]);
+    useEffect(() => { setCanonMaxStr(String(options.canonDelayMaxBeats ?? 4)); }, [options.canonDelayMaxBeats]);
+
+    // Local string state for strettoMinDelayBeats input
+    const [minDelayStr, setMinDelayStr] = useState(
+        options.strettoMinDelayBeats != null ? String(options.strettoMinDelayBeats) : ''
+    );
+    useEffect(() => {
+        setMinDelayStr(options.strettoMinDelayBeats != null ? String(options.strettoMinDelayBeats) : '');
+    }, [options.strettoMinDelayBeats]);
+
+    const commitCanonMin = () => {
+        handleCanonDelayBoundChange('canonDelayMinBeats', parseFloat(canonMinStr));
+    };
+    const commitCanonMax = () => {
+        handleCanonDelayBoundChange('canonDelayMaxBeats', parseFloat(canonMaxStr));
+    };
+    const commitMinDelay = () => {
+        const v = parseFloat(minDelayStr);
+        handleChange('strettoMinDelayBeats', Number.isFinite(v) && v > 0 ? v : undefined);
+    };
 
     // Truncation Visualization Logic
     const truncationVisual = useMemo(() => {
@@ -288,8 +313,9 @@ export default function StrettoSearchPanel({
                                         type="number"
                                         min="0.5"
                                         step="0.5"
-                                        value={options.canonDelayMinBeats ?? 1}
-                                        onChange={(e) => handleCanonDelayBoundChange('canonDelayMinBeats', parseFloat(e.target.value))}
+                                        value={canonMinStr}
+                                        onChange={(e) => setCanonMinStr(e.target.value)}
+                                        onBlur={commitCanonMin}
                                         className="bg-gray-900 border border-gray-600 text-xs rounded px-1 py-1 text-white text-center"
                                     />
                                 </label>
@@ -299,8 +325,9 @@ export default function StrettoSearchPanel({
                                         type="number"
                                         min="0.5"
                                         step="0.5"
-                                        value={options.canonDelayMaxBeats ?? 4}
-                                        onChange={(e) => handleCanonDelayBoundChange('canonDelayMaxBeats', parseFloat(e.target.value))}
+                                        value={canonMaxStr}
+                                        onChange={(e) => setCanonMaxStr(e.target.value)}
+                                        onBlur={commitCanonMax}
                                         className="bg-gray-900 border border-gray-600 text-xs rounded px-1 py-1 text-white text-center"
                                     />
                                 </label>
@@ -315,6 +342,24 @@ export default function StrettoSearchPanel({
                     </div>
                 </div>
 
+                {/* 1b. Min Entry Delay */}
+                {(options.delaySearchCategory ?? 'stretto') === 'stretto' && (
+                    <div className="lg:col-span-4 flex items-center gap-3">
+                        <label className="text-[9px] text-gray-500 whitespace-nowrap">Min Entry Delay (beats)</label>
+                        <input
+                            type="number"
+                            min="0.5"
+                            step="0.5"
+                            placeholder="rule default"
+                            value={minDelayStr}
+                            onChange={(e) => setMinDelayStr(e.target.value)}
+                            onBlur={commitMinDelay}
+                            className="w-24 bg-gray-900 border border-gray-600 text-xs rounded px-1 py-1 text-white text-center"
+                        />
+                        <span className="text-[9px] text-gray-600 italic">floor on every d_i; leave blank for rule default</span>
+                    </div>
+                )}
+
                 {/* 2. Truncation (Col 4) */}
                 <div className="lg:col-span-4 flex flex-col gap-2">
                     <ConstraintSelector
@@ -326,8 +371,8 @@ export default function StrettoSearchPanel({
                     <div className={`flex flex-col gap-2 px-1 transition-opacity ${options.truncationMode === 'None' ? 'opacity-30 pointer-events-none' : ''}`}>
                         <div className="flex items-center gap-2">
                             <label className="text-[9px] text-gray-500 block">Cut Length (Q)</label>
-                            <input 
-                                type="number" 
+                            <input
+                                type="number"
                                 min="0.5" step="0.5"
                                 value={isNaN(options.truncationTargetBeats) ? '' : options.truncationTargetBeats}
                                 onChange={(e) => handleChange('truncationTargetBeats', parseFloat(e.target.value))}
@@ -336,6 +381,16 @@ export default function StrettoSearchPanel({
                         </div>
                         {truncationVisual}
                     </div>
+                    <label className="flex items-center gap-2 mt-1 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={options.useAutoTruncation ?? false}
+                            onChange={(e) => handleChange('useAutoTruncation', e.target.checked)}
+                            className="h-3 w-3 rounded bg-gray-900 border-gray-600 text-brand-primary focus:ring-0"
+                        />
+                        <span className="text-[10px] text-gray-300">Auto-truncate oldest voice when all voices exhausted</span>
+                        <span className="text-[9px] text-gray-600 italic">(enables chains requiring voice re-entry beyond capacity)</span>
+                    </label>
                 </div>
 
                 {/* 3. Inversion (Col 2) */}
