@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { CanonSearchOptions, CanonTranspositionMode } from '../../types';
 import { getStrictPitchName } from '../services/midiSpelling';
 
@@ -32,7 +32,22 @@ export default function CanonSearchPanel({
     };
 
     const clampedChainMax = Math.max(options.chainLengthMin, options.chainLengthMax);
-    const clampedDelayMax = Math.max(options.delayMinBeats, options.delayMaxBeats);
+
+    // Local string state for delay inputs so the user can clear and retype without snapping
+    const [delayMinStr, setDelayMinStr] = useState(String(options.delayMinBeats));
+    const [delayMaxStr, setDelayMaxStr] = useState(String(options.delayMaxBeats));
+    useEffect(() => { setDelayMinStr(String(options.delayMinBeats)); }, [options.delayMinBeats]);
+    useEffect(() => { setDelayMaxStr(String(options.delayMaxBeats)); }, [options.delayMaxBeats]);
+
+    const commitDelayMin = () => {
+        const v = Math.max(0.5, parseFloat(delayMinStr) || 0.5);
+        const newMax = Math.max(v, options.delayMaxBeats);
+        setOptions({ ...options, delayMinBeats: v, delayMaxBeats: newMax });
+    };
+    const commitDelayMax = () => {
+        const v = Math.max(options.delayMinBeats, parseFloat(delayMaxStr) || options.delayMinBeats);
+        set('delayMaxBeats', v);
+    };
 
     return (
         <div className="bg-gray-800 border border-gray-700 rounded p-4 mb-4 shadow-sm">
@@ -53,11 +68,9 @@ export default function CanonSearchPanel({
                                 type="number"
                                 min="0.5"
                                 step="0.5"
-                                value={options.delayMinBeats}
-                                onChange={e => {
-                                    const v = Math.max(0.5, parseFloat(e.target.value) || 0.5);
-                                    setOptions({ ...options, delayMinBeats: v, delayMaxBeats: Math.max(v, options.delayMaxBeats) });
-                                }}
+                                value={delayMinStr}
+                                onChange={e => setDelayMinStr(e.target.value)}
+                                onBlur={commitDelayMin}
                                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white text-center"
                             />
                         </div>
@@ -68,11 +81,9 @@ export default function CanonSearchPanel({
                                 type="number"
                                 min="0.5"
                                 step="0.5"
-                                value={clampedDelayMax}
-                                onChange={e => {
-                                    const v = Math.max(options.delayMinBeats, parseFloat(e.target.value) || options.delayMinBeats);
-                                    set('delayMaxBeats', v);
-                                }}
+                                value={delayMaxStr}
+                                onChange={e => setDelayMaxStr(e.target.value)}
+                                onBlur={commitDelayMax}
                                 className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-xs text-white text-center"
                             />
                         </div>
