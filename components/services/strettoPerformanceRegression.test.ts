@@ -120,11 +120,11 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
 
   assert.ok(report.stats.stageStats, `${fixtureName} must expose stageStats for regression checks.`);
 
-  // Stop reason: either Exhausted (if search space small enough) or Timeout (time-gated).
+  // Stop reason: Exhausted (space fully searched), Success (chains found before timeout), or Timeout.
   // NodeLimit should never occur (node budget removed).
   assert.ok(
-    report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
-    `${fixtureName}: unexpected stopReason '${report.stats.stopReason}' (expected 'Exhausted' or 'Timeout')`
+    report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout' || report.stats.stopReason === 'Success',
+    `${fixtureName}: unexpected stopReason '${report.stats.stopReason}' (expected 'Exhausted', 'Success', or 'Timeout')`
   );
 
   // Depth must reach the lower bound.
