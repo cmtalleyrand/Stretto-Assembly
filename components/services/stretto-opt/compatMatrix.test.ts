@@ -10,11 +10,11 @@ function runFlattenUnflattenBijectionTest(): void {
     let visited = 0;
     for (let vi = 0; vi < dimensions.V; vi += 1) {
         for (let vj = 0; vj < dimensions.V; vj += 1) {
-            for (let di = 0; di < dimensions.D; di += 1) {
+            for (let d_idx = 0; d_idx < dimensions.D; d_idx += 1) {
                 for (let ti = 0; ti < dimensions.T; ti += 1) {
-                    const index = matrix.flattenIndex(vi, vj, di, ti);
+                    const index = matrix.flattenIndex(vi, vj, d_idx, ti);
                     const roundTrip = matrix.unflattenIndex(index);
-                    assert.deepEqual(roundTrip, { vi, vj, di, ti }, `flatten/unflatten mismatch at index=${index}`);
+                    assert.deepEqual(roundTrip, { vi, vj, d_idx, ti }, `flatten/unflatten mismatch at index=${index}`);
                     visited += 1;
                 }
             }

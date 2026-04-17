@@ -176,8 +176,8 @@ export default function StrettoList({
 
             if (isTriplet) {
                 const nct = `${Math.round((r.nctRatio || 0) * 100)}%`;
-                const d2 = r.delayBeats2 != null ? formatQuarterNoteUnits(r.delayBeats2) : '?';
-                md += `| ${r.intervalLabel} | ${formatQuarterNoteUnits(r.delayBeats)} | ${d2} | ${entryNote} | ${diss} | ${nct} | ${intent} | ${errs} |\n`;
+                const d_te_2_display = r.delayBeats2 != null ? formatQuarterNoteUnits(r.delayBeats2) : '?';
+                md += `| ${r.intervalLabel} | ${formatQuarterNoteUnits(r.delayBeats)} | ${d_te_2_display} | ${entryNote} | ${diss} | ${nct} | ${intent} | ${errs} |\n`;
             } else {
                 md += `| ${r.intervalLabel} | ${formatQuarterNoteUnits(r.delayBeats)} | ${entryNote} | ${diss} | ${intent} | ${errs} |\n`;
             }

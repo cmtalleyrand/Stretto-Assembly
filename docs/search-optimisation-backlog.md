@@ -73,7 +73,7 @@ time. In the triplet inner loop, when `validDelayTransitions` is null (disabled/
 modes), break the inner loop when `p2.d > p1.d + delayStep`.
 
 **Why:** Currently the inner loop is an unsorted array; the bounded-expansion check
-`d2 <= d1 + delayStep` fires as a mid-loop `continue` rather than an early break.
+`d_te_2 <= d_te_1 + delayStep` fires as a mid-loop `continue` rather than an early break.
 With sorting, ~47% of inner iterations (the rejected-delay-shape fraction) become unreachable
 without even entering the loop body.
 

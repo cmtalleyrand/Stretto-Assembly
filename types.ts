@@ -304,7 +304,7 @@ export interface StrettoCandidate {
     intervalLabel: string;
     delayBeats: number;
     delayTicks: number;
-    /** Triplet only: absolute offset of e2 from e0 in beats (= d1 + d2) */
+    /** Triplet only: absolute offset of e2 from e0 in beats (= d_te_1 + d_te_2) */
     delayBeats2?: number;
     grade: StrettoGrade;
     errors: StrettoError[];

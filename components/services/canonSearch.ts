@@ -421,15 +421,15 @@ export async function runCanonSearch(
     let totalEvaluated = 0;
     let prunedByDissonance = 0;
 
-    for (let di = 0; di < delays.length; di++) {
-        const delayBeats = delays[di];
+    for (let d_idx = 0; d_idx < delays.length; d_idx++) {
+        const delayBeats = delays[d_idx];
         const delayTicks = Math.round(delayBeats * ppq);
 
         // Yield to the browser between delay batches so the UI stays responsive.
         await new Promise<void>(r => setTimeout(r, 0));
         onProgress?.(
-            (di / delays.length) * 100,
-            `Delay ${delayBeats}b (${di + 1}/${delays.length}) — ${results.length} passing so far`
+            (d_idx / delays.length) * 100,
+            `Delay ${delayBeats}b (${d_idx + 1}/${delays.length}) — ${results.length} passing so far`
         );
 
         for (const tTuple of tTuples) {
