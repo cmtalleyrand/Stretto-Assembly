@@ -120,11 +120,11 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
 
   assert.ok(report.stats.stageStats, `${fixtureName} must expose stageStats for regression checks.`);
 
-  // Stop reason: either Exhausted (if search space small enough) or Timeout (time-gated).
+  // Stop reason: Success (max-results bound), Exhausted (search-space exhaustion), or Timeout (time-gated).
   // NodeLimit should never occur (node budget removed).
   assert.ok(
-    report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
-    `${fixtureName}: unexpected stopReason '${report.stats.stopReason}' (expected 'Exhausted' or 'Timeout')`
+    report.stats.stopReason === 'Success' || report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
+    `${fixtureName}: unexpected stopReason '${report.stats.stopReason}' (expected 'Success', 'Exhausted', or 'Timeout')`
   );
 
   // Depth must reach the lower bound.
@@ -190,8 +190,8 @@ printComparisonTable();
       }
     );
     assert.ok(
-      report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
-      `admissibility-disabled run must complete with Exhausted/Timeout stopReason, got '${report.stats.stopReason}'`
+      report.stats.stopReason === 'Success' || report.stats.stopReason === 'Exhausted' || report.stats.stopReason === 'Timeout',
+      `admissibility-disabled run must complete with Success/Exhausted/Timeout stopReason, got '${report.stats.stopReason}'`
     );
     assert.ok(Array.isArray(report.results), 'admissibility-disabled run must return an array of results.');
     for (const result of report.results) {
