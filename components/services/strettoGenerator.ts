@@ -1920,7 +1920,7 @@ export async function searchStrettoChains(
     const absoluteTranspositionToIndex = new Map(transpositions.map((t, idx) => [t, idx]));
     const voiceTranspositionAdmissibilityIndex = buildVoiceTranspositionAdmissibilityIndex({
         targetChainLength: options.targetChainLength,
-        voiceCount: variants.length,
+        voiceCount: options.ensembleTotal,
         transpositionCount: transpositions.length,
         rootVoiceIndex: 0
     });
@@ -2353,20 +2353,26 @@ export async function searchStrettoChains(
 
     const validTripletDelayAs = [0, ...validAdjacentDelays];
     const maxTripletTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
+    // Voice assignment is post-hoc so we check whether ANY ensemble voice pair (vPrev, vCurr)
+    // is FSM-admissible at this depth. This preserves terminal coverage pruning (last
+    // ensembleTotal entries must cover all voices) while avoiding false negatives from
+    // variant indices being mistakenly used as voice labels.
     const hasVoiceTranspositionTripletContext = (
-        vPrev: number,
-        vCurr: number,
         transpositionAB: number,
         transpositionBC: number,
         startReachable: boolean,
         interiorReachable: boolean
     ): boolean => {
+        const nVoices = options.ensembleTotal;
         if (startReachable) {
             const tPrevIdx = absoluteTranspositionToIndex.get(transpositionAB);
             const tCurrIdx = absoluteTranspositionToIndex.get(transpositionAB + transpositionBC);
-            if (tPrevIdx !== undefined && tCurrIdx !== undefined
-                && voiceTranspositionAdmissibilityIndex.has(2, vPrev, vCurr, tPrevIdx, tCurrIdx)) {
-                return true;
+            if (tPrevIdx !== undefined && tCurrIdx !== undefined) {
+                for (let vp = 0; vp < nVoices; vp++) {
+                    for (let vc = 0; vc < nVoices; vc++) {
+                        if (voiceTranspositionAdmissibilityIndex.has(2, vp, vc, tPrevIdx, tCurrIdx)) return true;
+                    }
+                }
             }
         }
         if (!interiorReachable) return false;
@@ -2376,8 +2382,10 @@ export async function searchStrettoChains(
             const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
             if (tCurrIdx === undefined) continue;
             for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
-                if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vPrev, vCurr, tPrevIdx, tCurrIdx)) {
-                    return true;
+                for (let vp = 0; vp < nVoices; vp++) {
+                    for (let vc = 0; vc < nVoices; vc++) {
+                        if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vp, vc, tPrevIdx, tCurrIdx)) return true;
+                    }
                 }
             }
         }
@@ -2441,7 +2449,7 @@ export async function searchStrettoChains(
                 const interiorReachable = Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
                 if (!startReachable && !interiorReachable) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                } else if (!hasVoiceTranspositionTripletContext(vB, vC, p1.t, p2.t, startReachable, interiorReachable)) {
+                } else if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
                     rejectReason = TRIPLET_REJECT_REASON.VOICE;
                 }
             } else {
@@ -2653,7 +2661,7 @@ export async function searchStrettoChains(
             const interiorReachable = validDelayTransitionsByAbsPos === null
                 ? true
                 : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
-            if (!hasVoiceTranspositionTripletContext(p1.vB, p2.vB, p1.t, p2.t, startReachable, interiorReachable)) {
+            if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
                 continue;
             }
             const dAC = p1.d + p2.d;
@@ -3091,13 +3099,18 @@ export async function searchStrettoChains(
                     const tPrevIdx = absoluteTranspositionToIndex.get(prevTransposition);
                     const tCurrIdx = absoluteTranspositionToIndex.get(t);
                     if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                    if (!voiceTranspositionAdmissibilityIndex.has(
-                        depth,
-                        variantIndices[depth - 1],
-                        transition.nextVariantIndex,
-                        tPrevIdx,
-                        tCurrIdx
-                    )) continue;
+                    // Check if any ensemble voice pair admits this transition at this depth.
+                    // Voice assignment is post-hoc so we accept if ANY (vPrev, vCurr) is FSM-valid.
+                    let voiceAdmissible = false;
+                    const nV = options.ensembleTotal;
+                    outer1: for (let vp = 0; vp < nV; vp++) {
+                        for (let vc = 0; vc < nV; vc++) {
+                            if (voiceTranspositionAdmissibilityIndex.has(depth, vp, vc, tPrevIdx, tCurrIdx)) {
+                                voiceAdmissible = true; break outer1;
+                            }
+                        }
+                    }
+                    if (!voiceAdmissible) continue;
                     // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
@@ -3142,7 +3155,16 @@ export async function searchStrettoChains(
                         const tPrevIdx = absoluteTranspositionToIndex.get(chain[depth - 1].transposition);
                         const tCurrIdx = absoluteTranspositionToIndex.get(t);
                         if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                        if (!voiceTranspositionAdmissibilityIndex.has(depth, immPrevVarIdx, varIdx, tPrevIdx, tCurrIdx)) continue;
+                        let voiceAdmissible2 = false;
+                        const nV2 = options.ensembleTotal;
+                        outer2: for (let vp = 0; vp < nV2; vp++) {
+                            for (let vc = 0; vc < nV2; vc++) {
+                                if (voiceTranspositionAdmissibilityIndex.has(depth, vp, vc, tPrevIdx, tCurrIdx)) {
+                                    voiceAdmissible2 = true; break outer2;
+                                }
+                            }
+                        }
+                        if (!voiceAdmissible2) continue;
                         stageStats.candidateTransitionsEnumerated++;
                         candidateTransitions.push({
                             varIdx,
