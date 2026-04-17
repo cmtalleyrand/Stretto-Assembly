@@ -1,21 +1,9 @@
 import assert from 'node:assert/strict';
 import { searchStrettoChains } from './strettoGenerator';
-import type { RawNote, StrettoSearchOptions, StrettoChainResult } from '../../types';
+import { computeU1, computeU2 } from './strettoTestUtils';
+import type { RawNote, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
-
-// Outcome quality metric: rewards low dissonance and full-length chains.
-// Chains with dissonanceRatio >= 0.5 contribute 0 (clamped by max(..., 0)).
-// Length factor: 3^(chainLength - targetLength), so missing one step is 3x cheaper.
-function outcomeScore(results: StrettoChainResult[], targetChainLength: number): number {
-    let total = 0;
-    for (const chain of results) {
-        const d = chain.dissonanceRatio ?? 0;
-        if (d >= 0.5) continue;
-        total += (1 / (0.5 - d)) * Math.pow(3, chain.entries.length - targetChainLength);
-    }
-    return total;
-}
 
 // Three subjects from Bach's Well-Tempered Clavier Book I.
 // ABC convention used: uppercase A–G = A4–G4 (middle-C octave, key sig applied);
@@ -181,16 +169,15 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
     );
 
     // Outcome quality: logged for visibility, not asserted (time-bounded runs are non-deterministic).
-    const score = outcomeScore(report.results, fixture.options.targetChainLength);
+    const u1 = computeU1(report.results, fixture.options.targetChainLength);
+    const u2 = computeU2(report.results, fixture.options.targetChainLength);
     const fullLength = report.results.filter(c => c.entries.length === fixture.options.targetChainLength).length;
-    const avgDiss = report.results.length
-        ? report.results.reduce((s, c) => s + (c.dissonanceRatio ?? 0), 0) / report.results.length
-        : 0;
+    const st = report.stats.stageTiming;
     console.log(
         `[${fixtureName}] stopReason=${report.stats.stopReason} depth=${report.stats.maxDepthReached}` +
         ` chains=${report.results.length} fullLength=${fullLength}` +
-        ` avgDissonance=${avgDiss.toFixed(3)} outcomeScore=${score.toFixed(2)}` +
-        ` timeMs=${report.stats.timeMs}`
+        ` U1=${u1.toFixed(2)} U2=${u2.toFixed(2)} timeMs=${report.stats.timeMs}` +
+        (st ? ` [admiss=${st.admissibilityMs}ms pair=${st.pairwiseMs}ms trip=${st.tripletMs}ms dag=${st.dagMs}ms]` : '')
     );
 }
 

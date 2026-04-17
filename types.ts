@@ -632,6 +632,12 @@ export interface StrettoSearchReport {
             frontierClassesAtTermination: number;
             completionRatioLowerBound?: number | null;
         };
+        stageTiming?: {
+            admissibilityMs: number;
+            pairwiseMs: number;
+            tripletMs: number;
+            dagMs: number;
+        };
         stageStats?: {
             validDelayCount: number;
             transpositionCount: number;

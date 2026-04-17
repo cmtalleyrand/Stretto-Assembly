@@ -65,9 +65,11 @@ interface PairTuple {
 }
 
 type StrettoPrecomputeBackend = 'map' | 'dense';
+export type StrettoAdmissibilityMode = 'full' | 'delay-variant-only' | 'disabled';
 
-interface StrettoPrecomputeConfig {
+export interface StrettoPrecomputeConfig {
     backend?: StrettoPrecomputeBackend;
+    admissibilityMode?: StrettoAdmissibilityMode;
 }
 
 type PairwiseByTransposition = Map<number, PairwiseCompatibilityRecord>;
@@ -644,6 +646,135 @@ async function buildEntryStateAdmissibilityModel(
 
     return { admissiblePairKeys, statesVisited: visited.size };
 }
+
+// Cheaper admissibility DFS: only tracks (depth, variantIndex, delay, nInv, nTrunc) —
+// no transposition dimension. Enforces variant quotas and delay rules (A.2–A.5, A.6)
+// but not transposition constraints. For each reachable (vA, vB, d), every transposition
+// is considered admissible; the admissibilityMatrix is then populated for all tIdx.
+async function buildDelayVariantAdmissibilityModel(
+    variants: SubjectVariant[],
+    delayStep: number,
+    targetChainLength: number,
+    options: StrettoSearchOptions
+): Promise<EntryStateAdmissibilityModel> {
+    const isCanonDelaySearch = options.delaySearchCategory === 'canon';
+    const ppq = delayStep * 2;
+    const canonDelayMinTicksRaw = Math.round((options.canonDelayMinBeats ?? 1) * ppq);
+    const canonDelayMaxTicksRaw = Math.round((options.canonDelayMaxBeats ?? 4) * ppq);
+    const canonDelayLowerTicks = Math.max(delayStep, Math.min(canonDelayMinTicksRaw, canonDelayMaxTicksRaw));
+    const canonDelayUpperTicks = Math.max(delayStep, Math.max(canonDelayMinTicksRaw, canonDelayMaxTicksRaw));
+    const canonDelayMinTicks = Math.ceil(canonDelayLowerTicks / delayStep) * delayStep;
+    const canonDelayMaxTicks = Math.floor(canonDelayUpperTicks / delayStep) * delayStep;
+    const isCanonicalDelayAllowed = (delayTicks: number): boolean => (
+        !isCanonDelaySearch || (delayTicks >= canonDelayMinTicks && delayTicks <= canonDelayMaxTicks)
+    );
+
+    // admissiblePairKeys: vA → vB → delay → Set (placeholder — transpositions added at matrix-build time)
+    const admissiblePairKeys: AdmissiblePairIndex = new Map();
+    const addAdmissiblePair = (vA: number, vB: number, d: number): void => {
+        let byVB = admissiblePairKeys.get(vA);
+        if (!byVB) { byVB = new Map(); admissiblePairKeys.set(vA, byVB); }
+        let byD = byVB.get(vB);
+        if (!byD) { byD = new Map(); byVB.set(vB, byD); }
+        if (!byD.has(d)) byD.set(d, new Set());
+    };
+
+    interface DVState {
+        depth: number;
+        prevVariantIndex: number;
+        prevEntryLengthTicks: number;
+        prevDelayTicks: number | null;
+        prevPrevDelayTicks: number | null;
+        nInv: number;
+        nTrunc: number;
+    }
+
+    const stack: DVState[] = [{
+        depth: 1,
+        prevVariantIndex: 0,
+        prevEntryLengthTicks: variants[0].lengthTicks,
+        prevDelayTicks: null,
+        prevPrevDelayTicks: null,
+        nInv: 0,
+        nTrunc: 0
+    }];
+    const visited = new Set<string>();
+    let operationCounter = 0;
+
+    while (stack.length > 0) {
+        const state = stack.pop()!;
+        operationCounter++;
+        if (shouldYieldToEventLoop(operationCounter)) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+        if (state.depth >= targetChainLength) continue;
+
+        let minD = delayStep;
+        let maxD = Math.floor(state.prevEntryLengthTicks * (2 / 3));
+        if (state.depth === 1) {
+            if (isCanonDelaySearch) { minD = canonDelayMinTicks; maxD = canonDelayMaxTicks; }
+            else { minD = Math.floor(state.prevEntryLengthTicks * 0.5); }
+        } else {
+            const prevDelayTicks = state.prevDelayTicks!;
+            const prevSubjectLengthTicks = state.prevEntryLengthTicks;
+            if (isCanonDelaySearch) { minD = prevDelayTicks; maxD = prevDelayTicks; }
+            else {
+                minD = Math.max(minD, prevDelayTicks - Math.floor(prevSubjectLengthTicks / 4));
+                if (state.prevPrevDelayTicks !== null) {
+                    const ppd = state.prevPrevDelayTicks;
+                    if (prevDelayTicks > ppd && prevDelayTicks > (prevSubjectLengthTicks / 3)) {
+                        maxD = Math.min(maxD, ppd - delayStep);
+                    }
+                }
+            }
+        }
+        minD = Math.ceil(minD / delayStep) * delayStep;
+        maxD = Math.floor(maxD / delayStep) * delayStep;
+        if (minD > maxD) continue;
+
+        for (let delayTicks = minD; delayTicks <= maxD; delayTicks += delayStep) {
+            if (!isCanonicalDelayAllowed(delayTicks)) continue;
+            if (state.depth >= 2) {
+                const prevDelayTicks = state.prevDelayTicks!;
+                const halfSubjectTicks = state.prevEntryLengthTicks / 2;
+                if (!isCanonDelaySearch && (prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
+            }
+
+            for (let nextVariantIndex = 0; nextVariantIndex < variants.length; nextVariantIndex++) {
+                const nextVariant = variants[nextVariantIndex];
+                const isInv = nextVariant.type === 'I';
+                const isTrunc = nextVariant.truncationBeats > 0;
+                const prevVariant = variants[state.prevVariantIndex];
+                const prevIsInv = prevVariant.type === 'I';
+                const prevIsTrunc = prevVariant.truncationBeats > 0;
+                if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+                if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
+                if (isTrunc && !checkQuota(options.truncationMode, state.nTrunc)) continue;
+
+                addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks);
+
+                const nextInv = state.nInv + (isInv ? 1 : 0);
+                const nextTrunc = state.nTrunc + (isTrunc ? 1 : 0);
+                const nextDepth = state.depth + 1;
+                const visitKey = [nextDepth, nextVariantIndex, delayTicks, state.prevDelayTicks ?? -1, nextInv, nextTrunc].join('|');
+                if (visited.has(visitKey)) continue;
+                visited.add(visitKey);
+                stack.push({
+                    depth: nextDepth,
+                    prevVariantIndex: nextVariantIndex,
+                    prevEntryLengthTicks: nextVariant.lengthTicks,
+                    prevDelayTicks: delayTicks,
+                    prevPrevDelayTicks: state.prevDelayTicks,
+                    nInv: nextInv,
+                    nTrunc: nextTrunc
+                });
+            }
+        }
+    }
+
+    return { admissiblePairKeys, statesVisited: visited.size };
+}
+
 // --- Precomputation: Scales & Inversion ---
 
 function normalizeSubject(notes: RawNote[], ppq: number): { notes: InternalNote[], offsetTicks: number } {
@@ -1841,30 +1972,38 @@ export async function searchStrettoChains(
 
     const collectSpans = options.collectDiagnosticSpans === true;
     const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
+    const admissibilityMode: StrettoAdmissibilityMode = forceFullPairwiseDiagnostic
+        ? 'disabled'
+        : (internalConfig?.admissibilityMode ?? 'full');
+
     // Emit concrete stage metadata before structural admissibility precompute begins.
     // This phase can be expensive for larger option spaces; emitting here ensures
     // UI transitions out of heartbeat-only status immediately.
     emitStageProgress('pairwise', 0, 1, true);
-    const entryStateAdmissibilityModel = forceFullPairwiseDiagnostic
+    const t0Admissibility = Date.now();
+    const entryStateAdmissibilityModel = admissibilityMode === 'disabled'
         ? { admissiblePairKeys: null, statesVisited: 0 }
-        : await buildEntryStateAdmissibilityModel(
-            variants,
-            transpositions,
-            relativeTranspositionDeltas,
-            delayStep,
-            options.targetChainLength,
-            options
-        );
+        : admissibilityMode === 'delay-variant-only'
+            ? await buildDelayVariantAdmissibilityModel(variants, delayStep, options.targetChainLength, options)
+            : await buildEntryStateAdmissibilityModel(
+                variants,
+                transpositions,
+                relativeTranspositionDeltas,
+                delayStep,
+                options.targetChainLength,
+                options
+            );
+    const admissibilityMs = Date.now() - t0Admissibility;
 
     // Translate the admissibility model's nested-Map structure into a dense compat matrix
     // so the pairwise hot-loop uses a single byte-array probe instead of 4-level Map chaining.
     // Both validAdjacentDelays and validPairwiseDelays share the same delayStep stride from the
     // same origin, so the pairwise loop's dIdx equals the adjacent-delay index for every d ≤ maxAdjacentDelayTicks.
     const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
+    const transpToIdx = new Map(relativeTranspositionDeltas.map((t, i) => [t, i]));
+    const adjDelayToIdx = (d: number) => Math.round(d / delayStep) - 1;
     const admissibilityMatrix = admissiblePairKeys
         ? (() => {
-            const transpToIdx = new Map(relativeTranspositionDeltas.map((t, i) => [t, i]));
-            const adjDelayToIdx = (d: number) => Math.round(d / delayStep) - 1;
             const m = createCompatMatrix({
                 V: variants.length,
                 D: validAdjacentDelays.length,
@@ -1875,10 +2014,17 @@ export async function searchStrettoChains(
                     for (const [d, transpSet] of byD) {
                         const di = adjDelayToIdx(d);
                         if (di < 0 || di >= validAdjacentDelays.length) continue;
-                        for (const t of transpSet) {
-                            const ti = transpToIdx.get(t);
-                            if (ti === undefined) continue;
-                            m.set(vA, vB, di, ti, { status: 1, constraintClass: 0 });
+                        if (admissibilityMode === 'delay-variant-only') {
+                            // Mark ALL transpositions admissible for this (vA, vB, d)
+                            for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
+                                m.set(vA, vB, di, tIdx, { status: 1, constraintClass: 0 });
+                            }
+                        } else {
+                            for (const t of transpSet) {
+                                const ti = transpToIdx.get(t);
+                                if (ti === undefined) continue;
+                                m.set(vA, vB, di, ti, { status: 1, constraintClass: 0 });
+                            }
                         }
                     }
                 }
@@ -1914,6 +2060,7 @@ export async function searchStrettoChains(
     // Phase 1: STRUCTURAL PAIRWISE PRECOMPUTATION
     // Compute all 3 bass-role scans (none, a, b) at precomp time so traversal never re-scans.
     // Also precompute interval class metadata for quota checks.
+    const t0Pairwise = Date.now();
     for (let iA = 0; iA < variants.length; iA++) {
         const vA = variants[iA];
         for (let iB = 0; iB < variants.length; iB++) {
@@ -2100,8 +2247,11 @@ export async function searchStrettoChains(
         }
     }
 
+    const pairwiseMs = Date.now() - t0Pairwise;
+
     // --- PRECOMPUTE TRIPLES ---
     // Numeric window-transition index is precomputed once so expandNode never rebuilds it.
+    const t0Triplet = Date.now();
     const validPairsList = precomputeIndex.getValidPairs();
 
     // Extended-delay pairs (d > 2/3 Sb, added by validPairwiseDelays) are needed for the A→C
@@ -3028,6 +3178,8 @@ export async function searchStrettoChains(
     }
     const deferredPartials: DeferredPartial[] = [];
     emitStageProgress('triplet', tripletTotalUnits, tripletTotalUnits, true);
+    const tripletMs = Date.now() - t0Triplet;
+    const t0Dag = Date.now();
     const dagTotalUnits = Math.max(1, options.targetChainLength);
     let dagCompletedUnits = 0;
     dagExploredWorkItems = 0;
@@ -3827,6 +3979,12 @@ export async function searchStrettoChains(
             nodesVisited,
             edgesTraversed,
             timeMs: Date.now() - startTime,
+            stageTiming: {
+                admissibilityMs,
+                pairwiseMs,
+                tripletMs,
+                dagMs: Date.now() - t0Dag,
+            },
             stopReason: stopReason,
             maxDepthReached: maxDepth,
             metricOffsetTicks: offsetTicks,
