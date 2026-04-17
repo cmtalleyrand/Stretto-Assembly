@@ -171,7 +171,7 @@ export default function StrettoView({
         pivotMidi: 60, // Placeholder, updated in effect
         requireConsonantEnd: false,
         disallowComplexExceptions: true,
-        maxPairwiseDissonance: 0.5, // Default hard cap: 50% dissonant overlap
+        maxPairwiseDissonance: 0.4, // Default hard cap: 40% dissonant overlap
         scaleRoot: 0,
         scaleMode: 'Major',
         maxSearchTimeMs: 30000,

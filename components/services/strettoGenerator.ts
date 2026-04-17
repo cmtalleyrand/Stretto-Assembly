@@ -363,6 +363,10 @@ type AdmissiblePairIndex = Map<number, Map<number, Map<number, Set<number>>>>;
 
 interface EntryStateAdmissibilityModel {
     admissiblePairKeys: AdmissiblePairIndex | null;
+    // (vB, vC, d1, d2) tuples: valid delay transitions in the chain.
+    // vB = variant of entry i-1, vC = variant of entry i, d1 = delay_{i-1}, d2 = delay_i.
+    // Only populated by delay-variant admissibility mode; null otherwise.
+    validDelayTransitions: Set<string> | null;
     statesVisited: number;
 }
 
@@ -644,7 +648,7 @@ async function buildEntryStateAdmissibilityModel(
         }
     }
 
-    return { admissiblePairKeys, statesVisited: visited.size };
+    return { admissiblePairKeys, validDelayTransitions: null, statesVisited: visited.size };
 }
 
 // Cheaper admissibility DFS: only tracks (depth, variantIndex, delay, nInv, nTrunc) —
@@ -678,6 +682,10 @@ async function buildDelayVariantAdmissibilityModel(
         if (!byD) { byD = new Map(); byVB.set(vB, byD); }
         if (!byD.has(d)) byD.set(d, new Set());
     };
+    // (vB, vC, d1, d2) valid delay transitions — used as O(1) lookup in triplet enumeration
+    // to replace A.10, A.8, and all four delay-shape arithmetic checks.
+    const validDelayTransitions = new Set<string>();
+    const fullSubjectHalfTicks = variants[0].lengthTicks / 2;
 
     interface DVState {
         depth: number;
@@ -750,8 +758,14 @@ async function buildDelayVariantAdmissibilityModel(
                 if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
                 if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
                 if (isTrunc && !checkQuota(options.truncationMode, state.nTrunc)) continue;
+                // A.10: no truncated entry at delay >= 0.5*Sb
+                if (!isCanonDelaySearch && isTrunc && delayTicks >= fullSubjectHalfTicks) continue;
 
                 addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks);
+                // Record (vB, vC, d1, d2) transition for O(1) triplet-stage lookup
+                if (state.prevDelayTicks !== null) {
+                    validDelayTransitions.add(`${state.prevVariantIndex}:${nextVariantIndex}:${state.prevDelayTicks}:${delayTicks}`);
+                }
 
                 const nextInv = state.nInv + (isInv ? 1 : 0);
                 const nextTrunc = state.nTrunc + (isTrunc ? 1 : 0);
@@ -772,7 +786,7 @@ async function buildDelayVariantAdmissibilityModel(
         }
     }
 
-    return { admissiblePairKeys, statesVisited: visited.size };
+    return { admissiblePairKeys, validDelayTransitions, statesVisited: visited.size };
 }
 
 // --- Precomputation: Scales & Inversion ---
@@ -1982,7 +1996,7 @@ export async function searchStrettoChains(
     emitStageProgress('pairwise', 0, 1, true);
     const t0Admissibility = Date.now();
     const entryStateAdmissibilityModel = admissibilityMode === 'disabled'
-        ? { admissiblePairKeys: null, statesVisited: 0 }
+        ? { admissiblePairKeys: null, validDelayTransitions: null, statesVisited: 0 }
         : admissibilityMode === 'delay-variant-only'
             ? await buildDelayVariantAdmissibilityModel(variants, delayStep, options.targetChainLength, options)
             : await buildEntryStateAdmissibilityModel(
@@ -2000,6 +2014,7 @@ export async function searchStrettoChains(
     // Both validAdjacentDelays and validPairwiseDelays share the same delayStep stride from the
     // same origin, so the pairwise loop's dIdx equals the adjacent-delay index for every d ≤ maxAdjacentDelayTicks.
     const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
+    const validDelayTransitions = entryStateAdmissibilityModel.validDelayTransitions;
     const transpToIdx = new Map(relativeTranspositionDeltas.map((t, i) => [t, i]));
     const adjDelayToIdx = (d: number) => Math.round(d / delayStep) - 1;
     const admissibilityMatrix = admissiblePairKeys
@@ -2359,31 +2374,31 @@ export async function searchStrettoChains(
             const vCVariant = variants[vC];
             let rejectReason: TripletRejectReason | null = null;
 
-            // A.10: no truncated entries at delay >= 0.5*Sb (disabled in canon-delay mode)
-            if (!isCanonDelaySearch) {
-                if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
-                else if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
-            }
-
-            // A.8: Transform-following — transformed entry must be followed by normal
-            const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
-            const bTransformed = vBVariant.type === 'I' || vBVariant.truncationBeats > 0;
-            const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
-            if (!rejectReason && (aTransformed && bTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
-            if (!rejectReason && (bTransformed && cTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
-
-            // Delay progression constraints:
-            // - Stretto mode: bounded expansion (A.x local shape guard)
-            // - Canon mode: all delays must be identical
-            if (!rejectReason && !(isCanonDelaySearch ? d2 === d1 : d2 <= d1 + delayStep)) {
-                rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-            }
-
-            // A.2, A.5, A.4 on the d1→d2 edge — disabled in canon-delay mode
-            if (!isCanonDelaySearch) {
-                if (!rejectReason && !satisfiesHalfLengthTrigger(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                if (!rejectReason && !satisfiesMaximumContractionBound(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                if (!rejectReason && !satisfiesPostTruncationContraction(vB, d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+            if (validDelayTransitions !== null) {
+                // Delay-variant admissibility mode: single O(1) set probe replaces A.10, A.8,
+                // bounded expansion, A.2, A.5, A.4 — all encoded in the DFS transition index.
+                if (!validDelayTransitions.has(`${vB}:${vC}:${d1}:${d2}`)) {
+                    rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                }
+            } else {
+                // Fallback for disabled/full-admissibility modes (no transition index available)
+                if (!isCanonDelaySearch) {
+                    if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
+                    else if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
+                }
+                const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
+                const bTransformed = vBVariant.type === 'I' || vBVariant.truncationBeats > 0;
+                const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
+                if (!rejectReason && (aTransformed && bTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
+                if (!rejectReason && (bTransformed && cTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
+                if (!rejectReason && !(isCanonDelaySearch ? d2 === d1 : d2 <= d1 + delayStep)) {
+                    rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                }
+                if (!isCanonDelaySearch) {
+                    if (!rejectReason && !satisfiesHalfLengthTrigger(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                    if (!rejectReason && !satisfiesMaximumContractionBound(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                    if (!rejectReason && !satisfiesPostTruncationContraction(vB, d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                }
             }
 
             if (rejectReason) {
