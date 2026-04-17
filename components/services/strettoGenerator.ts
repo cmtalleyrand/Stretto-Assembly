@@ -363,8 +363,8 @@ type AdmissiblePairIndex = Map<number, Map<number, Map<number, Set<number>>>>;
 
 interface EntryStateAdmissibilityModel {
     admissiblePairKeys: AdmissiblePairIndex | null;
-    // (vB, vC, d1, d2) tuples: valid delay transitions in the chain.
-    // vB = variant of entry i-1, vC = variant of entry i, d1 = delay_{i-1}, d2 = delay_i.
+    // Valid delay transitions, keyed as "${v_{i-1}}:${v_i}:${d_{i-1}}:${d_i}".
+    // d_i = delay of entry e_i relative to e_{i-1} (i.e. startBeat(e_i) − startBeat(e_{i-1})).
     // Only populated by delay-variant admissibility mode; null otherwise.
     validDelayTransitions: Set<string> | null;
     statesVisited: number;
@@ -682,8 +682,8 @@ async function buildDelayVariantAdmissibilityModel(
         if (!byD) { byD = new Map(); byVB.set(vB, byD); }
         if (!byD.has(d)) byD.set(d, new Set());
     };
-    // (vB, vC, d1, d2) valid delay transitions — used as O(1) lookup in triplet enumeration
-    // to replace A.10, A.8, and all four delay-shape arithmetic checks.
+    // (v_{i-1}, v_i, d_{i-1}, d_i) valid delay transitions — O(1) lookup at triplet stage
+    // replacing A.10, A.8, and delay-shape checks (bounded expansion, A.2, A.5, A.4).
     const validDelayTransitions = new Set<string>();
     const fullSubjectHalfTicks = variants[0].lengthTicks / 2;
 
@@ -762,7 +762,7 @@ async function buildDelayVariantAdmissibilityModel(
                 if (!isCanonDelaySearch && isTrunc && delayTicks >= fullSubjectHalfTicks) continue;
 
                 addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks);
-                // Record (vB, vC, d1, d2) transition for O(1) triplet-stage lookup
+                // key = "${v_{i-1}}:${v_i}:${d_{i-1}}:${d_i}"
                 if (state.prevDelayTicks !== null) {
                     validDelayTransitions.add(`${state.prevVariantIndex}:${nextVariantIndex}:${state.prevDelayTicks}:${delayTicks}`);
                 }
@@ -2375,8 +2375,9 @@ export async function searchStrettoChains(
             let rejectReason: TripletRejectReason | null = null;
 
             if (validDelayTransitions !== null) {
-                // Delay-variant admissibility mode: single O(1) set probe replaces A.10, A.8,
-                // bounded expansion, A.2, A.5, A.4 — all encoded in the DFS transition index.
+                // Single O(1) probe: key is "${v_{i-1}}:${v_i}:${d_{i-1}}:${d_i}" where
+                // v_{i-1}=vB, v_i=vC, d_{i-1}=d1 (delay into B), d_i=d2 (delay into C).
+                // Replaces A.10, A.8, bounded expansion, A.2, A.5, A.4.
                 if (!validDelayTransitions.has(`${vB}:${vC}:${d1}:${d2}`)) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
                 }
