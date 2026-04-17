@@ -363,10 +363,12 @@ type AdmissiblePairIndex = Map<number, Map<number, Map<number, Set<number>>>>;
 
 interface EntryStateAdmissibilityModel {
     admissiblePairKeys: AdmissiblePairIndex | null;
-    // Valid delay transitions, keyed as "${v_{i-1}}:${v_i}:${d_{i-1}}:${d_i}".
-    // d_i = delay of entry e_i relative to e_{i-1} (i.e. startBeat(e_i) − startBeat(e_{i-1})).
+    // Valid delay transitions, keyed as "${vPrev}:${vNext}:${dPrev}:${dNext}".
+    // dPrev/dNext are consecutive adjacent delays (in ticks) between neighboring entries.
+    // Indexed by absolute chain position p (1-based entry index), i.e. index p stores
+    // transitions (d_{p-1} -> d_p) observed while expanding DFS state.depth = p.
     // Only populated by delay-variant admissibility mode; null otherwise.
-    validDelayTransitions: Set<string> | null;
+    validDelayTransitions: Set<string>[] | null;
     statesVisited: number;
 }
 
@@ -682,9 +684,12 @@ async function buildDelayVariantAdmissibilityModel(
         if (!byD) { byD = new Map(); byVB.set(vB, byD); }
         if (!byD.has(d)) byD.set(d, new Set());
     };
-    // (v_{i-1}, v_i, d_{i-1}, d_i) valid delay transitions — O(1) lookup at triplet stage
+    // (vPrev, vNext, dPrev, dNext) valid delay transitions — O(1) lookup at triplet stage
     // replacing A.10, A.8, and delay-shape checks (bounded expansion, A.2, A.5, A.4).
-    const validDelayTransitions = new Set<string>();
+    const validDelayTransitionsByAbsPos: Set<string>[] = Array.from(
+        { length: Math.max(0, targetChainLength + 1) },
+        () => new Set<string>()
+    );
     const fullSubjectHalfTicks = variants[0].lengthTicks / 2;
 
     interface DVState {
@@ -762,9 +767,11 @@ async function buildDelayVariantAdmissibilityModel(
                 if (!isCanonDelaySearch && isTrunc && delayTicks >= fullSubjectHalfTicks) continue;
 
                 addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks);
-                // key = "${v_{i-1}}:${v_i}:${d_{i-1}}:${d_i}"
+                // key = "${vPrev}:${vNext}:${dPrev}:${dNext}"
                 if (state.prevDelayTicks !== null) {
-                    validDelayTransitions.add(`${state.prevVariantIndex}:${nextVariantIndex}:${state.prevDelayTicks}:${delayTicks}`);
+                    validDelayTransitionsByAbsPos[state.depth].add(
+                        `${state.prevVariantIndex}:${nextVariantIndex}:${state.prevDelayTicks}:${delayTicks}`
+                    );
                 }
 
                 const nextInv = state.nInv + (isInv ? 1 : 0);
@@ -786,7 +793,7 @@ async function buildDelayVariantAdmissibilityModel(
         }
     }
 
-    return { admissiblePairKeys, validDelayTransitions, statesVisited: visited.size };
+    return { admissiblePairKeys, validDelayTransitions: validDelayTransitionsByAbsPos, statesVisited: visited.size };
 }
 
 // --- Precomputation: Scales & Inversion ---
@@ -2014,7 +2021,17 @@ export async function searchStrettoChains(
     // Both validAdjacentDelays and validPairwiseDelays share the same delayStep stride from the
     // same origin, so the pairwise loop's dIdx equals the adjacent-delay index for every d ≤ maxAdjacentDelayTicks.
     const admissiblePairKeys = entryStateAdmissibilityModel.admissiblePairKeys;
-    const validDelayTransitions = entryStateAdmissibilityModel.validDelayTransitions;
+    const validDelayTransitionsByAbsPos = entryStateAdmissibilityModel.validDelayTransitions;
+    const validDelayTransitionsStartPos = validDelayTransitionsByAbsPos?.[2] ?? null;
+    const validDelayTransitionsInteriorPos = validDelayTransitionsByAbsPos
+        ? (() => {
+            const interior = new Set<string>();
+            for (let absPos = 3; absPos < validDelayTransitionsByAbsPos.length; absPos++) {
+                for (const key of validDelayTransitionsByAbsPos[absPos]) interior.add(key);
+            }
+            return interior;
+        })()
+        : null;
     const transpToIdx = new Map(relativeTranspositionDeltas.map((t, i) => [t, i]));
     const adjDelayToIdx = (d: number) => Math.round(d / delayStep) - 1;
     const admissibilityMatrix = admissiblePairKeys
@@ -2374,11 +2391,16 @@ export async function searchStrettoChains(
             const vCVariant = variants[vC];
             let rejectReason: TripletRejectReason | null = null;
 
-            if (validDelayTransitions !== null) {
-                // Single O(1) probe: key is "${v_{i-1}}:${v_i}:${d_{i-1}}:${d_i}" where
-                // v_{i-1}=vB, v_i=vC, d_{i-1}=d1 (delay into B), d_i=d2 (delay into C).
+            if (validDelayTransitionsByAbsPos !== null) {
+                // Single O(1) probe: key is "${vPrev}:${vNext}:${dPrev}:${dNext}" where
+                // vPrev=vB, vNext=vC, dPrev=d1 (delay into B), dNext=d2 (delay into C).
                 // Replaces A.10, A.8, bounded expansion, A.2, A.5, A.4.
-                if (!validDelayTransitions.has(`${vB}:${vC}:${d1}:${d2}`)) {
+                const transitionKey = `${vB}:${vC}:${d1}:${d2}`;
+                // A candidate can survive only if this transition is reachable in at least
+                // one admissible triplet context: chain-start (absolute position p=2) or interior (p>=3).
+                const startReachable = Boolean(validDelayTransitionsStartPos?.has(transitionKey));
+                const interiorReachable = Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
+                if (!startReachable && !interiorReachable) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
                 }
             } else {
@@ -2483,6 +2505,14 @@ export async function searchStrettoChains(
 
             let tripletHasValidDelayContext = false;
             for (const dCtx of validTripletDelayAs) {
+                if (validDelayTransitionsByAbsPos !== null) {
+                    const transitionKey = `${vB}:${vC}:${d1}:${d2}`;
+                    if (dCtx === 0) {
+                        if (!validDelayTransitionsStartPos?.has(transitionKey)) continue;
+                    } else {
+                        if (!validDelayTransitionsInteriorPos?.has(transitionKey)) continue;
+                    }
+                }
                 if (isCanonDelaySearch) {
                     if (dCtx !== 0 && dCtx !== d1) continue;
                 } else {
