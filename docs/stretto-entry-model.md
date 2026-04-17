@@ -52,9 +52,19 @@ All fields are per-entry fields of `e_i = (d_i,t_i,v_i,inv_i,trunc_i)`.
 |---|---|---|---|
 | `d_i` | `{⊥}` for `i=0`; `ℝ>=0` beats for `i>=1` (implementation may quantize to beat-grid step) | Incremental temporal spacing parameter | `d_0` is not applicable; for `i>=1`, `d_i` is the incremental delay value attached to entry `e_i`; absolute start offsets are derived by prefix sums `s_i = Σ_{k=1..i} d_k` with `s_0=0`. |
 | `t_i` | `ℤ` semitones | Pitch transform | Subject-to-voice-order constraints and transposition admissibility checks. |
-| `v_i` | `ℤ`, `0 <= v_i < ensembleTotal` | Voice assignment | **Assigned post-hoc** by a CSP backtracker after chain search completes, enforcing §B ordering rules (Rules 2A/2B/3A/3B) for all temporal pairs and §C re-entry. During BFS, `voiceIndex` carries placeholder values; the CSP fills in final values before results are returned. Chains with no valid assignment are discarded. |
+| `v_i` | `ℤ`, `0 <= v_i < ensembleTotal` | Voice assignment | **Finalized post-hoc** by the CSP backtracker `assignVoices` in `components/services/strettoGenerator.ts` after chain search completes, enforcing §B ordering rules (Rules 2A/2B/3A/3B) for all temporal pairs and §C re-entry. BFS/DAG search nodes may carry placeholder `voiceIndex` values; admissibility still incorporates voice-space constraints via mask-domain propagation in precomputation (see §3.1). Chains with no valid CSP assignment are discarded. |
 | `inv_i` | `{0,1}` (or `{false,true}`) | Binary transform flag | `1` means inversion form, `0` means non-inverted form. |
 | `trunc_i` | `ℝ>=0` beats removed from full subject (or equivalent non-negative truncation extent scalar) | Duration transform | `0` means full-length; `>0` means truncated. |
+
+
+### 3.1) Early Voice Feasibility Pruning
+
+Before final CSP assignment, the generator executes an early feasibility stage in `components/services/strettoGenerator.ts` to eliminate impossible voice-spacing configurations while keeping concrete voice identities unbound:
+
+1. **Pairwise mask construction** via `buildAllowedVoiceMaskRows(...)` creates row-wise bitmasks of admissible successor voices for a given pairwise relation (delay/transposition/variant context).
+2. **Triplet feasibility check** via `hasFeasibleTripletAssignment(...)` performs mask-domain propagation over the `(A,B,C)` window to verify that at least one assignment satisfies spacing/order constraints simultaneously across the three entries.
+
+This stage is intentionally existential: it proves non-emptiness of the local voice domain but does not assign a definitive `voiceIndex` to chain entries. Consequently, BFS and DAG states can retain placeholder voice indices, yet the search remains voice-space admissible because impossible domains are pruned before extension. Final concrete indices are still produced only by `assignVoices(...)` after a complete chain candidate is formed.
 
 ### Derived predicates
 
