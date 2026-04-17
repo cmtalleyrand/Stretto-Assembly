@@ -30,6 +30,11 @@ type RunMetrics = {
   harmonicallyValidTriples: number;
   nodesVisited: number;
   stopReason: string;
+  resultsCount: number;
+  maxDepthReached: number;
+  scoringValidChainsFound: number;
+  structurallyCompleteChainsFound: number;
+  bestScore: number;
 };
 
 const PPQ = 480;
@@ -96,6 +101,39 @@ const FIXTURES: Fixture[] = [
   }
 ];
 
+const BUDGETED_FIXTURES: Fixture[] = [
+  {
+    name: 'budgeted_target8_scale8',
+    subject: [
+      { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
+      { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
+      { midi: 64, ticks: 960, durationTicks: 480, velocity: 90, name: 'E4' },
+      { midi: 65, ticks: 1440, durationTicks: 480, velocity: 90, name: 'F4' },
+      { midi: 67, ticks: 1920, durationTicks: 480, velocity: 90, name: 'G4' },
+      { midi: 69, ticks: 2400, durationTicks: 480, velocity: 90, name: 'A4' },
+      { midi: 71, ticks: 2880, durationTicks: 480, velocity: 90, name: 'B4' },
+      { midi: 72, ticks: 3360, durationTicks: 480, velocity: 90, name: 'C5' }
+    ],
+    options: {
+      ensembleTotal: 8,
+      targetChainLength: 8,
+      subjectVoiceIndex: 1,
+      truncationMode: 'None',
+      truncationTargetBeats: 1,
+      inversionMode: 'None',
+      useChromaticInversion: false,
+      thirdSixthMode: 'None',
+      pivotMidi: 60,
+      requireConsonantEnd: false,
+      disallowComplexExceptions: true,
+      maxPairwiseDissonance: 0.5,
+      maxSearchTimeMs: 5000,
+      scaleRoot: 0,
+      scaleMode: 'Major'
+    }
+  }
+];
+
 const MODES: Mode[] = [
   {
     name: 'full-domain-default',
@@ -133,7 +171,10 @@ function mean(values: number[]): number {
 }
 
 function pctDelta(reference: number, candidate: number): number {
-  if (reference === 0) return 0;
+  if (reference === 0) {
+    if (candidate === 0) return 0;
+    return Number.POSITIVE_INFINITY;
+  }
   return ((candidate - reference) / reference) * 100;
 }
 
@@ -175,7 +216,12 @@ async function runSingle(fixture: Fixture): Promise<RunMetrics> {
     tripleCandidates: stageStats.tripleCandidates,
     harmonicallyValidTriples: stageStats.harmonicallyValidTriples,
     nodesVisited: report.stats.nodesVisited,
-    stopReason: report.stats.stopReason
+    stopReason: report.stats.stopReason,
+    resultsCount: report.results.length,
+    maxDepthReached: report.stats.maxDepthReached,
+    scoringValidChainsFound: report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0,
+    structurallyCompleteChainsFound: report.stats.completionDiagnostics?.structurallyCompleteChainsFound ?? 0,
+    bestScore: report.results.length > 0 ? Math.max(...report.results.map((result) => result.score)) : Number.NEGATIVE_INFINITY
   };
 }
 
@@ -199,6 +245,10 @@ function summarize(label: string, runs: RunMetrics[]): string {
     `tripletStageMs(mean/median)=${mean(runs.map((r) => r.tripletStageMs)).toFixed(2)}/${median(runs.map((r) => r.tripletStageMs)).toFixed(2)}`,
     `dagStageMs(mean/median)=${mean(runs.map((r) => r.dagStageMs)).toFixed(2)}/${median(runs.map((r) => r.dagStageMs)).toFixed(2)}`,
     `nodesVisited(mean)=${mean(runs.map((r) => r.nodesVisited)).toFixed(2)}`,
+    `resultsCount(mean)=${mean(runs.map((r) => r.resultsCount)).toFixed(2)}`,
+    `maxDepth(mean)=${mean(runs.map((r) => r.maxDepthReached)).toFixed(2)}`,
+    `scoringValidChainsFound(mean)=${mean(runs.map((r) => r.scoringValidChainsFound)).toFixed(2)}`,
+    `structurallyCompleteChainsFound(mean)=${mean(runs.map((r) => r.structurallyCompleteChainsFound)).toFixed(2)}`,
     `stopReasons=${Array.from(new Set(runs.map((r) => r.stopReason))).join(',')}`
   ].join(' ');
 }
@@ -243,6 +293,27 @@ async function main(): Promise<void> {
           `delta.pairwiseStageMedianPct=${pctDelta(median(fullRuns.map((r) => r.pairwiseStageMs)), median(prunedRuns.map((r) => r.pairwiseStageMs))).toFixed(2)}%`,
           `delta.tripletStageMedianPct=${pctDelta(median(fullRuns.map((r) => r.tripletStageMs)), median(prunedRuns.map((r) => r.tripletStageMs))).toFixed(2)}%`,
           `delta.wallMedianPct=${pctDelta(median(fullRuns.map((r) => r.wallMs)), median(prunedRuns.map((r) => r.wallMs))).toFixed(2)}%`
+        ].join(' ')
+      );
+    }
+
+    for (const fixture of BUDGETED_FIXTURES) {
+      const fullRuns = await runFixtureMode(fixture, MODES[0]);
+      const prunedRuns = await runFixtureMode(fixture, MODES[1]);
+      const fullWallMedian = median(fullRuns.map((r) => r.wallMs));
+      const prunedWallMedian = median(prunedRuns.map((r) => r.wallMs));
+      const fullQualityPerSecond = mean(fullRuns.map((r) => r.scoringValidChainsFound / (r.wallMs / 1000)));
+      const prunedQualityPerSecond = mean(prunedRuns.map((r) => r.scoringValidChainsFound / (r.wallMs / 1000)));
+      const qualityDelta = pctDelta(fullQualityPerSecond, prunedQualityPerSecond);
+
+      console.log(`[stretto-admissibility-ab][budgeted] fixture=${fixture.name}`);
+      console.log(`[stretto-admissibility-ab][budgeted] ${summarize('full-domain-default', fullRuns)}`);
+      console.log(`[stretto-admissibility-ab][budgeted] ${summarize('admissibility-enabled', prunedRuns)}`);
+      console.log(
+        [
+          `[stretto-admissibility-ab][budgeted] fixture=${fixture.name}`,
+          `delta.wallMedianPct=${pctDelta(fullWallMedian, prunedWallMedian).toFixed(2)}%`,
+          `delta.qualityPerSecondPct=${Number.isFinite(qualityDelta) ? `${qualityDelta.toFixed(2)}%` : '+Inf'}`
         ].join(' ')
       );
     }
