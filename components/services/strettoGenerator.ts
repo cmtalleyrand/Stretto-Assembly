@@ -5,6 +5,7 @@ import { calculateStrettoScore, SubjectVariant, InternalNote } from './strettoSc
 import { getInvertedPitch } from './strettoCore';
 import { buildTranspositionRuleTables, TranspositionIndex as RuleTranspositionIndex } from './stretto-opt/ruleTables';
 import { createCompatMatrix } from './stretto-opt/compatMatrix';
+import { buildVoiceTranspositionAdmissibilityIndex } from './stretto-opt/voiceTranspositionAdmissibility';
 
 // --- Constants & Types ---
 // Node budget removed — time is the only search limit.
@@ -1916,6 +1917,13 @@ export async function searchStrettoChains(
     if (options.thirdSixthMode !== 'None') {
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
+    const absoluteTranspositionToIndex = new Map(transpositions.map((t, idx) => [t, idx]));
+    const voiceTranspositionAdmissibilityIndex = buildVoiceTranspositionAdmissibilityIndex({
+        targetChainLength: options.targetChainLength,
+        voiceCount: variants.length,
+        transpositionCount: transpositions.length,
+        rootVoiceIndex: 0
+    });
     const allowedTranspositions = new Set(transpositions);
     const relativeTranspositionDeltas = Array.from(new Set(
         transpositions.flatMap((left) => transpositions.map((right) => right - left))
@@ -2344,6 +2352,37 @@ export async function searchStrettoChains(
     emitStageProgress('triplet', 0, tripletTotalUnits, true);
 
     const validTripletDelayAs = [0, ...validAdjacentDelays];
+    const maxTripletTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
+    const hasVoiceTranspositionTripletContext = (
+        vPrev: number,
+        vCurr: number,
+        transpositionAB: number,
+        transpositionBC: number,
+        startReachable: boolean,
+        interiorReachable: boolean
+    ): boolean => {
+        if (startReachable) {
+            const tPrevIdx = absoluteTranspositionToIndex.get(transpositionAB);
+            const tCurrIdx = absoluteTranspositionToIndex.get(transpositionAB + transpositionBC);
+            if (tPrevIdx !== undefined && tCurrIdx !== undefined
+                && voiceTranspositionAdmissibilityIndex.has(2, vPrev, vCurr, tPrevIdx, tCurrIdx)) {
+                return true;
+            }
+        }
+        if (!interiorReachable) return false;
+        for (const transpositionBase of transpositions) {
+            const tPrevIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB);
+            if (tPrevIdx === undefined) continue;
+            const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
+            if (tCurrIdx === undefined) continue;
+            for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
+                if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vPrev, vCurr, tPrevIdx, tCurrIdx)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
 
     for (const p1 of adjacentValidPairsList) {
         if (tripletEnumerationTruncated) break;
@@ -2402,6 +2441,8 @@ export async function searchStrettoChains(
                 const interiorReachable = Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
                 if (!startReachable && !interiorReachable) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                } else if (!hasVoiceTranspositionTripletContext(vB, vC, p1.t, p2.t, startReachable, interiorReachable)) {
+                    rejectReason = TRIPLET_REJECT_REASON.VOICE;
                 }
             } else {
                 // Fallback for disabled/full-admissibility modes (no transition index available)
@@ -2605,6 +2646,16 @@ export async function searchStrettoChains(
                 }
             }
             const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
+            const transitionKey = `${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`;
+            const startReachable = validDelayTransitionsByAbsPos === null
+                ? true
+                : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
+            const interiorReachable = validDelayTransitionsByAbsPos === null
+                ? true
+                : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
+            if (!hasVoiceTranspositionTripletContext(p1.vB, p2.vB, p1.t, p2.t, startReachable, interiorReachable)) {
+                continue;
+            }
             const dAC = p1.d + p2.d;
             const tAC = p1.t + p2.t;
             const lenA = variants[p1.vA].lengthTicks;
@@ -3037,6 +3088,16 @@ export async function searchStrettoChains(
                     // Without this guard, summing adjacent legal deltas can drift to values
                     // (e.g. 14) outside the historical transposition vocabulary.
                     if (!allowedTranspositions.has(t)) continue;
+                    const tPrevIdx = absoluteTranspositionToIndex.get(prevTransposition);
+                    const tCurrIdx = absoluteTranspositionToIndex.get(t);
+                    if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
+                    if (!voiceTranspositionAdmissibilityIndex.has(
+                        depth,
+                        variantIndices[depth - 1],
+                        transition.nextVariantIndex,
+                        tPrevIdx,
+                        tCurrIdx
+                    )) continue;
                     // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
@@ -3078,6 +3139,10 @@ export async function searchStrettoChains(
                         const immPair = precomputeIndex.getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
                         if (!immPair) continue;
                         if (!immPair.meetsAdjacentTranspositionSeparation) continue;
+                        const tPrevIdx = absoluteTranspositionToIndex.get(chain[depth - 1].transposition);
+                        const tCurrIdx = absoluteTranspositionToIndex.get(t);
+                        if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
+                        if (!voiceTranspositionAdmissibilityIndex.has(depth, immPrevVarIdx, varIdx, tPrevIdx, tCurrIdx)) continue;
                         stageStats.candidateTransitionsEnumerated++;
                         candidateTransitions.push({
                             varIdx,

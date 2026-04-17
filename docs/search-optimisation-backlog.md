@@ -4,11 +4,38 @@ Tasks arising from admissibility benchmarking (chain=8, wtc1_f08_ebmin, 45s run)
 
 ---
 
-## TODO-1: Delay-invariant voice/transposition admissibility model
+## TODO-1: Delay-agnostic voice/transposition admissibility model (absolute-indexed) — **Implemented**
+
+**Status update (implemented in codebase):**
+- Implemented module: `components/services/stretto-opt/voiceTranspositionAdmissibility.ts`.
+- Implemented builder: `buildVoiceTranspositionAdmissibilityIndex(...)`.
+- Implemented dense bitset-backed O(1) index key:
+  `(i, voice_{i-1}, voice_i, t_{i-1}, t_i)`.
+- Integrated index probes in:
+  - triplet enumeration (both `adjacentValidPairsList` traversal sites),
+  - DAG expansion candidate generation (`candidateTransitions` construction paths).
+- Added targeted test coverage:
+  `components/services/stretto-opt/voiceTranspositionAdmissibility.test.ts`.
 
 **What:** Build a complementary admissibility model that is delay-agnostic but prunes
-on voice assignment and transposition constraints. Enumerate all structurally valid
-`(v_{i-1}, v_i, transposition, voiceAssignment)` combinations independent of delay.
+on voice assignment and transposition constraints. Enumerate structurally valid quadruples
+`(voice_{i-1}, voice_i, t_{i-1}, t_i)` for each **absolute entry index** `i ∈ {1, …, targetChainLength}`.
+Here `t_j` is the absolute transposition attached to entry `j`, and `i` indexes the current edge
+between entries `(i-1, i)`.
+
+**State definition (finite-state machine):**
+- `i` (absolute entry index).
+- `lastSeen[voice]` (most recent absolute entry index for each voice).
+- `seenSinceLast[voice]` bitset (which non-self voices have appeared since that voice last appeared).
+- Current `(voice, transposition)` pair context for `(i-1, i)`.
+
+**Exact constraints to encode in the model:**
+- **Re-entry cooldown:** allow voice `v` at `i` only if at least `nVoices - 2` distinct non-`v` voices
+  have appeared since `v` last appeared.
+- **Re-entry obligation:** if all other voices have appeared since `v` last appeared, then `v` must be
+  selected before any already-satisfied voice can repeat.
+- **Terminal coverage:** for any chain of `targetChainLength`, entries in
+  `[targetChainLength - nVoices, targetChainLength - 1]` must cover all voices.
 
 **Why it matters:**
 - `rejectVoice` and `rejectP4Bass` are currently zero in practice, but that is a property of
@@ -18,18 +45,25 @@ on voice assignment and transposition constraints. Enumerate all structurally va
   structure but differing only in absolute transposition) produce identical pairwise
   dissonance structures. A delay-invariant transposition model can detect and prune these
   duplicates cheaply at precompute time rather than at scoring/deduplication time.
+- **Harmonic-equivalence class (active-window = 4):** two compounds are equivalent when every
+  active 4-entry window induces the same ordered overlap topology and the same-sign relative
+  transposition compounds `(t_{k+1}-t_k, t_{k+2}-t_{k+1}, t_{k+3}-t_{k+2})` match classwise.
+  Under this relation, pairwise dissonance/parallel structures are invariant up to global
+  absolute transposition shift.
 - With `span` information (which voice pairs overlap at what beats), the model can also
   pre-filter `(v_{i-1}, v_i, transposition)` pairs whose dissonance structure guarantees
   the full-texture `maxDissonanceRunEvents` validity check will fail — without running
   the full scoring pipeline.
 
-**Suggested approach:**
-- New function `buildTranspositionAdmissibilityModel` (delay-invariant).
-- Enumerate `(vA, vB, relativeTransposition)` triples; for each, pre-compute voice mask
-  intersection. Only mark admissible if at least one valid voice assignment exists.
-- Output: compact set/map used at pairwise precompute to skip infeasible `(vA, vB, t)` pairs
-  before the full harmonic scan. Expected cost: negligible (no delay dimension).
-- Extension: use dissonance span structure to prune `(vA, vB, t)` pairs that provably
+**Implemented approach:**
+- Implemented `buildVoiceTranspositionAdmissibilityIndex` (delay-agnostic).
+- Enumerates reachable FSM states and emits a dense bitset index keyed by
+  `(i, voice_{i-1}, voice_i, t_{i-1}, t_i)` with O(1) membership checks.
+- Uses the index to reject infeasible voice/transposition edges before pairwise harmonic scans
+  and before DAG candidate expansion.
+
+**Remaining extension work:**
+- Use dissonance span structure to prune `(vA, vB, t)` pairs that provably
   produce ≥3 consecutive dissonant full-texture events regardless of chain context.
 
 ---
