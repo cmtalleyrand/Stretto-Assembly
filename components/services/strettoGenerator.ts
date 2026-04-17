@@ -1974,7 +1974,7 @@ export async function searchStrettoChains(
     const forceFullPairwiseDiagnostic = collectSpans || process.env.STRETTO_DIAGNOSTIC_FULL_PAIRWISE === '1';
     const admissibilityMode: StrettoAdmissibilityMode = forceFullPairwiseDiagnostic
         ? 'disabled'
-        : (internalConfig?.admissibilityMode ?? 'full');
+        : (internalConfig?.admissibilityMode ?? 'delay-variant-only');
 
     // Emit concrete stage metadata before structural admissibility precompute begins.
     // This phase can be expensive for larger option spaces; emitting here ensures
