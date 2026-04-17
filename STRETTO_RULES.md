@@ -6,7 +6,7 @@ This document defines the strict set of rules, constraints, and scoring mechanis
 ## ⚠ Critical Delay-Contraction Safeguards (Persistent Failure Prevention)
 These rules explicitly prevent chains where added entries fail to increase stretto compactness.
 
-Notation: $n$ is entry index, $d_n$ is delay between entries $(n-1)\rightarrow n$, $Sb$ is current entry subject length in beats, and $B$ is one beat.
+Notation: $n$ is the **absolute entry index** in the chain, $d_n$ is delay between entries $(n-1)\rightarrow n$, $Sb$ is current entry subject length in beats, and $B$ is one beat.
 
 1. **Half-length contraction trigger (OR form):** if $d_{n-1} \ge Sb/2$ **or** $d_n \ge Sb/2$, then $d_n < d_{n-1}$.
 2. **Expansion recoil trigger:** if $d_{n-1} > d_{n-2}$ and $d_{n-1} > Sb/3$, then $d_n < d_{n-2} - 0.5B$.

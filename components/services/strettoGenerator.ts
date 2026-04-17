@@ -2052,18 +2052,18 @@ export async function searchStrettoChains(
             for (const [vA, byB] of admissiblePairKeys) {
                 for (const [vB, byD] of byB) {
                     for (const [d, transpSet] of byD) {
-                        const di = adjDelayToIdx(d);
-                        if (di < 0 || di >= validAdjacentDelays.length) continue;
+                        const d_idx = adjDelayToIdx(d);
+                        if (d_idx < 0 || d_idx >= validAdjacentDelays.length) continue;
                         if (admissibilityMode === 'delay-variant-only') {
                             // Mark ALL transpositions admissible for this (vA, vB, d)
                             for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
-                                m.set(vA, vB, di, tIdx, { status: 1, constraintClass: 0 });
+                                m.set(vA, vB, d_idx, tIdx, { status: 1, constraintClass: 0 });
                             }
                         } else {
                             for (const t of transpSet) {
                                 const ti = transpToIdx.get(t);
                                 if (ti === undefined) continue;
-                                m.set(vA, vB, di, ti, { status: 1, constraintClass: 0 });
+                                m.set(vA, vB, d_idx, ti, { status: 1, constraintClass: 0 });
                             }
                         }
                     }
@@ -2393,7 +2393,7 @@ export async function searchStrettoChains(
         // to skip the entire inner loop when it fails (~29% of pairs).
         if (!pairAB.meetsAdjacentTranspositionSeparation) continue;
 
-        const d1 = p1.d;
+        const d_te_1 = p1.d;
         const vA = p1.vA;
         const vB = p1.vB;
         const vAVariant = variants[vA];
@@ -2425,16 +2425,16 @@ export async function searchStrettoChains(
             }
 
             // All cheap checks before the pairBC index lookup:
-            const d2 = p2.d;
+            const d_te_2 = p2.d;
             const vC = p2.vB;
             const vCVariant = variants[vC];
             let rejectReason: TripletRejectReason | null = null;
 
             if (validDelayTransitionsByAbsPos !== null) {
                 // Single O(1) probe: key is "${vPrev}:${vNext}:${dPrev}:${dNext}" where
-                // vPrev=vB, vNext=vC, dPrev=d1 (delay into B), dNext=d2 (delay into C).
+                // vPrev=vB, vNext=vC, dPrev=d_te_1 (delay into B), dNext=d_te_2 (delay into C).
                 // Replaces A.10, A.8, bounded expansion, A.2, A.5, A.4.
-                const transitionKey = `${vB}:${vC}:${d1}:${d2}`;
+                const transitionKey = `${vB}:${vC}:${d_te_1}:${d_te_2}`;
                 // A candidate can survive only if this transition is reachable in at least
                 // one admissible triplet context: chain-start (absolute position p=2) or interior (p>=3).
                 const startReachable = Boolean(validDelayTransitionsStartPos?.has(transitionKey));
@@ -2447,21 +2447,21 @@ export async function searchStrettoChains(
             } else {
                 // Fallback for disabled/full-admissibility modes (no transition index available)
                 if (!isCanonDelaySearch) {
-                    if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
-                    else if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
+                    if (d_te_1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
+                    else if (d_te_2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
                 }
                 const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
                 const bTransformed = vBVariant.type === 'I' || vBVariant.truncationBeats > 0;
                 const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
                 if (!rejectReason && (aTransformed && bTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
                 if (!rejectReason && (bTransformed && cTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
-                if (!rejectReason && !(isCanonDelaySearch ? d2 === d1 : d2 <= d1 + delayStep)) {
+                if (!rejectReason && !(isCanonDelaySearch ? d_te_2 === d_te_1 : d_te_2 <= d_te_1 + delayStep)) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
                 }
                 if (!isCanonDelaySearch) {
-                    if (!rejectReason && !satisfiesHalfLengthTrigger(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                    if (!rejectReason && !satisfiesMaximumContractionBound(d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                    if (!rejectReason && !satisfiesPostTruncationContraction(vB, d1, d2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                    if (!rejectReason && !satisfiesHalfLengthTrigger(d_te_1, d_te_2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                    if (!rejectReason && !satisfiesMaximumContractionBound(d_te_1, d_te_2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
+                    if (!rejectReason && !satisfiesPostTruncationContraction(vB, d_te_1, d_te_2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
                 }
             }
 
@@ -2484,7 +2484,7 @@ export async function searchStrettoChains(
             }
 
             // Rule: Pair A->C compatibility (if overlapping)
-            const dAC = d1 + d2;
+            const dAC = d_te_1 + d_te_2;
             const tAC = p1.t + p2.t;
             
             const lenA = variants[vA].lengthTicks;
@@ -2547,7 +2547,7 @@ export async function searchStrettoChains(
             let tripletHasValidDelayContext = false;
             for (const dCtx of validTripletDelayAs) {
                 if (validDelayTransitionsByAbsPos !== null) {
-                    const transitionKey = `${vB}:${vC}:${d1}:${d2}`;
+                    const transitionKey = `${vB}:${vC}:${d_te_1}:${d_te_2}`;
                     if (dCtx === 0) {
                         if (!validDelayTransitionsStartPos?.has(transitionKey)) continue;
                     } else {
@@ -2555,36 +2555,36 @@ export async function searchStrettoChains(
                     }
                 }
                 if (isCanonDelaySearch) {
-                    if (dCtx !== 0 && dCtx !== d1) continue;
+                    if (dCtx !== 0 && dCtx !== d_te_1) continue;
                 } else {
-                    // A.1 local: pairwise high-delay uniqueness across (dCtx, d1, d2)
-                    if (!hasPairwiseHighDelayUniqueness(dCtx, d1, d2)) continue;
+                    // A.1 local: pairwise high-delay uniqueness across (dCtx, d_te_1, d_te_2)
+                    if (!hasPairwiseHighDelayUniqueness(dCtx, d_te_1, d_te_2)) continue;
                 }
 
                 // dCtx = 0 is the sentinel for the chain start (no real predecessor before e0).
-                // Apply A.3 with dCtx = 0, but skip A.2/A.4/A.5 on the synthetic 0→d_1 edge.
+                // Apply A.3 with dCtx = 0, but skip A.2/A.4/A.5 on the synthetic 0→d_te_1 edge.
                 if (!isCanonDelaySearch && dCtx !== 0) {
-                    if (!satisfiesHalfLengthTrigger(dCtx, d1)) continue;
-                    if (!satisfiesMaximumContractionBound(dCtx, d1)) continue;
-                    if (!satisfiesPostTruncationContraction(vA, dCtx, d1)) continue;
-                    if (!satisfiesExpansionRecoil(dCtx, d1, d2)) continue;
+                    if (!satisfiesHalfLengthTrigger(dCtx, d_te_1)) continue;
+                    if (!satisfiesMaximumContractionBound(dCtx, d_te_1)) continue;
+                    if (!satisfiesPostTruncationContraction(vA, dCtx, d_te_1)) continue;
+                    if (!satisfiesExpansionRecoil(dCtx, d_te_1, d_te_2)) continue;
                 }
 
                 tripletHasValidDelayContext = true;
 
                 const nextTransition: NextTransition = {
                     nextVariantIndex: vC,
-                    delayTicks: d2,
+                    delayTicks: d_te_2,
                     transpositionDelta: p2.t,
                     pairRecord: pairBC,
                     isRestrictedInterval: pairBC.isRestrictedInterval,
                     isFreeInterval: pairBC.isFreeInterval
                 };
-                precomputeIndex.appendWindowTransition(vA, vB, dCtx, d1, p1.t, nextTransition);
+                precomputeIndex.appendWindowTransition(vA, vB, dCtx, d_te_1, p1.t, nextTransition);
             }
 
             if (tripletHasValidDelayContext) {
-                precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d1}|${d2}|${p1.t}|${p2.t}`);
+                precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d_te_1}|${d_te_2}|${p1.t}|${p2.t}`);
             } else {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT);
             }
@@ -2613,7 +2613,7 @@ export async function searchStrettoChains(
     // for cross-triplet dissonance union checks during seed extension.
     interface TripletRecord {
         vA: number; vB: number; vC: number;
-        d1: number; d2: number; // delays: d1 = A→B, d2 = B→C (spec: d_i = delay of entry i rel. to i-1)
+        d_te_1: number; d_te_2: number; // delays: d_te_1 = A→B, d_te_2 = B→C (spec: d_i = delay of entry i rel. to i-1)
         tAB: number; tBC: number;
         pairAB: PairwiseCompatibilityRecord;
         pairBC: PairwiseCompatibilityRecord;
@@ -2666,7 +2666,7 @@ export async function searchStrettoChains(
 
             const rec: TripletRecord = {
                 vA: p1.vA, vB: p1.vB, vC: p2.vB,
-                d1: p1.d, d2: p2.d,
+                d_te_1: p1.d, d_te_2: p2.d,
                 tAB: p1.t, tBC: p2.t,
                 pairAB, pairBC, pairAC
             };

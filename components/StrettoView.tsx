@@ -420,13 +420,14 @@ export default function StrettoView({
                     }
                 });
             } else {
-                // Triplet: d1 = delay from e0→e1, d2 = relative gap from e1→e2
-                // e2 absolute position = d1 + d2 (handled inside analyzeStrettoTripletCandidate)
+                // Triplet-enumeration aliases:
+                // d_te_1 = delay from e0→e1, d_te_2 = relative gap from e1→e2.
+                // e2 absolute position = d_te_1 + d_te_2 (handled inside analyzeStrettoTripletCandidate)
                 const inversionPairs = enumerateTripletInversionPairs(includeInversions);
-                for (let d1 = effectiveMinDelay; d1 <= effectiveMaxDelay; d1 += stepTicks) {
-                    const d2Start = computeSecondDelayStart(d1, stepTicks);
-                    const d2End = computeSecondDelayEnd(d1, effectiveMaxDelay, stepTicks, tripletDelayOrderingMode);
-                    for (let d2 = d2Start; d2 <= d2End; d2 += stepTicks) {
+                for (let d_te_1 = effectiveMinDelay; d_te_1 <= effectiveMaxDelay; d_te_1 += stepTicks) {
+                    const d_te_2_start = computeSecondDelayStart(d_te_1, stepTicks);
+                    const d_te_2_end = computeSecondDelayEnd(d_te_1, effectiveMaxDelay, stepTicks, tripletDelayOrderingMode);
+                    for (let d_te_2 = d_te_2_start; d_te_2 <= d_te_2_end; d_te_2 += stepTicks) {
                         for (const i1 of intervalsToCheck) {
                             for (const i2 of intervalsToCheck) {
                                 for (const inversionPair of inversionPairs) {
@@ -435,8 +436,8 @@ export default function StrettoView({
                                             validNotes,
                                             i1,
                                             i2,
-                                            Math.round(d1),
-                                            Math.round(d2),
+                                            Math.round(d_te_1),
+                                            Math.round(d_te_2),
                                             currentPpq,
                                             activeMeter,
                                             inversionPair.firstIsInverted,
@@ -867,23 +868,23 @@ export default function StrettoView({
                     {/* Triplet: delay ordering */}
                     {discoveryArity === 'triplet' && (
                         <div className="flex flex-col gap-1">
-                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">d2 (e1→e2 gap)</span>
+                            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">d_te_2 (e1→e2 gap)</span>
                             <div className="flex items-center gap-1">
                                 <button
                                     type="button"
                                     onClick={() => setTripletDelayOrderingMode('tightening')}
                                     className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'tightening' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                                    title="Only enumerate tightening triplets where d2 < d1"
+                                    title="Only enumerate tightening triplets where d_te_2 < d_te_1"
                                 >
-                                    Tightening (d2 &lt; d1)
+                                    Tightening (d_te_2 &lt; d_te_1)
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => setTripletDelayOrderingMode('unconstrained')}
                                     className={`px-3 py-1.5 text-xs rounded border font-bold transition-colors ${tripletDelayOrderingMode === 'unconstrained' ? 'bg-brand-primary text-white border-brand-primary' : 'bg-gray-900 text-gray-400 border-gray-700 hover:bg-gray-800'}`}
-                                    title="Enumerate all d2 values up to max delay"
+                                    title="Enumerate all d_te_2 values up to max delay"
                                 >
-                                    All d2
+                                    All d_te_2
                                 </button>
                             </div>
                         </div>
