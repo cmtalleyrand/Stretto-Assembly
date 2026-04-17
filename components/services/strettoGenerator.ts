@@ -3055,7 +3055,6 @@ export async function searchStrettoChains(
                 boundedNonTerminalCeiling,
                 Math.max(dagCompletedUnits, Math.floor(heuristicRatio * dagTotalUnits))
             );
-        if (!force && nextCompletedUnits === dagCompletedUnits) return;
         dagCompletedUnits = nextCompletedUnits;
         emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force, terminal);
     };
@@ -3129,13 +3128,17 @@ export async function searchStrettoChains(
     // factor is ~1-20 per level. DFS is cheaper than BFS frontier management.
     // Long-range pair checks are sparse: cumulative delay typically exceeds Sb,
     // so entries 3+ apart rarely overlap.
-    function dfsExtend(node: DagNode): void {
+    async function dfsExtend(node: DagNode): Promise<void> {
         startDagWorkItem(node.chain.length);
         nodesVisited++;
         dagNodesExpanded++;
         operationCounter++;
         maxDepth = Math.max(maxDepth, node.chain.length);
         emitDagProgress();
+
+        if (shouldYieldToEventLoop(operationCounter)) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
 
         if (node.chain.length === options.targetChainLength) {
             recordCompletedChain(node.chain, node.variantIndices, node.prefixAdmissible);
@@ -3151,7 +3154,7 @@ export async function searchStrettoChains(
         const successors = expandNode(node);
         queueDagWorkItems(successors.length);
         for (const successor of successors) {
-            dfsExtend(successor);
+            await dfsExtend(successor);
             if (terminationReason) return;
         }
     }
@@ -3587,7 +3590,7 @@ export async function searchStrettoChains(
                                             } else {
                                                 recordDeferredPartial(dagNode.chain, dagNode.variantIndices);
                                                 queueDagWorkItems(1);
-                                                dfsExtend(dagNode);
+                                                await dfsExtend(dagNode);
                                             }
                                             maxDepth = Math.max(maxDepth, currentDepth);
                                             emitDagProgress();
@@ -3666,7 +3669,7 @@ export async function searchStrettoChains(
                     const successors = expandNode(node);
                     queueDagWorkItems(successors.length);
                     for (const successor of successors) {
-                        dfsExtend(successor);
+                        await dfsExtend(successor);
                         if (terminationReason) {
                             stopTraversal = true;
                             break;
