@@ -3569,11 +3569,12 @@ export async function searchStrettoChains(
     const timeoutFallbackResults: StrettoChainResult[] = [];
     const finalizationDeadlineMs = terminationReason === 'Timeout'
         ? activeTimeLimitMs + FINALIZATION_TIMEOUT_GRACE_MS
-        : activeTimeLimitMs;
+        : Number.POSITIVE_INFINITY;
     let timeoutFinalizationCandidatesRemaining = terminationReason === 'Timeout'
         ? MIN_TIMEOUT_FINALIZATION_CANDIDATES
         : 0;
     for (const uc of sourceUnscored) {
+        if (scoredResults.length >= MAX_RESULTS) break;
         const elapsedMs = Date.now() - startTime;
         const timeoutGraceExhausted = elapsedMs >= finalizationDeadlineMs;
         if (timeoutGraceExhausted && timeoutFinalizationCandidatesRemaining <= 0) break;
