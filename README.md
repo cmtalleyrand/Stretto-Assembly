@@ -203,6 +203,7 @@ For current profiling and regression baselines, pairwise precomputation defaults
 - Default (`STRETTO_ENABLE_ADMISSIBILITY` unset or `0`): admissibility pruning disabled.
 - Opt-in (`STRETTO_ENABLE_ADMISSIBILITY=1`): re-enable admissibility matrix pruning for A/B comparison runs.
 - Diagnostic override (`STRETTO_DIAGNOSTIC_FULL_PAIRWISE=1`): always force full-domain pairwise precompute.
+- Reproducible A/B benchmark harness: `npm run bench:stretto:admissibility-ab` (runs fixed fixtures under both modes, reports median runtime deltas, and validates precompute-cardinality monotonicity under admissibility pruning).
 
 ## Test Tiering and Change-Type Mapping
 
