@@ -169,8 +169,9 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
     );
 
     // Outcome quality: logged for visibility, not asserted (time-bounded runs are non-deterministic).
-    const u1 = computeU1(report.results, fixture.options.targetChainLength);
-    const u2 = computeU2(report.results, fixture.options.targetChainLength);
+    const subjectSpan = Math.max(0, Math.max(...fixture.subject.map(n => n.midi)) - Math.min(...fixture.subject.map(n => n.midi)));
+    const u1 = computeU1(report.results, fixture.options.targetChainLength, subjectSpan);
+    const u2 = computeU2(report.results, fixture.options.targetChainLength, subjectSpan);
     const fullLength = report.results.filter(c => c.entries.length === fixture.options.targetChainLength).length;
     const st = report.stats.stageTiming;
     console.log(

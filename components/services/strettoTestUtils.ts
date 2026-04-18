@@ -1,15 +1,21 @@
 import type { StrettoChainResult, StrettoChainOption } from '../../types';
+import { foldTranspositionWithinSpan } from './strettoGenerator';
 
 /**
- * U1: quality-weighted chain count, deduplicating score-identical chains.
+ * U1: quality-weighted chain count, deduplicating octave-equivalent chains.
  *
  * For each chain c with length l_c >= targetLength - 2:
  *   contribution = 10^(1 + l_c - targetLength) × min(max(0, 0.4 - dissonanceRatio), 0.25)
  *
- * Chains are deduplicated by canonical key (delays, relative transpositions, variant shapes).
- * Score-identical chains (same key) contribute only once — the one with the best dissonance factor.
+ * Chains are deduplicated by canonical key (delays, folded relative transpositions, variant shapes).
+ * Octave-equivalent chains (same harmonic structure under foldTranspositionWithinSpan) contribute
+ * only once — the one with the best dissonance factor.
  */
-export function computeU1(results: StrettoChainResult[], targetLength: number): number {
+export function computeU1(
+    results: StrettoChainResult[],
+    targetLength: number,
+    subjectSpanSemitones?: number
+): number {
     const best = new Map<string, number>(); // key → best dissonance factor seen
     const contributions = new Map<string, number>(); // key → contribution value
 
@@ -20,7 +26,7 @@ export function computeU1(results: StrettoChainResult[], targetLength: number): 
         const factor = Math.min(Math.max(0, 0.4 - d), 0.25);
         if (factor === 0) continue;
 
-        const key = chainCanonicalKey(chain.entries);
+        const key = chainCanonicalKey(chain.entries, subjectSpanSemitones);
         const prevBest = best.get(key) ?? -1;
         if (factor <= prevBest) continue;
         best.set(key, factor);
@@ -34,11 +40,13 @@ export function computeU1(results: StrettoChainResult[], targetLength: number): 
 
 /**
  * U2: same structure as U1 but uses the full chain score instead of dissonance factor.
- * Scores are normalised to [0, 1] within the filtered result set:
- * best chain (highest score) gets 1, worst gets 0.
- * Handles negative scores correctly since stretto scores are often << 0.
+ * Scores are normalised to [0, 1] within the filtered result set.
  */
-export function computeU2(results: StrettoChainResult[], targetLength: number): number {
+export function computeU2(
+    results: StrettoChainResult[],
+    targetLength: number,
+    subjectSpanSemitones?: number
+): number {
     const filtered = results.filter(c => c.entries.length >= targetLength - 2);
     if (filtered.length === 0) return 0;
     const scores = filtered.map(c => c.score);
@@ -52,7 +60,7 @@ export function computeU2(results: StrettoChainResult[], targetLength: number): 
     for (const chain of filtered) {
         const lc = chain.entries.length;
         const normScore = range > 0 ? (chain.score - minScore) / range : 1;
-        const key = chainCanonicalKey(chain.entries);
+        const key = chainCanonicalKey(chain.entries, subjectSpanSemitones);
         const prevBest = best.get(key) ?? -1;
         if (normScore <= prevBest) continue;
         best.set(key, normScore);
@@ -64,14 +72,19 @@ export function computeU2(results: StrettoChainResult[], targetLength: number): 
     return total;
 }
 
-function chainCanonicalKey(entries: StrettoChainOption[]): string {
+function chainCanonicalKey(entries: StrettoChainOption[], subjectSpanSemitones?: number): string {
     if (entries.length === 0) return '';
     const delays: number[] = [];
     for (let i = 1; i < entries.length; i++) {
         delays.push(Math.round((entries[i].startBeat - entries[i - 1].startBeat) * 1000) / 1000);
     }
     const t0 = entries[0].transposition;
-    const relT = entries.map(e => e.transposition - t0);
+    const relT = entries.map(e => {
+        const raw = e.transposition - t0;
+        return subjectSpanSemitones !== undefined
+            ? foldTranspositionWithinSpan(raw, subjectSpanSemitones)
+            : raw;
+    });
     const shapes = entries.map(e => `${e.type}:${e.length}`);
     return JSON.stringify([delays, relT, shapes]);
 }

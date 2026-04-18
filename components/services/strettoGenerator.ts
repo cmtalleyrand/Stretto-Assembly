@@ -762,6 +762,8 @@ async function buildDelayVariantAdmissibilityModel(
                 const prevIsInv = prevVariant.type === 'I';
                 const prevIsTrunc = prevVariant.truncationBeats > 0;
                 if ((prevIsInv || prevIsTrunc) && (isInv || isTrunc)) continue;
+                // A.9: entry e1 (depth=1, the first successor to the root) must not be inverted
+                if (state.depth === 1 && isInv) continue;
                 if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
                 if (isTrunc && !checkQuota(options.truncationMode, state.nTrunc)) continue;
                 // A.10: no truncated entry at delay >= 0.5*Sb
