@@ -2311,11 +2311,13 @@ export async function searchStrettoChains(
         list.push(p);
     }
 
+    const enableLegacyTripletRecordIndexPass = process.env.STRETTO_LEGACY_TRIPLET_RECORD_INDEX_PASS === '1';
     let tripletEnumerationTotalUnits = 0;
     for (const p1 of adjacentValidPairsList) {
         tripletEnumerationTotalUnits += (adjacentNextPairsByVariant.get(p1.vB) ?? []).length;
     }
-    const tripletTotalUnits = tripletEnumerationTotalUnits;
+    const tripletRecordIndexingTotalUnits = enableLegacyTripletRecordIndexPass ? tripletEnumerationTotalUnits : 0;
+    const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
     let tripletCompletedUnits = 0;
 
     const phase1ElapsedMs = Date.now() - startTime;
@@ -2611,18 +2613,20 @@ export async function searchStrettoChains(
             if (tripletHasValidDelayContext) {
                 const tripletShapeKey = `${vA}|${vB}|${vC}|${d_te_1}|${d_te_2}|${p1.t}|${p2.t}`;
                 precomputeIndex.addTripletShapeKey(tripletShapeKey);
-                allTripletRecords.push({
-                    vA,
-                    vB,
-                    vC,
-                    d_te_1,
-                    d_te_2,
-                    tAB: p1.t,
-                    tBC: p2.t,
-                    pairAB,
-                    pairBC,
-                    pairAC
-                });
+                if (!enableLegacyTripletRecordIndexPass) {
+                    allTripletRecords.push({
+                        vA,
+                        vB,
+                        vC,
+                        d_te_1,
+                        d_te_2,
+                        tAB: p1.t,
+                        tBC: p2.t,
+                        pairAB,
+                        pairBC,
+                        pairAC
+                    });
+                }
             } else {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT);
             }
@@ -2645,6 +2649,66 @@ export async function searchStrettoChains(
     stageStats.tripletAcceptedTotal = stageStats.tripletCandidatesAccepted;
     stageStats.tripletDistinctShapesAccepted = precomputeIndex.getTripletShapeCount();
     stageStats.harmonicallyValidTriples = stageStats.tripletDistinctShapesAccepted;
+
+    if (enableLegacyTripletRecordIndexPass) {
+        for (const p1 of adjacentValidPairsList) {
+            if (tripletEnumerationTruncated) break;
+            const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
+            if (!pairAB) continue;
+            const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
+            for (const p2 of nextPairsForIdx) {
+                if (Date.now() >= tripletDeadlineMs) {
+                    tripletEnumerationTruncated = true;
+                    break;
+                }
+                tripletCompletedUnits++;
+                tripletOperationsProcessed++;
+                if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
+                    emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
+                    const elapsedTripletMs = Date.now() - tripletStartMs;
+                    if (!tripletBudgetCalibrated && elapsedTripletMs >= tripletCalibrationWindowMs && tripletCompletedUnits > 0) {
+                        const opsPerMs = tripletCompletedUnits / Math.max(1, elapsedTripletMs);
+                        const projectedTripletMs = Math.ceil((tripletTotalUnits / Math.max(0.001, opsPerMs)) * 1.1);
+                        tripletBudgetMs = clampTripletBudget(projectedTripletMs);
+                        tripletDeadlineMs = tripletStartMs + tripletBudgetMs;
+                        tripletBudgetCalibrated = true;
+                    }
+                }
+                const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
+                if (!pairBC) continue;
+                const transitionKey = `${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`;
+                const startReachable = validDelayTransitionsByAbsPos === null
+                    ? true
+                    : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
+                const interiorReachable = validDelayTransitionsByAbsPos === null
+                    ? true
+                    : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
+                if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
+                    continue;
+                }
+                const dAC = p1.d + p2.d;
+                const tAC = p1.t + p2.t;
+                const lenA = variants[p1.vA].lengthTicks;
+                const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
+
+                const tripletShapeKey = `${p1.vA}|${p1.vB}|${p2.vB}|${p1.d}|${p2.d}|${p1.t}|${p2.t}`;
+                if (!precomputeIndex.hasTripletShapeKey(tripletShapeKey)) continue;
+
+                allTripletRecords.push({
+                    vA: p1.vA,
+                    vB: p1.vB,
+                    vC: p2.vB,
+                    d_te_1: p1.d,
+                    d_te_2: p2.d,
+                    tAB: p1.t,
+                    tBC: p2.t,
+                    pairAB,
+                    pairBC,
+                    pairAC
+                });
+            }
+        }
+    }
 
     // Deferred scoring: store unscored chains during search, score after
     interface UnscoredChain {
