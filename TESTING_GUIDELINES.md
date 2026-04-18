@@ -228,6 +228,43 @@ npm run test:stretto:integration  # End-to-end integration tests
 npm run test:stretto:regression   # Performance regression tests
 ```
 
+## Stretto Search Performance Testing
+
+### Outcomes vs diagnostics
+
+The two outcomes of interest when comparing search configurations or optimisations are:
+
+1. **Total utility found** — U1 and U2 (quality-weighted chain counts, deduplicating octave-equivalent chains). These capture what matters musically: how many good chains at or near target length were found.
+2. **Clock time to equal utility** — does configuration A reach the same U1/U2 as configuration B faster?
+
+Everything else — nodes visited, pruning percentages, stage timing, `maxDepthReached`, `pairwiseCompatible`, histogram counts — is **diagnostic only**. These stats explain *why* utility differs or *where* time is spent, but they do not proxy musical outcome quality. Do not assert on them as if they do.
+
+In particular, reaching a higher node count or more depth is not inherently better: it may mean the search is spending time on hopeless branches. The only meaningful comparison is: for the same clock budget, which configuration finds more useful chains?
+
+### U1 and U2
+
+`computeU1` and `computeU2` are defined in `strettoTestUtils.ts`. Both require `subjectSpanSemitones` — the MIDI note range of the subject — which is always trivially computable as `max(midi) - min(midi)` and must always be supplied. Both deduplicate octave-equivalent chains before summing, using `foldTranspositionWithinSpan` to collapse relative transpositions that differ only by octave displacements within the subject span.
+
+Do not call these functions without the span argument. There is no valid reason to omit it.
+
+### Adaptive budget probing
+
+Static time budgets in performance tests are misleading. A 5 s budget that exhausts the chain=5 search space tells you nothing about chain=8 behaviour, because admissibility model cost grows with chain length while pairwise cost does not.
+
+`strettoPerformanceRegression.test.ts` instead probes adaptively:
+
+- If the search **exhausts the space within 15 s**: decrement the budget by 3 s until it no longer exhausts, establishing the minimum viable budget; then increment target chain length by 1 (at 15 s) until it times out, establishing the depth ceiling.
+- If it **times out but finds chains** at target length: increment budget by 5 s (up to 30 s) to see whether more time improves utility.
+- If it **times out and finds no chains** at target length: increment by 15 s (up to 60 s) until chains appear.
+
+This approach surfaces the budget boundary and depth ceiling rather than asserting on a fixed snapshot.
+
+### Regime guard: traditional vs third/sixth spacing
+
+`isVoicePairAllowedForTransposition` encodes **traditional-only** voice-spacing thresholds (e.g. tenor–bass ≥ 7 semitones, dist-2 ≥ 7 semitones). These thresholds are too strict for chains that use third/sixth transpositions (±3, ±4, ±8, ±9 semitones), which are valid intervals under `thirdSixthMode`.
+
+Never apply `isVoicePairAllowedForTransposition` to results from a fixture with `thirdSixthMode !== 'None'`. Always guard that assertion with `fixture.options.thirdSixthMode === 'None'`.
+
 ## Summary
 
 **Write tests that would catch bugs.** If you delete a line or change logic, the test should fail. If not, either:
