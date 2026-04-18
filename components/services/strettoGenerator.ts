@@ -336,6 +336,7 @@ interface StageStats {
     tripletRejectParallel: number;
     tripletRejectVoice: number;
     tripletRejectP4Bass: number;
+    tripletRejectPrefixRunBound: number;
     tripleLowerBoundRejected: number;
     tripleParallelRejected: number;
     tripleVoiceRejected: number;
@@ -384,6 +385,7 @@ const TRIPLET_REJECT_REASON = {
     PARALLEL: 'tripletRejectParallel',
     VOICE: 'tripletRejectVoice',
     P4_BASS: 'tripletRejectP4Bass',
+    PREFIX_RUN_BOUND: 'tripletRejectPrefixRunBound',
     NO_DELAY_CONTEXT: 'tripletRejectNoDelayContext'
 } as const;
 
@@ -486,6 +488,9 @@ function incrementTripletRejectCounter(stageStats: StageStats, reason: TripletRe
         case TRIPLET_REJECT_REASON.P4_BASS:
             stageStats.tripletRejectP4Bass++;
             stageStats.tripleP4BassRejected++;
+            break;
+        case TRIPLET_REJECT_REASON.PREFIX_RUN_BOUND:
+            stageStats.tripletRejectPrefixRunBound++;
             break;
         case TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT:
             stageStats.tripletRejectNoDelayContext++;
@@ -1444,6 +1449,19 @@ function rebaseRunSpansToAbsolute(runSpans: SimultaneitySpan[], pairAnchorStartT
     }));
 }
 
+function clipRunSpansToWindow(runSpans: SimultaneitySpan[], startTick: number, endTick: number): SimultaneitySpan[] {
+    if (runSpans.length === 0 || endTick <= startTick) return [];
+    const clipped: SimultaneitySpan[] = [];
+    for (const span of runSpans) {
+        const clippedStart = Math.max(startTick, span.startTick);
+        const clippedEnd = Math.min(endTick, span.endTick);
+        if (clippedEnd > clippedStart) {
+            clipped.push({ startTick: clippedStart, endTick: clippedEnd });
+        }
+    }
+    return clipped;
+}
+
 class MapPrecomputeIndex implements PairwiseTripletPrecomputeIndex {
     private readonly pairwiseCompatibleTriplets: PairwiseByVariantA = new Map();
     private readonly validPairsList: PairTuple[] = [];
@@ -1775,6 +1793,7 @@ export async function searchStrettoChains(
                     tripletRejectParallel: 0,
                     tripletRejectVoice: 0,
                     tripletRejectP4Bass: 0,
+                    tripletRejectPrefixRunBound: 0,
                     tripleLowerBoundRejected: 0,
                     tripleParallelRejected: 0,
                     tripleVoiceRejected: 0,
@@ -1974,6 +1993,7 @@ export async function searchStrettoChains(
         tripletRejectParallel: 0,
         tripletRejectVoice: 0,
         tripletRejectP4Bass: 0,
+        tripletRejectPrefixRunBound: 0,
         tripleLowerBoundRejected: 0,
         tripleParallelRejected: 0,
         tripleVoiceRejected: 0,
@@ -2504,8 +2524,9 @@ export async function searchStrettoChains(
             const tAC = p1.t + p2.t;
             
             const lenA = variants[vA].lengthTicks;
+            let pairAC: PairwiseCompatibilityRecord | null = null;
             if (dAC < lenA) {
-                const pairAC = precomputeIndex.getPairRecord(vA, vC, dAC, tAC);
+                pairAC = precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null;
                 if (!pairAC) {
                     incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PAIR_AC_MISSING);
                     continue;
@@ -2521,6 +2542,70 @@ export async function searchStrettoChains(
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.LOWER_BOUND);
                 continue;
             }
+
+            const startA = 0;
+            const startB = d_te_1;
+            const startC = d_te_1 + d_te_2;
+            const nextFromC = adjacentNextPairsByVariant.get(vC)?.[0]?.d ?? Number.POSITIVE_INFINITY;
+            const startNextCandidate = Number.isFinite(nextFromC) ? (startC + nextFromC) : Number.POSITIVE_INFINITY;
+            const tripletLocalRunSpans: SimultaneitySpan[] = [];
+            // Region R1: A∩B without C (triplet-local deterministic P4 regime).
+            for (const span of clipRunSpansToWindow(
+                rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.none, startA),
+                startB,
+                startC
+            )) {
+                tripletLocalRunSpans.push(span);
+            }
+            // Region R2: from C entry to earliest possible next valid entry onset.
+            const r2Start = startC;
+            const r2End = startNextCandidate;
+            if (!pairAB.hasFourth) {
+                for (const span of clipRunSpansToWindow(
+                    rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.none, startA),
+                    r2Start,
+                    r2End
+                )) {
+                    tripletLocalRunSpans.push(span);
+                }
+            }
+            if (!pairBC.hasFourth) {
+                for (const span of clipRunSpansToWindow(
+                    rebaseRunSpansToAbsolute(pairBC.bassRoleDissonanceRunSpans.none, startB),
+                    r2Start,
+                    r2End
+                )) {
+                    tripletLocalRunSpans.push(span);
+                }
+            }
+            if (pairAC) {
+                if (!pairAC.hasFourth) {
+                    for (const span of clipRunSpansToWindow(
+                        rebaseRunSpansToAbsolute(pairAC.bassRoleDissonanceRunSpans.none, startA),
+                        r2Start,
+                        r2End
+                    )) {
+                        tripletLocalRunSpans.push(span);
+                    }
+                }
+            }
+            const conservativeTripletLocalPrefixState = extendPrefixDissonanceState(
+                {
+                    macroRunCount: 0,
+                    macroRunEnd: Number.NEGATIVE_INFINITY,
+                    macroRunFirstStart: Number.NEGATIVE_INFINITY,
+                    violated: false
+                },
+                tripletLocalRunSpans,
+                ppq,
+                offsetTicks,
+                tsNum,
+                tsDenom
+            );
+            if (conservativeTripletLocalPrefixState.violated) {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PREFIX_RUN_BOUND);
+                continue;
+            }
             
             // Rule: Voice Spacing for the Triple
             const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
@@ -2533,7 +2618,7 @@ export async function searchStrettoChains(
             // Use precomputed allowedVoicePairs from pairwise records to constrain
             // the triplet voice assignment. The pairwise records already encode
             // spacing rules (neighbor, 2-gap, bass-alto), so we intersect them.
-            const pairAC_rec = (dAC < lenA) ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
+            const pairAC_rec = pairAC;
 
             const bassIdx = options.ensembleTotal - 1;
             const spacingFeasible = hasFeasibleTripletAssignment(
@@ -2618,6 +2703,7 @@ export async function searchStrettoChains(
         + stageStats.tripletRejectParallel
         + stageStats.tripletRejectVoice
         + stageStats.tripletRejectP4Bass
+        + stageStats.tripletRejectPrefixRunBound
         + stageStats.tripletRejectNoDelayContext;
     stageStats.tripletCandidatesAccepted = stageStats.tripleCandidates - stageStats.tripletRejectedTotal;
     stageStats.tripletAcceptedTotal = stageStats.tripletCandidatesAccepted;
