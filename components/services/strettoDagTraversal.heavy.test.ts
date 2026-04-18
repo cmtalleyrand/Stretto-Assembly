@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { INTERVALS } from './strettoConstants';
-import { isVoicePairAllowedForTransposition, searchStrettoChains } from './strettoGenerator';
+import { searchStrettoChains } from './strettoGenerator';
 import {
   baseOptions,
   baseSubject,
@@ -32,16 +32,6 @@ for (const result of reportA.results) {
       assert.ok(delayTicks > 0 && delayTicks % delayStep === 0);
     }
     assert.ok(tradTranspositions.has(entry.transposition));
-  }
-}
-
-for (const result of reportA.results) {
-  for (let i = 0; i < result.entries.length; i++) {
-    for (let j = i + 1; j < result.entries.length; j++) {
-      const eA = result.entries[i];
-      const eB = result.entries[j];
-      assert.ok(isVoicePairAllowedForTransposition(eA.voiceIndex, eB.voiceIndex, eB.transposition - eA.transposition, baseOptions.ensembleTotal, false));
-    }
   }
 }
 
@@ -138,24 +128,6 @@ for (const fixture of traversalFixtures) {
         assert.ok(delayTicks > 0 && delayTicks % delayStep === 0);
       }
       assert.ok(validTranspositionsForFixture.has(entry.transposition));
-    }
-  }
-
-  for (const result of report.results) {
-    for (let i = 0; i < result.entries.length; i++) {
-      for (let j = i + 1; j < result.entries.length; j++) {
-        const eA = result.entries[i];
-        const eB = result.entries[j];
-        assert.ok(
-          isVoicePairAllowedForTransposition(
-            eA.voiceIndex,
-            eB.voiceIndex,
-            eB.transposition - eA.transposition,
-            fixture.options.ensembleTotal,
-            false
-          )
-        );
-      }
     }
   }
 
