@@ -1925,7 +1925,7 @@ export async function searchStrettoChains(
         targetChainLength: options.targetChainLength,
         voiceCount: options.ensembleTotal,
         transpositionCount: transpositions.length,
-        rootVoiceIndex: 0
+        rootVoiceIndex: options.subjectVoiceIndex
     });
     const allowedTranspositions = new Set(transpositions);
     const relativeTranspositionDeltas = Array.from(new Set(
@@ -2856,35 +2856,53 @@ export async function searchStrettoChains(
     }
 
     // Timeout-only fallback used for user-facing continuity when strict voice assignment
-    // fails under hard runtime limits. This preserves non-overlap per voice but does not
-    // enforce the full pairwise transposition-domain constraints.
+    // fails under hard runtime limits. This enforces non-overlap plus cheap adjacent-edge
+    // admissibility from the dense voice/transposition index, and solves all positions
+    // using bounded backtracking (no expensive overlap-specific pairwise rescans).
     function assignVoicesGreedyFallback(chain: StrettoChainOption[]): StrettoChainOption[] | null {
-        const assigned: StrettoChainOption[] = [];
-        for (let i = 0; i < chain.length; i++) {
-            const entry = chain[i];
-            const entryStart = Math.round(entry.startBeat * ppq);
-            const entryEnd = entryStart + entry.length;
-            let chosenVoice = -1;
-            for (let v = 0; v < options.ensembleTotal; v++) {
-                let overlapsVoice = false;
-                for (const prior of assigned) {
-                    if (prior.voiceIndex !== v) continue;
-                    const priorStart = Math.round(prior.startBeat * ppq);
-                    const priorEnd = priorStart + prior.length;
-                    if (entryStart < priorEnd - ppq && priorStart < entryEnd - ppq) {
-                        overlapsVoice = true;
-                        break;
-                    }
-                }
-                if (!overlapsVoice) {
-                    chosenVoice = v;
-                    break;
-                }
-            }
-            if (chosenVoice < 0) return null;
-            assigned.push({ ...entry, voiceIndex: chosenVoice });
+        const n = chain.length;
+        const starts = new Array<number>(n);
+        const ends = new Array<number>(n);
+        const tIdx = new Array<number>(n).fill(-1);
+        const voices = new Array<number>(n).fill(-1);
+
+        for (let i = 0; i < n; i++) {
+            starts[i] = Math.round(chain[i].startBeat * ppq);
+            ends[i] = starts[i] + chain[i].length;
+            const idx = absoluteTranspositionToIndex.get(chain[i].transposition);
+            if (idx === undefined) return null;
+            tIdx[i] = idx;
         }
-        return assigned;
+
+        const conflicts = (i: number, j: number): boolean => {
+            if (starts[i] > starts[j]) return conflicts(j, i);
+            return starts[j] < ends[i] - ppq;
+        };
+
+        const valid = (pos: number, v: number): boolean => {
+            if (pos === 0) return v === options.subjectVoiceIndex;
+            if (!voiceTranspositionAdmissibilityIndex.has(pos, voices[pos - 1], v, tIdx[pos - 1], tIdx[pos])) {
+                return false;
+            }
+            for (let k = 0; k < pos; k++) {
+                if (voices[k] === v && conflicts(k, pos)) return false;
+            }
+            return true;
+        };
+
+        const backtrack = (pos: number): boolean => {
+            if (pos === n) return true;
+            for (let v = 0; v < options.ensembleTotal; v++) {
+                if (!valid(pos, v)) continue;
+                voices[pos] = v;
+                if (backtrack(pos + 1)) return true;
+                voices[pos] = -1;
+            }
+            return false;
+        };
+
+        if (!backtrack(0)) return null;
+        return chain.map((entry, i) => ({ ...entry, voiceIndex: voices[i] }));
     }
 
     // Returns how many chain entries are still active (voice not yet freed) at `atTicks`.
