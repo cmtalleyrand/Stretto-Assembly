@@ -1,4 +1,21 @@
-# Stretto Assembly — Algorithm Architecture
+# Stretto Assembly
+
+## Objectives
+
+The primary objective of stretto search and canon search is to find:
+a) for complex subjects in ABC: typcial subjects are between 2 and 4 measures long, with 10-25 notes. MIDI inputs are not often used
+b) the highest quality chains possible: criteria for quality are reflected in scoring, but the most important is disssonance as % of duration with simultaneities and % non-chord tones. As a rule of thumb good chains have less than 25% dissonance and no more than 10% of non-chord tones; acceptable chains no more than 35% dissonance and 25% NCTs; and anything over 50% dissonance is as good as useless
+c) of the length desired by the user: chains 1 shorter than the desired length are some value; chains 2 shorter of limited value and anything shorter is effectively worthless.
+d) within a reasonable time frame: ideally less than 30 seconds and no more than a minute, with no particular value to getting outputs in less than 15 seconds
+e) For export to MIDI
+
+Secondary objectives are:
+a) to provide users a rich set of options to configure search
+b) to present outputs attractively and informative
+c) to provide musical analysis of inputs and outputs 
+d) to provide analysis on app performance to enable continued optimisation 
+
+---
 
 ## AI Assembly API Security
 
@@ -8,17 +25,11 @@
 
 Counterpoint rules (including the P4/P5/P8 policy) are defined in `STRETTO_RULES.md`. This file covers the mandatory search architecture only.
 
-## ⚠️ CRITICAL: DO NOT REVERT THE SEARCH ARCHITECTURE
-
-This document defines the **mandatory, intended architecture** for the chain search algorithm.
-The previous DFS-with-inline-pruning approach is **permanently retired** because it:
-- Cannot guarantee exhaustiveness (valid chains are silently missed)
-- Applies constraints locally (per-step) rather than globally (per-chain)
-- Repeatedly fails to enforce the Global Uniqueness delay rule (STRETTO_RULES.md §A.1)
-
 ---
 
-## The Correct Architecture: Bottom-Up Triplet Assembly
+# Algorithm Architecture
+
+## Architecture: Bottom-Up Triplet Assembly
 
 The algorithm must be implemented as a **staged bottom-up precomputation pipeline**, not a depth-first recursive search. Each stage filters candidates using the cheapest applicable rules first, so expensive checks are only applied to survivors.
 
