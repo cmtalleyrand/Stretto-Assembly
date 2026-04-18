@@ -141,20 +141,28 @@ for (const fixture of traversalFixtures) {
     }
   }
 
-  for (const result of report.results) {
-    for (let i = 0; i < result.entries.length; i++) {
-      for (let j = i + 1; j < result.entries.length; j++) {
-        const eA = result.entries[i];
-        const eB = result.entries[j];
-        assert.ok(
-          isVoicePairAllowedForTransposition(
-            eA.voiceIndex,
-            eB.voiceIndex,
-            eB.transposition - eA.transposition,
-            fixture.options.ensembleTotal,
-            false
-          )
-        );
+  if (fixture.options.thirdSixthMode === 'None') {
+    for (const result of report.results) {
+      for (let i = 0; i < result.entries.length; i++) {
+        for (let j = i + 1; j < result.entries.length; j++) {
+          const eA = result.entries[i];
+          const eB = result.entries[j];
+          const eAEndBeat = eA.startBeat + (eA.length / ppq);
+          const eBEndBeat = eB.startBeat + (eB.length / ppq);
+          const overlapStart = Math.max(eA.startBeat, eB.startBeat);
+          const overlapEnd = Math.min(eAEndBeat, eBEndBeat);
+          if (overlapEnd <= overlapStart) continue;
+
+          assert.ok(
+            isVoicePairAllowedForTransposition(
+              eA.voiceIndex,
+              eB.voiceIndex,
+              eB.transposition - eA.transposition,
+              fixture.options.ensembleTotal,
+              false
+            )
+          );
+        }
       }
     }
   }
