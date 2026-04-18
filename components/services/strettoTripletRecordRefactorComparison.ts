@@ -268,24 +268,11 @@ for (const fixture of fixtures) {
     `${fixture.name}: accepted chain identity mismatch between single-pass and legacy-two-pass modes`
   );
 
-  const wallGainPct = ((legacyTwoPass.wallMs.mean - singlePass.wallMs.mean) / legacyTwoPass.wallMs.mean) * 100;
-  const pairwiseGainPct = ((legacyTwoPass.pairwiseMs.mean - singlePass.pairwiseMs.mean) / legacyTwoPass.pairwiseMs.mean) * 100;
-  const tripletGainPct = ((legacyTwoPass.tripletMs.mean - singlePass.tripletMs.mean) / legacyTwoPass.tripletMs.mean) * 100;
-  const dagGainPct = ((legacyTwoPass.dagMs.mean - singlePass.dagMs.mean) / legacyTwoPass.dagMs.mean) * 100;
-  const utilityGainPct = ((legacyTwoPass.totalMs.mean - singlePass.totalMs.mean) / legacyTwoPass.totalMs.mean) * 100;
-
   console.log(JSON.stringify({
     fixture: fixture.name,
     minDurationMsPerMode: fixture.minDurationMsPerMode,
     singlePass,
-    legacyTwoPass,
-    estimates: {
-      wallGainPct,
-      pairwiseStageGainPct: pairwiseGainPct,
-      tripletStageGainPct: tripletGainPct,
-      dagStageGainPct: dagGainPct,
-      totalUtilityGainPct: utilityGainPct
-    }
+    legacyTwoPass
   }, null, 2));
 }
 
