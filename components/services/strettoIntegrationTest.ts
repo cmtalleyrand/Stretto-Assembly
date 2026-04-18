@@ -50,6 +50,14 @@ function countRestrictedAdjacentIntervals(
   return restrictedCount;
 }
 
+function toCanonicalChainIdentity(
+  result: Awaited<ReturnType<typeof searchStrettoChains>>['results'][number]
+): string {
+  return result.entries
+    .map((entry) => `${entry.startBeat.toFixed(6)}|${entry.transposition}|${entry.type}|${entry.length}|${entry.voiceIndex}`)
+    .join('||');
+}
+
 async function assertAdmissibilityPruningParity(
   subject: RawNote[],
   options: StrettoSearchOptions,
@@ -74,11 +82,7 @@ async function assertAdmissibilityPruningParity(
   );
 
   const toCanonicalChainSet = (report: Awaited<ReturnType<typeof searchStrettoChains>>): Set<string> => {
-    return new Set(
-      report.results.map((result) => result.entries
-        .map((entry) => `${entry.startBeat.toFixed(6)}|${entry.transposition}|${entry.type}|${entry.length}|${entry.voiceIndex}`)
-        .join('||'))
-    );
+    return new Set(report.results.map(toCanonicalChainIdentity));
   };
   const prunedChainSet = toCanonicalChainSet(pruned);
   const fullChainSet = toCanonicalChainSet(full);
@@ -309,6 +313,26 @@ async function assertAdmissibilityPruningParity(
   assert.ok(
     report.results.length > 0,
     'fixture-E: constrained long-chain search must yield at least one admissible chain'
+  );
+  const stageStats = report.stats.stageStats;
+  assert.ok(stageStats, 'fixture-E: stageStats must be present for regression comparison.');
+  assert.equal(
+    stageStats.harmonicallyValidTriples,
+    17724,
+    'fixture-E: harmonicallyValidTriples regression guard failed (before/after refactor mismatch)'
+  );
+  assert.equal(
+    stageStats.tripletDistinctShapesAccepted,
+    17724,
+    'fixture-E: tripletDistinctShapesAccepted regression guard failed (before/after refactor mismatch)'
+  );
+  const canonicalChainIdentities = report.results.map(toCanonicalChainIdentity).sort();
+  assert.deepEqual(
+    canonicalChainIdentities,
+    [
+      '0.000000|0|N|2400|0||3.000000|-12|N|2400|1||5.500000|-4|N|2400|0||7.500000|-17|N|2400|1||8.500000|-31|N|2400|3||10.000000|-21|N|2400|2||10.500000|-9|N|2400|0'
+    ],
+    'fixture-E: resulting chain identities regression guard failed (before/after refactor mismatch)'
   );
   for (const result of report.results) {
     assertChainStructure(result, options.ensembleTotal, 'fixture-E');
