@@ -2373,12 +2373,18 @@ export async function searchStrettoChains(
         list.push(p);
     }
 
+    // TESTING TOGGLE — remove before final merge.
+    // When set to '1', uses the old separate second-pass for allTripletRecords collection
+    // (slower) so strettoTripletRecordRefactorComparison.ts can compare both modes.
+    const enableLegacyTripletRecordIndexPass = process.env.STRETTO_LEGACY_TRIPLET_RECORD_INDEX_PASS === '1';
+
     let tripletEnumerationTotalUnits = 0;
     for (const p1 of adjacentValidPairsList) {
         tripletEnumerationTotalUnits += (adjacentNextPairsByVariant.get(p1.vB) ?? []).length;
     }
-    const tripletRecordIndexingTotalUnits = tripletEnumerationTotalUnits;
-    const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
+    const tripletTotalUnits = enableLegacyTripletRecordIndexPass
+        ? tripletEnumerationTotalUnits * 2
+        : tripletEnumerationTotalUnits;
     let tripletCompletedUnits = 0;
 
     const phase1ElapsedMs = Date.now() - startTime;
@@ -2461,6 +2467,18 @@ export async function searchStrettoChains(
         if (startReachable && reachability.start) return true;
         return interiorReachable && reachability.interior;
     };
+
+    // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
+    // dissonance union checks during seed extension (targetChainLength >= 7).
+    interface TripletRecord {
+        vA: number; vB: number; vC: number;
+        d_te_1: number; d_te_2: number;
+        tAB: number; tBC: number;
+        pairAB: PairwiseCompatibilityRecord;
+        pairBC: PairwiseCompatibilityRecord;
+        pairAC: PairwiseCompatibilityRecord | null;
+    }
+    const allTripletRecords: TripletRecord[] = [];
 
     for (const p1 of adjacentValidPairsList) {
         if (tripletEnumerationTruncated) break;
@@ -2567,10 +2585,9 @@ export async function searchStrettoChains(
             // Rule: Pair A->C compatibility (if overlapping)
             const dAC = d_te_1 + d_te_2;
             const tAC = p1.t + p2.t;
-            
             const lenA = variants[vA].lengthTicks;
+            const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
             if (dAC < lenA) {
-                const pairAC = precomputeIndex.getPairRecord(vA, vC, dAC, tAC);
                 if (!pairAC) {
                     incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PAIR_AC_MISSING);
                     continue;
@@ -2586,7 +2603,7 @@ export async function searchStrettoChains(
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.LOWER_BOUND);
                 continue;
             }
-            
+
             // Rule: Voice Spacing for the Triple
             const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
             if (trans[2] - trans[0] < 7) {
@@ -2598,21 +2615,19 @@ export async function searchStrettoChains(
             // Use precomputed allowedVoicePairs from pairwise records to constrain
             // the triplet voice assignment. The pairwise records already encode
             // spacing rules (neighbor, 2-gap, bass-alto), so we intersect them.
-            const pairAC_rec = (dAC < lenA) ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
-
             const bassIdx = options.ensembleTotal - 1;
             const spacingFeasible = hasFeasibleTripletAssignment(
                 pairAB.allowedVoiceMaskRows,
                 pairBC.allowedVoiceMaskRows,
                 options.ensembleTotal,
-                pairAC_rec?.allowedVoiceMaskRows
+                pairAC?.allowedVoiceMaskRows
             );
 
             const possibleAssignment = spacingFeasible && hasFeasibleTripletAssignment(
                 applyBassRoleCompatibilityMaskRows(pairAB, bassIdx),
                 applyBassRoleCompatibilityMaskRows(pairBC, bassIdx),
                 options.ensembleTotal,
-                pairAC_rec ? applyBassRoleCompatibilityMaskRows(pairAC_rec, bassIdx) : undefined
+                pairAC ? applyBassRoleCompatibilityMaskRows(pairAC, bassIdx) : undefined
             );
 
             if (!possibleAssignment) {
@@ -2666,6 +2681,9 @@ export async function searchStrettoChains(
 
             if (tripletHasValidDelayContext) {
                 precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d_te_1}|${d_te_2}|${p1.t}|${p2.t}`);
+                if (!enableLegacyTripletRecordIndexPass) {
+                    allTripletRecords.push({ vA, vB, vC, d_te_1, d_te_2, tAB: p1.t, tBC: p2.t, pairAB, pairBC, pairAC });
+                }
             } else {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT);
             }
@@ -2689,69 +2707,36 @@ export async function searchStrettoChains(
     stageStats.tripletDistinctShapesAccepted = precomputeIndex.getTripletShapeCount();
     stageStats.harmonicallyValidTriples = stageStats.tripletDistinctShapesAccepted;
 
-    // --- Triplet records for triplet-join Phase A ---
-    // Each TripletRecord captures a valid (A,B,C) triplet with its pairwise records
-    // for cross-triplet dissonance union checks during seed extension.
-    interface TripletRecord {
-        vA: number; vB: number; vC: number;
-        d_te_1: number; d_te_2: number; // delays: d_te_1 = A→B, d_te_2 = B→C (spec: d_i = delay of entry i rel. to i-1)
-        tAB: number; tBC: number;
-        pairAB: PairwiseCompatibilityRecord;
-        pairBC: PairwiseCompatibilityRecord;
-        pairAC: PairwiseCompatibilityRecord | null; // null if A and C don't overlap
-    }
-
-    const allTripletRecords: TripletRecord[] = [];
-
-    for (const p1 of adjacentValidPairsList) {
-        if (tripletEnumerationTruncated) break;
-        const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
-        if (!pairAB) continue;
-        const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
-        for (const p2 of nextPairsForIdx) {
-            if (Date.now() >= tripletDeadlineMs) {
-                tripletEnumerationTruncated = true;
-                break;
+    if (enableLegacyTripletRecordIndexPass) {
+        for (const p1 of adjacentValidPairsList) {
+            if (tripletEnumerationTruncated) break;
+            const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
+            if (!pairAB) continue;
+            const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
+            for (const p2 of nextPairsForIdx) {
+                if (Date.now() >= tripletDeadlineMs) { tripletEnumerationTruncated = true; break; }
+                tripletCompletedUnits++;
+                const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
+                if (!pairBC) continue;
+                const transitionKey = `${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`;
+                const startReachable = validDelayTransitionsByAbsPos === null
+                    ? true : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
+                const interiorReachable = validDelayTransitionsByAbsPos === null
+                    ? true : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
+                if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) continue;
+                const dAC = p1.d + p2.d;
+                const tAC = p1.t + p2.t;
+                const lenA = variants[p1.vA].lengthTicks;
+                const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
+                const tripletShapeKey = `${p1.vA}|${p1.vB}|${p2.vB}|${p1.d}|${p2.d}|${p1.t}|${p2.t}`;
+                if (!precomputeIndex.hasTripletShapeKey(tripletShapeKey)) continue;
+                allTripletRecords.push({
+                    vA: p1.vA, vB: p1.vB, vC: p2.vB,
+                    d_te_1: p1.d, d_te_2: p2.d,
+                    tAB: p1.t, tBC: p2.t,
+                    pairAB, pairBC, pairAC
+                });
             }
-            tripletCompletedUnits++;
-            tripletOperationsProcessed++;
-            if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
-                emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
-                const elapsedTripletMs = Date.now() - tripletStartMs;
-                if (!tripletBudgetCalibrated && elapsedTripletMs >= tripletCalibrationWindowMs && tripletCompletedUnits > 0) {
-                    const opsPerMs = tripletCompletedUnits / Math.max(1, elapsedTripletMs);
-                    const projectedTripletMs = Math.ceil((tripletTotalUnits / Math.max(0.001, opsPerMs)) * 1.1);
-                    tripletBudgetMs = clampTripletBudget(projectedTripletMs);
-                    tripletDeadlineMs = tripletStartMs + tripletBudgetMs;
-                    tripletBudgetCalibrated = true;
-                }
-            }
-            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
-            const transitionKey = `${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`;
-            const startReachable = validDelayTransitionsByAbsPos === null
-                ? true
-                : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
-            const interiorReachable = validDelayTransitionsByAbsPos === null
-                ? true
-                : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
-            if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
-                continue;
-            }
-            const dAC = p1.d + p2.d;
-            const tAC = p1.t + p2.t;
-            const lenA = variants[p1.vA].lengthTicks;
-            const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
-
-            const tripletShapeKey = `${p1.vA}|${p1.vB}|${p2.vB}|${p1.d}|${p2.d}|${p1.t}|${p2.t}`;
-            if (!precomputeIndex.hasTripletShapeKey(tripletShapeKey)) continue;
-
-            const rec: TripletRecord = {
-                vA: p1.vA, vB: p1.vB, vC: p2.vB,
-                d_te_1: p1.d, d_te_2: p2.d,
-                tAB: p1.t, tBC: p2.t,
-                pairAB, pairBC, pairAC
-            };
-            allTripletRecords.push(rec);
         }
     }
 
