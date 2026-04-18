@@ -10,10 +10,32 @@ const options = {
 const runA = await searchStrettoChains(baseSubject, options, ppq);
 const runB = await searchStrettoChains(baseSubject, options, ppq);
 
+delete process.env.STRETTO_DISABLE_VOICE_TRANSITION_PRECOMPUTE;
+const optimizedRun = await searchStrettoChains(baseSubject, options, ppq);
+process.env.STRETTO_DISABLE_VOICE_TRANSITION_PRECOMPUTE = '1';
+const legacyProbeRun = await searchStrettoChains(baseSubject, options, ppq);
+delete process.env.STRETTO_DISABLE_VOICE_TRANSITION_PRECOMPUTE;
+
 // Determinism invariant: identical input must produce identical structural output.
 const signaturesA = runA.results.map((r) => structureSignature(r.entries));
 const signaturesB = runB.results.map((r) => structureSignature(r.entries));
 assert.deepEqual(signaturesA, signaturesB, 'DAG traversal output must be deterministic for fixed input/options.');
+const optimizedSignatures = optimizedRun.results.map((r) => structureSignature(r.entries));
+const legacyProbeSignatures = legacyProbeRun.results.map((r) => structureSignature(r.entries));
+assert.deepEqual(
+  optimizedSignatures,
+  legacyProbeSignatures,
+  'Voice-transition probe precompute refactor must preserve accepted chain identities.'
+);
+
+const optimizedStageStats = optimizedRun.stats.stageStats;
+const legacyProbeStageStats = legacyProbeRun.stats.stageStats;
+assert.ok(optimizedStageStats, 'Optimized run must expose stageStats.');
+assert.ok(legacyProbeStageStats, 'Legacy-probe run must expose stageStats.');
+assert.ok(
+  (optimizedStageStats!.voiceTransitionProbeCount ?? 0) < (legacyProbeStageStats!.voiceTransitionProbeCount ?? 0),
+  'Optimized voice-transition reachability must perform fewer probe operations than legacy nested loops.'
+);
 
 // Structural invariants on each chain: strictly increasing start times, delay quantization,
 // and admissible transposition membership.

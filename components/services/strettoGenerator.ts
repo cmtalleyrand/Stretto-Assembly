@@ -357,6 +357,8 @@ interface StageStats {
     transitionWindowLookups: number;
     transitionsReturned: number;
     candidateTransitionsEnumerated: number;
+    voiceTransitionProbeCount: number;
+    voiceTransitionProbeBaselineCount: number;
     prunedByPrefixAdmissibility: number;
 }
 
@@ -1796,6 +1798,8 @@ export async function searchStrettoChains(
                     transitionWindowLookups: 0,
                     transitionsReturned: 0,
                     candidateTransitionsEnumerated: 0,
+                    voiceTransitionProbeCount: 0,
+                    voiceTransitionProbeBaselineCount: 0,
                     prunedByPrefixAdmissibility: 0
                 }
             }
@@ -1927,6 +1931,44 @@ export async function searchStrettoChains(
         transpositionCount: transpositions.length,
         rootVoiceIndex: options.subjectVoiceIndex
     });
+    const maxVoiceTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
+    const edgeReachableByDepth: boolean[][][] = Array.from(
+        { length: maxVoiceTransitionAbsIndex + 1 },
+        () => Array.from(
+            { length: transpositions.length },
+            () => Array<boolean>(transpositions.length).fill(false)
+        )
+    );
+    for (let absEntryIndex = 1; absEntryIndex <= maxVoiceTransitionAbsIndex; absEntryIndex++) {
+        for (let tPrevIdx = 0; tPrevIdx < transpositions.length; tPrevIdx++) {
+            for (let tCurrIdx = 0; tCurrIdx < transpositions.length; tCurrIdx++) {
+                let reachable = false;
+                for (let vPrev = 0; vPrev < options.ensembleTotal && !reachable; vPrev++) {
+                    for (let vCurr = 0; vCurr < options.ensembleTotal; vCurr++) {
+                        if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vPrev, vCurr, tPrevIdx, tCurrIdx)) {
+                            reachable = true;
+                            break;
+                        }
+                    }
+                }
+                edgeReachableByDepth[absEntryIndex][tPrevIdx][tCurrIdx] = reachable;
+            }
+        }
+    }
+    const startEdgeReachable = edgeReachableByDepth[2]
+        ?? Array.from({ length: transpositions.length }, () => Array<boolean>(transpositions.length).fill(false));
+    const interiorEdgeReachable: boolean[][] = Array.from(
+        { length: transpositions.length },
+        (_, tPrevIdx) => Array.from(
+            { length: transpositions.length },
+            (_, tCurrIdx) => {
+                for (let absEntryIndex = 3; absEntryIndex <= maxVoiceTransitionAbsIndex; absEntryIndex++) {
+                    if (edgeReachableByDepth[absEntryIndex][tPrevIdx][tCurrIdx]) return true;
+                }
+                return false;
+            }
+        )
+    );
     const allowedTranspositions = new Set(transpositions);
     const relativeTranspositionDeltas = Array.from(new Set(
         transpositions.flatMap((left) => transpositions.map((right) => right - left))
@@ -1953,6 +1995,7 @@ export async function searchStrettoChains(
         allowedVoicesForTrans.set(t, validVoices);
     }
 
+    const disableVoiceTransitionPrecompute = process.env.STRETTO_DISABLE_VOICE_TRANSITION_PRECOMPUTE === '1';
     const stageStats: StageStats = {
         validDelayCount: validDelays.length,
         transpositionCount: transpositions.length,
@@ -1995,7 +2038,26 @@ export async function searchStrettoChains(
         transitionWindowLookups: 0,
         transitionsReturned: 0,
         candidateTransitionsEnumerated: 0,
+        voiceTransitionProbeCount: 0,
+        voiceTransitionProbeBaselineCount: 0,
         prunedByPrefixAdmissibility: 0
+    };
+    const probeVoiceTransitionReachability = (depth: number, tPrevIdx: number, tCurrIdx: number): boolean => {
+        stageStats.voiceTransitionProbeBaselineCount += options.ensembleTotal * options.ensembleTotal;
+        if (disableVoiceTransitionPrecompute) {
+            for (let vPrev = 0; vPrev < options.ensembleTotal; vPrev++) {
+                for (let vCurr = 0; vCurr < options.ensembleTotal; vCurr++) {
+                    stageStats.voiceTransitionProbeCount++;
+                    if (voiceTranspositionAdmissibilityIndex.has(depth, vPrev, vCurr, tPrevIdx, tCurrIdx)) return true;
+                }
+            }
+            return false;
+        }
+        stageStats.voiceTransitionProbeCount++;
+        if (depth < edgeReachableByDepth.length) {
+            return edgeReachableByDepth[depth][tPrevIdx][tCurrIdx];
+        }
+        return interiorEdgeReachable[tPrevIdx][tCurrIdx];
     };
 
     const precomputeIndex: PairwiseTripletPrecomputeIndex = precomputeBackend === 'dense'
@@ -2358,6 +2420,32 @@ export async function searchStrettoChains(
 
     const validTripletDelayAs = [0, ...validAdjacentDelays];
     const maxTripletTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
+    const tripletVoiceContextReachability = new Map<string, { start: boolean; interior: boolean }>();
+    for (const transpositionAB of relativeTranspositionDeltas) {
+        for (const transpositionBC of relativeTranspositionDeltas) {
+            let start = false;
+            let interior = false;
+            for (const transpositionBase of transpositions) {
+                const tPrevIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB);
+                if (tPrevIdx === undefined) continue;
+                const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
+                if (tCurrIdx === undefined) continue;
+                if (!start && maxTripletTransitionAbsIndex >= 2 && startEdgeReachable[tPrevIdx][tCurrIdx]) {
+                    start = true;
+                }
+                for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
+                    if (edgeReachableByDepth[absEntryIndex][tPrevIdx][tCurrIdx]) {
+                        interior = true;
+                    }
+                }
+                if (start && interior && maxTripletTransitionAbsIndex <= 3) break;
+            }
+            tripletVoiceContextReachability.set(
+                `${transpositionAB}|${transpositionBC}`,
+                { start, interior }
+            );
+        }
+    }
     // Voice assignment is post-hoc so we check whether ANY ensemble voice pair (vPrev, vCurr)
     // is FSM-admissible at this depth. This preserves terminal coverage pruning (last
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
@@ -2368,33 +2456,10 @@ export async function searchStrettoChains(
         startReachable: boolean,
         interiorReachable: boolean
     ): boolean => {
-        const nVoices = options.ensembleTotal;
-        if (startReachable) {
-            const tPrevIdx = absoluteTranspositionToIndex.get(transpositionAB);
-            const tCurrIdx = absoluteTranspositionToIndex.get(transpositionAB + transpositionBC);
-            if (tPrevIdx !== undefined && tCurrIdx !== undefined) {
-                for (let vp = 0; vp < nVoices; vp++) {
-                    for (let vc = 0; vc < nVoices; vc++) {
-                        if (voiceTranspositionAdmissibilityIndex.has(2, vp, vc, tPrevIdx, tCurrIdx)) return true;
-                    }
-                }
-            }
-        }
-        if (!interiorReachable) return false;
-        for (const transpositionBase of transpositions) {
-            const tPrevIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB);
-            if (tPrevIdx === undefined) continue;
-            const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
-            if (tCurrIdx === undefined) continue;
-            for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
-                for (let vp = 0; vp < nVoices; vp++) {
-                    for (let vc = 0; vc < nVoices; vc++) {
-                        if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vp, vc, tPrevIdx, tCurrIdx)) return true;
-                    }
-                }
-            }
-        }
-        return false;
+        const reachability = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
+        if (!reachability) return false;
+        if (startReachable && reachability.start) return true;
+        return interiorReachable && reachability.interior;
     };
 
     for (const p1 of adjacentValidPairsList) {
@@ -3125,18 +3190,7 @@ export async function searchStrettoChains(
                     const tPrevIdx = absoluteTranspositionToIndex.get(prevTransposition);
                     const tCurrIdx = absoluteTranspositionToIndex.get(t);
                     if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                    // Check if any ensemble voice pair admits this transition at this depth.
-                    // Voice assignment is post-hoc so we accept if ANY (vPrev, vCurr) is FSM-valid.
-                    let voiceAdmissible = false;
-                    const nV = options.ensembleTotal;
-                    outer1: for (let vp = 0; vp < nV; vp++) {
-                        for (let vc = 0; vc < nV; vc++) {
-                            if (voiceTranspositionAdmissibilityIndex.has(depth, vp, vc, tPrevIdx, tCurrIdx)) {
-                                voiceAdmissible = true; break outer1;
-                            }
-                        }
-                    }
-                    if (!voiceAdmissible) continue;
+                    if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
                     // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
@@ -3181,16 +3235,7 @@ export async function searchStrettoChains(
                         const tPrevIdx = absoluteTranspositionToIndex.get(chain[depth - 1].transposition);
                         const tCurrIdx = absoluteTranspositionToIndex.get(t);
                         if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                        let voiceAdmissible2 = false;
-                        const nV2 = options.ensembleTotal;
-                        outer2: for (let vp = 0; vp < nV2; vp++) {
-                            for (let vc = 0; vc < nV2; vc++) {
-                                if (voiceTranspositionAdmissibilityIndex.has(depth, vp, vc, tPrevIdx, tCurrIdx)) {
-                                    voiceAdmissible2 = true; break outer2;
-                                }
-                            }
-                        }
-                        if (!voiceAdmissible2) continue;
+                        if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
                         stageStats.candidateTransitionsEnumerated++;
                         candidateTransitions.push({
                             varIdx,
