@@ -147,6 +147,7 @@ function pad(s: string | number, w: number): string {
 
 for (const [subjectName, { subject, baseOptions }] of Object.entries(SUBJECTS)) {
     const opts = hardOptions(baseOptions);
+    const subjectSpan = Math.max(0, Math.max(...subject.map(n => n.midi)) - Math.min(...subject.map(n => n.midi)));
 
     console.log(`\n${'='.repeat(90)}`);
     console.log(`=== ${subjectName}  chain=${opts.targetChainLength}  inv=${opts.inversionMode} trunc=${opts.truncationMode} 3/6=${opts.thirdSixthMode}  budget=${BUDGET_MS / 1000}s ===`);
@@ -170,8 +171,8 @@ for (const [subjectName, { subject, baseOptions }] of Object.entries(SUBJECTS)) 
         const report = await searchStrettoChains(subject, opts, ppq, undefined, { admissibilityMode: mode });
         const st = report.stats.stageTiming!;
         const ss = report.stats.stageStats;
-        const u1 = computeU1(report.results, opts.targetChainLength);
-        const u2 = computeU2(report.results, opts.targetChainLength);
+        const u1 = computeU1(report.results, opts.targetChainLength, subjectSpan);
+        const u2 = computeU2(report.results, opts.targetChainLength, subjectSpan);
 
         const row = [
             (mode + ' '.repeat(15)).slice(0, 15),
