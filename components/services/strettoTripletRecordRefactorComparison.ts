@@ -14,13 +14,28 @@ interface Fixture {
 interface ModeAggregate {
   elapsedMs: number;
   runs: number;
-  meanWallMs: number;
-  meanTripletMs: number;
-  meanTotalMs: number;
-  meanResults: number;
+  wallMs: NumericSummary;
+  pairwiseMs: NumericSummary;
+  tripletMs: NumericSummary;
+  dagMs: NumericSummary;
+  totalMs: NumericSummary;
+  resultsCount: NumericSummary;
+  maxDepthReached: NumericSummary;
   harmonicallyValidTriples: number;
   tripletDistinctShapesAccepted: number;
   chainIdentity: string[];
+  stopReasonHistogram: Record<string, number>;
+}
+
+interface NumericSummary {
+  min: number;
+  p25: number;
+  p50: number;
+  p75: number;
+  p95: number;
+  max: number;
+  mean: number;
+  stdDev: number;
 }
 
 function canonicalChainIdentities(
@@ -31,6 +46,35 @@ function canonicalChainIdentities(
     .join('||')).sort();
 }
 
+function percentile(sortedValues: number[], p: number): number {
+  if (sortedValues.length === 0) return Number.NaN;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const clamped = Math.max(0, Math.min(1, p));
+  const position = clamped * (sortedValues.length - 1);
+  const left = Math.floor(position);
+  const right = Math.ceil(position);
+  if (left === right) return sortedValues[left];
+  const w = position - left;
+  return sortedValues[left] * (1 - w) + sortedValues[right] * w;
+}
+
+function summarize(values: number[]): NumericSummary {
+  const sorted = [...values].sort((a, b) => a - b);
+  const n = sorted.length;
+  const mean = sorted.reduce((acc, v) => acc + v, 0) / Math.max(1, n);
+  const variance = sorted.reduce((acc, v) => acc + ((v - mean) ** 2), 0) / Math.max(1, n);
+  return {
+    min: sorted[0],
+    p25: percentile(sorted, 0.25),
+    p50: percentile(sorted, 0.5),
+    p75: percentile(sorted, 0.75),
+    p95: percentile(sorted, 0.95),
+    max: sorted[n - 1],
+    mean,
+    stdDev: Math.sqrt(variance)
+  };
+}
+
 async function runMode(
   fixture: Fixture,
   useLegacyIndexingPass: boolean
@@ -39,13 +83,17 @@ async function runMode(
 
   let elapsedMs = 0;
   let runs = 0;
-  let wallMsSum = 0;
-  let tripletMsSum = 0;
-  let totalMsSum = 0;
-  let resultsSum = 0;
+  const wallMsValues: number[] = [];
+  const pairwiseMsValues: number[] = [];
+  const tripletMsValues: number[] = [];
+  const dagMsValues: number[] = [];
+  const totalMsValues: number[] = [];
+  const resultsCountValues: number[] = [];
+  const maxDepthValues: number[] = [];
   let harmonicallyValidTriples = -1;
   let tripletDistinctShapesAccepted = -1;
   let chainIdentity: string[] = [];
+  const stopReasonHistogram: Record<string, number> = {};
 
   while (elapsedMs < fixture.minDurationMsPerMode) {
     const t0 = Date.now();
@@ -53,10 +101,14 @@ async function runMode(
     const dt = Date.now() - t0;
     elapsedMs += dt;
     runs++;
-    wallMsSum += dt;
-    tripletMsSum += report.stats.stageTiming.tripletMs;
-    totalMsSum += report.stats.timeMs;
-    resultsSum += report.results.length;
+    wallMsValues.push(dt);
+    pairwiseMsValues.push(report.stats.stageTiming.pairwiseMs);
+    tripletMsValues.push(report.stats.stageTiming.tripletMs);
+    dagMsValues.push(report.stats.stageTiming.dagMs);
+    totalMsValues.push(report.stats.timeMs);
+    resultsCountValues.push(report.results.length);
+    maxDepthValues.push(report.stats.maxDepthReached);
+    stopReasonHistogram[report.stats.stopReason] = (stopReasonHistogram[report.stats.stopReason] ?? 0) + 1;
 
     if (runs === 1) {
       harmonicallyValidTriples = report.stats.stageStats?.harmonicallyValidTriples ?? -1;
@@ -68,13 +120,17 @@ async function runMode(
   return {
     elapsedMs,
     runs,
-    meanWallMs: wallMsSum / runs,
-    meanTripletMs: tripletMsSum / runs,
-    meanTotalMs: totalMsSum / runs,
-    meanResults: resultsSum / runs,
+    wallMs: summarize(wallMsValues),
+    pairwiseMs: summarize(pairwiseMsValues),
+    tripletMs: summarize(tripletMsValues),
+    dagMs: summarize(dagMsValues),
+    totalMs: summarize(totalMsValues),
+    resultsCount: summarize(resultsCountValues),
+    maxDepthReached: summarize(maxDepthValues),
     harmonicallyValidTriples,
     tripletDistinctShapesAccepted,
-    chainIdentity
+    chainIdentity,
+    stopReasonHistogram
   };
 }
 
@@ -107,7 +163,7 @@ const fixtures: Fixture[] = [
   },
   {
     name: 'fixture-D',
-    minDurationMsPerMode: 15000,
+    minDurationMsPerMode: 45000,
     subject: [
       { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
       { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
@@ -134,7 +190,7 @@ const fixtures: Fixture[] = [
   },
   {
     name: 'fixture-E',
-    minDurationMsPerMode: 40000,
+    minDurationMsPerMode: 45000,
     subject: [
       { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
       { midi: 62, ticks: 480, durationTicks: 480, velocity: 90, name: 'D4' },
@@ -156,6 +212,36 @@ const fixtures: Fixture[] = [
       disallowComplexExceptions: true,
       maxPairwiseDissonance: 0.5,
       maxSearchTimeMs: 10000,
+      scaleRoot: 0,
+      scaleMode: 'Major'
+    }
+  },
+  {
+    name: 'fixture-F',
+    minDurationMsPerMode: 45000,
+    subject: [
+      { midi: 60, ticks: 0, durationTicks: 480, velocity: 90, name: 'C4' },
+      { midi: 64, ticks: 480, durationTicks: 480, velocity: 90, name: 'E4' },
+      { midi: 67, ticks: 960, durationTicks: 480, velocity: 90, name: 'G4' },
+      { midi: 72, ticks: 1440, durationTicks: 480, velocity: 90, name: 'C5' }
+    ],
+    options: {
+      ensembleTotal: 4,
+      targetChainLength: 4,
+      delaySearchCategory: 'canon',
+      canonDelayMinBeats: 1,
+      canonDelayMaxBeats: 1,
+      subjectVoiceIndex: 1,
+      truncationMode: 'None',
+      truncationTargetBeats: 1,
+      inversionMode: 'None',
+      useChromaticInversion: false,
+      thirdSixthMode: 'None',
+      pivotMidi: 60,
+      requireConsonantEnd: false,
+      disallowComplexExceptions: true,
+      maxPairwiseDissonance: 0.5,
+      maxSearchTimeMs: 5000,
       scaleRoot: 0,
       scaleMode: 'Major'
     }
@@ -182,9 +268,11 @@ for (const fixture of fixtures) {
     `${fixture.name}: accepted chain identity mismatch between single-pass and legacy-two-pass modes`
   );
 
-  const wallGainPct = ((legacyTwoPass.meanWallMs - singlePass.meanWallMs) / legacyTwoPass.meanWallMs) * 100;
-  const tripletGainPct = ((legacyTwoPass.meanTripletMs - singlePass.meanTripletMs) / legacyTwoPass.meanTripletMs) * 100;
-  const utilityGainPct = ((legacyTwoPass.meanTotalMs - singlePass.meanTotalMs) / legacyTwoPass.meanTotalMs) * 100;
+  const wallGainPct = ((legacyTwoPass.wallMs.mean - singlePass.wallMs.mean) / legacyTwoPass.wallMs.mean) * 100;
+  const pairwiseGainPct = ((legacyTwoPass.pairwiseMs.mean - singlePass.pairwiseMs.mean) / legacyTwoPass.pairwiseMs.mean) * 100;
+  const tripletGainPct = ((legacyTwoPass.tripletMs.mean - singlePass.tripletMs.mean) / legacyTwoPass.tripletMs.mean) * 100;
+  const dagGainPct = ((legacyTwoPass.dagMs.mean - singlePass.dagMs.mean) / legacyTwoPass.dagMs.mean) * 100;
+  const utilityGainPct = ((legacyTwoPass.totalMs.mean - singlePass.totalMs.mean) / legacyTwoPass.totalMs.mean) * 100;
 
   console.log(JSON.stringify({
     fixture: fixture.name,
@@ -193,7 +281,9 @@ for (const fixture of fixtures) {
     legacyTwoPass,
     estimates: {
       wallGainPct,
+      pairwiseStageGainPct: pairwiseGainPct,
       tripletStageGainPct: tripletGainPct,
+      dagStageGainPct: dagGainPct,
       totalUtilityGainPct: utilityGainPct
     }
   }, null, 2));
