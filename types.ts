@@ -585,14 +585,15 @@ export interface StrettoChainResult {
     id: string;
     entries: StrettoChainOption[];
     warnings: string[];
-    score: number; 
+    score: number;
     scoreLog?: ScoreLog;
-    variations?: StrettoChainResult[]; 
-    detectedChords?: string[]; 
+    variations?: StrettoChainResult[];
+    detectedChords?: string[];
     dissonanceRatio?: number;
     nctRatio?: number;
     pairDissonanceScore?: number;
     isValid?: boolean;
+    maxDissonanceRunEvents?: number;
 }
 
 export interface StrettoSearchReport {
@@ -614,6 +615,7 @@ export interface StrettoSearchReport {
             scoringValidChainsFound: number;
             finalizationRejectedVoiceAssignment: number;
             finalizationRejectedScoringInvalid: number;
+            maxDissonanceRunEventsHistogram?: Record<string, number>;
         };
         coverage?: {
             nodeBudgetUsedPercent: number | null;

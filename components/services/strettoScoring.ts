@@ -551,6 +551,7 @@ export function calculateStrettoScore(
         dissonanceRatio: S1,
         nctRatio: S3,
         pairDissonanceScore: 0,
-        isValid
+        isValid,
+        maxDissonanceRunEvents
     };
 }

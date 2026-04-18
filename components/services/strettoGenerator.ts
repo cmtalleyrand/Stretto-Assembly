@@ -1697,6 +1697,7 @@ export async function searchStrettoChains(
     let finalizationScoredCount = 0;
     let finalizationRejectedScoringInvalid = 0;
     let finalizationRejectedVoiceAssignment = 0;
+    const maxDissonanceRunEventsHistogram: Record<string, number> = {};
     const configuredTimeLimitMs = Number.isFinite(options.maxSearchTimeMs) ? Math.max(1, Math.floor(options.maxSearchTimeMs as number)) : DEFAULT_TIME_LIMIT_MS;
     const enablePrefixAdmissibilityGate = process.env.STRETTO_DISABLE_PREFIX_ADMISSIBILITY !== '1';
     let activeTimeLimitMs = configuredTimeLimitMs;
@@ -2345,8 +2346,10 @@ export async function searchStrettoChains(
     };
     const prioritizedAdjacentPairs = buildDiversifiedPriorityOrder(adjacentValidPairsList, pairQuality);
     adjacentValidPairsList.splice(0, adjacentValidPairsList.length, ...prioritizedAdjacentPairs);
+    // Sort inner-loop arrays by .d ascending so the fallback path (disabled/full modes)
+    // can break as soon as d_te_2 exceeds the bounded-expansion limit.
     for (const [variantIndex, pairs] of adjacentNextPairsByVariant.entries()) {
-        adjacentNextPairsByVariant.set(variantIndex, buildDiversifiedPriorityOrder(pairs, pairQuality));
+        adjacentNextPairsByVariant.set(variantIndex, [...pairs].sort((a, b) => a.d - b.d));
     }
 
     emitStageProgress('triplet', 0, tripletTotalUnits, true);
@@ -2453,7 +2456,10 @@ export async function searchStrettoChains(
                     rejectReason = TRIPLET_REJECT_REASON.VOICE;
                 }
             } else {
-                // Fallback for disabled/full-admissibility modes (no transition index available)
+                // Fallback for disabled/full-admissibility modes (no transition index available).
+                // Inner arrays are sorted by .d ascending; once d_te_2 exceeds the bounded-expansion
+                // limit all subsequent pairs also exceed it, so break the inner loop immediately.
+                if (!isCanonDelaySearch && d_te_2 > d_te_1 + delayStep) break;
                 if (!isCanonDelaySearch) {
                     if (d_te_1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
                     else if (d_te_2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
@@ -2463,7 +2469,7 @@ export async function searchStrettoChains(
                 const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
                 if (!rejectReason && (aTransformed && bTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
                 if (!rejectReason && (bTransformed && cTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
-                if (!rejectReason && !(isCanonDelaySearch ? d_te_2 === d_te_1 : d_te_2 <= d_te_1 + delayStep)) {
+                if (!rejectReason && isCanonDelaySearch && d_te_2 !== d_te_1) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
                 }
                 if (!isCanonDelaySearch) {
@@ -4051,6 +4057,9 @@ export async function searchStrettoChains(
             scoredResults.push(scored);
         } else {
             finalizationRejectedScoringInvalid++;
+            const runEvents = scored.maxDissonanceRunEvents ?? 0;
+            const histKey = String(runEvents);
+            maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
             if (terminationReason === 'Timeout' && timeoutFallbackResults.length < MAX_RESULTS) {
                 timeoutFallbackResults.push({
                     ...scored,
@@ -4133,7 +4142,10 @@ export async function searchStrettoChains(
                 prefixAdmissibleCompleteChainsFound,
                 scoringValidChainsFound: scoredResults.length,
                 finalizationRejectedVoiceAssignment,
-                finalizationRejectedScoringInvalid
+                finalizationRejectedScoringInvalid,
+                maxDissonanceRunEventsHistogram: Object.keys(maxDissonanceRunEventsHistogram).length > 0
+                    ? maxDissonanceRunEventsHistogram
+                    : undefined
             },
             coverage: {
                 nodeBudgetUsedPercent: null, // No node budget — time-only gating
