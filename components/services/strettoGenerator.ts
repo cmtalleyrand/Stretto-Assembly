@@ -357,6 +357,8 @@ interface StageStats {
     transitionWindowLookups: number;
     transitionsReturned: number;
     candidateTransitionsEnumerated: number;
+    voiceTransitionProbeCount: number;
+    voiceTransitionProbeBaselineCount: number;
     prunedByPrefixAdmissibility: number;
 }
 
@@ -1332,13 +1334,10 @@ function checkMetricCompliance(
             let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
             if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
-            // Corrected Metric Check using Absolute Grid alignment
-            const isStrong = isStrongBeat(start + metricOffset, ppq, tsNum, tsDenom);
-
             if (isDiss) {
                 if (!lastIsDiss) dissRunLength = 1; else dissRunLength++;
-                if (isStrong && dissRunLength > 1) return false;
                 if (dissRunLength === 2) {
+                    const isStrong = isStrongBeat(start + metricOffset, ppq, tsNum, tsDenom);
                     // Check if previous interval started on strong beat?
                     // Or check if *this* interval is strong?
                     // Original logic: if current is strong, fail.
@@ -1384,10 +1383,9 @@ export function violatesCombinedDissonanceStarts(
             macroRunEnd = span.endTick;
             prevStart = span.startTick;
         }
-        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
         if (macroRunCount > 2) return true;
-        if (isStrong && macroRunCount > 1) return true;
         if (macroRunCount === 2) {
+            const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
             const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq, tsNum, tsDenom);
             if (isStrong || prevIsStrong) return true;
         }
@@ -1416,16 +1414,12 @@ function extendPrefixDissonanceState(
             nextState.macroRunEnd = span.endTick;
             nextState.macroRunFirstStart = span.startTick;
         }
-        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
         if (nextState.macroRunCount > 2) {
             nextState.violated = true;
             break;
         }
-        if (isStrong && nextState.macroRunCount > 1) {
-            nextState.violated = true;
-            break;
-        }
         if (nextState.macroRunCount === 2) {
+            const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
             const prevIsStrong = isStrongBeat(nextState.macroRunFirstStart + metricOffset, ppq, tsNum, tsDenom);
             if (isStrong || prevIsStrong) {
                 nextState.violated = true;
@@ -1796,6 +1790,8 @@ export async function searchStrettoChains(
                     transitionWindowLookups: 0,
                     transitionsReturned: 0,
                     candidateTransitionsEnumerated: 0,
+                    voiceTransitionProbeCount: 0,
+                    voiceTransitionProbeBaselineCount: 0,
                     prunedByPrefixAdmissibility: 0
                 }
             }
@@ -1928,6 +1924,44 @@ export async function searchStrettoChains(
         rootVoiceIndex: options.subjectVoiceIndex,
         transpositionPairPredicate: (tPrevIdx, tCurrIdx) => Math.abs(transpositions[tCurrIdx] - transpositions[tPrevIdx]) >= 5
     });
+    const maxVoiceTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
+    const edgeReachableByDepth: boolean[][][] = Array.from(
+        { length: maxVoiceTransitionAbsIndex + 1 },
+        () => Array.from(
+            { length: transpositions.length },
+            () => Array<boolean>(transpositions.length).fill(false)
+        )
+    );
+    for (let absEntryIndex = 1; absEntryIndex <= maxVoiceTransitionAbsIndex; absEntryIndex++) {
+        for (let tPrevIdx = 0; tPrevIdx < transpositions.length; tPrevIdx++) {
+            for (let tCurrIdx = 0; tCurrIdx < transpositions.length; tCurrIdx++) {
+                let reachable = false;
+                for (let vPrev = 0; vPrev < options.ensembleTotal && !reachable; vPrev++) {
+                    for (let vCurr = 0; vCurr < options.ensembleTotal; vCurr++) {
+                        if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vPrev, vCurr, tPrevIdx, tCurrIdx)) {
+                            reachable = true;
+                            break;
+                        }
+                    }
+                }
+                edgeReachableByDepth[absEntryIndex][tPrevIdx][tCurrIdx] = reachable;
+            }
+        }
+    }
+    const startEdgeReachable = edgeReachableByDepth[2]
+        ?? Array.from({ length: transpositions.length }, () => Array<boolean>(transpositions.length).fill(false));
+    const interiorEdgeReachable: boolean[][] = Array.from(
+        { length: transpositions.length },
+        (_, tPrevIdx) => Array.from(
+            { length: transpositions.length },
+            (_, tCurrIdx) => {
+                for (let absEntryIndex = 3; absEntryIndex <= maxVoiceTransitionAbsIndex; absEntryIndex++) {
+                    if (edgeReachableByDepth[absEntryIndex][tPrevIdx][tCurrIdx]) return true;
+                }
+                return false;
+            }
+        )
+    );
     const allowedTranspositions = new Set(transpositions);
     const relativeTranspositionDeltas = Array.from(new Set(
         transpositions.flatMap((left) => transpositions.map((right) => right - left))
@@ -1954,6 +1988,7 @@ export async function searchStrettoChains(
         allowedVoicesForTrans.set(t, validVoices);
     }
 
+    const disableVoiceTransitionPrecompute = process.env.STRETTO_DISABLE_VOICE_TRANSITION_PRECOMPUTE === '1';
     const stageStats: StageStats = {
         validDelayCount: validDelays.length,
         transpositionCount: transpositions.length,
@@ -1996,7 +2031,26 @@ export async function searchStrettoChains(
         transitionWindowLookups: 0,
         transitionsReturned: 0,
         candidateTransitionsEnumerated: 0,
+        voiceTransitionProbeCount: 0,
+        voiceTransitionProbeBaselineCount: 0,
         prunedByPrefixAdmissibility: 0
+    };
+    const probeVoiceTransitionReachability = (depth: number, tPrevIdx: number, tCurrIdx: number): boolean => {
+        stageStats.voiceTransitionProbeBaselineCount += options.ensembleTotal * options.ensembleTotal;
+        if (disableVoiceTransitionPrecompute) {
+            for (let vPrev = 0; vPrev < options.ensembleTotal; vPrev++) {
+                for (let vCurr = 0; vCurr < options.ensembleTotal; vCurr++) {
+                    stageStats.voiceTransitionProbeCount++;
+                    if (voiceTranspositionAdmissibilityIndex.has(depth, vPrev, vCurr, tPrevIdx, tCurrIdx)) return true;
+                }
+            }
+            return false;
+        }
+        stageStats.voiceTransitionProbeCount++;
+        if (depth < edgeReachableByDepth.length) {
+            return edgeReachableByDepth[depth][tPrevIdx][tCurrIdx];
+        }
+        return interiorEdgeReachable[tPrevIdx][tCurrIdx];
     };
 
     const precomputeIndex: PairwiseTripletPrecomputeIndex = precomputeBackend === 'dense'
@@ -2312,12 +2366,18 @@ export async function searchStrettoChains(
         list.push(p);
     }
 
+    // TESTING TOGGLE — remove before final merge.
+    // When set to '1', uses the old separate second-pass for allTripletRecords collection
+    // (slower) so strettoTripletRecordRefactorComparison.ts can compare both modes.
+    const enableLegacyTripletRecordIndexPass = process.env.STRETTO_LEGACY_TRIPLET_RECORD_INDEX_PASS === '1';
+
     let tripletEnumerationTotalUnits = 0;
     for (const p1 of adjacentValidPairsList) {
         tripletEnumerationTotalUnits += (adjacentNextPairsByVariant.get(p1.vB) ?? []).length;
     }
-    const tripletRecordIndexingTotalUnits = tripletEnumerationTotalUnits;
-    const tripletTotalUnits = tripletEnumerationTotalUnits + tripletRecordIndexingTotalUnits;
+    const tripletTotalUnits = enableLegacyTripletRecordIndexPass
+        ? tripletEnumerationTotalUnits * 2
+        : tripletEnumerationTotalUnits;
     let tripletCompletedUnits = 0;
 
     const phase1ElapsedMs = Date.now() - startTime;
@@ -2359,6 +2419,32 @@ export async function searchStrettoChains(
 
     const validTripletDelayAs = [0, ...validAdjacentDelays];
     const maxTripletTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
+    const tripletVoiceContextReachability = new Map<string, { start: boolean; interior: boolean }>();
+    for (const transpositionAB of relativeTranspositionDeltas) {
+        for (const transpositionBC of relativeTranspositionDeltas) {
+            let start = false;
+            let interior = false;
+            for (const transpositionBase of transpositions) {
+                const tPrevIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB);
+                if (tPrevIdx === undefined) continue;
+                const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
+                if (tCurrIdx === undefined) continue;
+                if (!start && maxTripletTransitionAbsIndex >= 2 && startEdgeReachable[tPrevIdx][tCurrIdx]) {
+                    start = true;
+                }
+                for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
+                    if (edgeReachableByDepth[absEntryIndex][tPrevIdx][tCurrIdx]) {
+                        interior = true;
+                    }
+                }
+                if (start && interior && maxTripletTransitionAbsIndex <= 3) break;
+            }
+            tripletVoiceContextReachability.set(
+                `${transpositionAB}|${transpositionBC}`,
+                { start, interior }
+            );
+        }
+    }
     // Voice assignment is post-hoc so we check whether ANY ensemble voice pair (vPrev, vCurr)
     // is FSM-admissible at this depth. This preserves terminal coverage pruning (last
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
@@ -2376,6 +2462,18 @@ export async function searchStrettoChains(
         }
         return false;
     };
+
+    // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
+    // dissonance union checks during seed extension (targetChainLength >= 7).
+    interface TripletRecord {
+        vA: number; vB: number; vC: number;
+        d_te_1: number; d_te_2: number;
+        tAB: number; tBC: number;
+        pairAB: PairwiseCompatibilityRecord;
+        pairBC: PairwiseCompatibilityRecord;
+        pairAC: PairwiseCompatibilityRecord | null;
+    }
+    const allTripletRecords: TripletRecord[] = [];
 
     for (const p1 of adjacentValidPairsList) {
         if (tripletEnumerationTruncated) break;
@@ -2482,10 +2580,9 @@ export async function searchStrettoChains(
             // Rule: Pair A->C compatibility (if overlapping)
             const dAC = d_te_1 + d_te_2;
             const tAC = p1.t + p2.t;
-            
             const lenA = variants[vA].lengthTicks;
+            const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
             if (dAC < lenA) {
-                const pairAC = precomputeIndex.getPairRecord(vA, vC, dAC, tAC);
                 if (!pairAC) {
                     incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PAIR_AC_MISSING);
                     continue;
@@ -2501,7 +2598,7 @@ export async function searchStrettoChains(
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.LOWER_BOUND);
                 continue;
             }
-            
+
             // Rule: Voice Spacing for the Triple
             const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
             if (trans[2] - trans[0] < 7) {
@@ -2513,21 +2610,19 @@ export async function searchStrettoChains(
             // Use precomputed allowedVoicePairs from pairwise records to constrain
             // the triplet voice assignment. The pairwise records already encode
             // spacing rules (neighbor, 2-gap, bass-alto), so we intersect them.
-            const pairAC_rec = (dAC < lenA) ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
-
             const bassIdx = options.ensembleTotal - 1;
             const spacingFeasible = hasFeasibleTripletAssignment(
                 pairAB.allowedVoiceMaskRows,
                 pairBC.allowedVoiceMaskRows,
                 options.ensembleTotal,
-                pairAC_rec?.allowedVoiceMaskRows
+                pairAC?.allowedVoiceMaskRows
             );
 
             const possibleAssignment = spacingFeasible && hasFeasibleTripletAssignment(
                 applyBassRoleCompatibilityMaskRows(pairAB, bassIdx),
                 applyBassRoleCompatibilityMaskRows(pairBC, bassIdx),
                 options.ensembleTotal,
-                pairAC_rec ? applyBassRoleCompatibilityMaskRows(pairAC_rec, bassIdx) : undefined
+                pairAC ? applyBassRoleCompatibilityMaskRows(pairAC, bassIdx) : undefined
             );
 
             if (!possibleAssignment) {
@@ -2581,6 +2676,9 @@ export async function searchStrettoChains(
 
             if (tripletHasValidDelayContext) {
                 precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d_te_1}|${d_te_2}|${p1.t}|${p2.t}`);
+                if (!enableLegacyTripletRecordIndexPass) {
+                    allTripletRecords.push({ vA, vB, vC, d_te_1, d_te_2, tAB: p1.t, tBC: p2.t, pairAB, pairBC, pairAC });
+                }
             } else {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT);
             }
@@ -2604,69 +2702,36 @@ export async function searchStrettoChains(
     stageStats.tripletDistinctShapesAccepted = precomputeIndex.getTripletShapeCount();
     stageStats.harmonicallyValidTriples = stageStats.tripletDistinctShapesAccepted;
 
-    // --- Triplet records for triplet-join Phase A ---
-    // Each TripletRecord captures a valid (A,B,C) triplet with its pairwise records
-    // for cross-triplet dissonance union checks during seed extension.
-    interface TripletRecord {
-        vA: number; vB: number; vC: number;
-        d_te_1: number; d_te_2: number; // delays: d_te_1 = A→B, d_te_2 = B→C (spec: d_i = delay of entry i rel. to i-1)
-        tAB: number; tBC: number;
-        pairAB: PairwiseCompatibilityRecord;
-        pairBC: PairwiseCompatibilityRecord;
-        pairAC: PairwiseCompatibilityRecord | null; // null if A and C don't overlap
-    }
-
-    const allTripletRecords: TripletRecord[] = [];
-
-    for (const p1 of adjacentValidPairsList) {
-        if (tripletEnumerationTruncated) break;
-        const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
-        if (!pairAB) continue;
-        const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
-        for (const p2 of nextPairsForIdx) {
-            if (Date.now() >= tripletDeadlineMs) {
-                tripletEnumerationTruncated = true;
-                break;
+    if (enableLegacyTripletRecordIndexPass) {
+        for (const p1 of adjacentValidPairsList) {
+            if (tripletEnumerationTruncated) break;
+            const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
+            if (!pairAB) continue;
+            const nextPairsForIdx = adjacentNextPairsByVariant.get(p1.vB) ?? [];
+            for (const p2 of nextPairsForIdx) {
+                if (Date.now() >= tripletDeadlineMs) { tripletEnumerationTruncated = true; break; }
+                tripletCompletedUnits++;
+                const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
+                if (!pairBC) continue;
+                const transitionKey = `${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`;
+                const startReachable = validDelayTransitionsByAbsPos === null
+                    ? true : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
+                const interiorReachable = validDelayTransitionsByAbsPos === null
+                    ? true : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
+                if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) continue;
+                const dAC = p1.d + p2.d;
+                const tAC = p1.t + p2.t;
+                const lenA = variants[p1.vA].lengthTicks;
+                const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
+                const tripletShapeKey = `${p1.vA}|${p1.vB}|${p2.vB}|${p1.d}|${p2.d}|${p1.t}|${p2.t}`;
+                if (!precomputeIndex.hasTripletShapeKey(tripletShapeKey)) continue;
+                allTripletRecords.push({
+                    vA: p1.vA, vB: p1.vB, vC: p2.vB,
+                    d_te_1: p1.d, d_te_2: p2.d,
+                    tAB: p1.t, tBC: p2.t,
+                    pairAB, pairBC, pairAC
+                });
             }
-            tripletCompletedUnits++;
-            tripletOperationsProcessed++;
-            if (tripletCompletedUnits % 128 === 0 || tripletCompletedUnits === tripletTotalUnits) {
-                emitStageProgress('triplet', tripletCompletedUnits, tripletTotalUnits);
-                const elapsedTripletMs = Date.now() - tripletStartMs;
-                if (!tripletBudgetCalibrated && elapsedTripletMs >= tripletCalibrationWindowMs && tripletCompletedUnits > 0) {
-                    const opsPerMs = tripletCompletedUnits / Math.max(1, elapsedTripletMs);
-                    const projectedTripletMs = Math.ceil((tripletTotalUnits / Math.max(0.001, opsPerMs)) * 1.1);
-                    tripletBudgetMs = clampTripletBudget(projectedTripletMs);
-                    tripletDeadlineMs = tripletStartMs + tripletBudgetMs;
-                    tripletBudgetCalibrated = true;
-                }
-            }
-            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t)!;
-            const transitionKey = `${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`;
-            const startReachable = validDelayTransitionsByAbsPos === null
-                ? true
-                : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
-            const interiorReachable = validDelayTransitionsByAbsPos === null
-                ? true
-                : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
-            if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
-                continue;
-            }
-            const dAC = p1.d + p2.d;
-            const tAC = p1.t + p2.t;
-            const lenA = variants[p1.vA].lengthTicks;
-            const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(p1.vA, p2.vB, dAC, tAC) ?? null : null;
-
-            const tripletShapeKey = `${p1.vA}|${p1.vB}|${p2.vB}|${p1.d}|${p2.d}|${p1.t}|${p2.t}`;
-            if (!precomputeIndex.hasTripletShapeKey(tripletShapeKey)) continue;
-
-            const rec: TripletRecord = {
-                vA: p1.vA, vB: p1.vB, vC: p2.vB,
-                d_te_1: p1.d, d_te_2: p2.d,
-                tAB: p1.t, tBC: p2.t,
-                pairAB, pairBC, pairAC
-            };
-            allTripletRecords.push(rec);
         }
     }
 
@@ -3106,18 +3171,7 @@ export async function searchStrettoChains(
                     const tPrevIdx = absoluteTranspositionToIndex.get(prevTransposition);
                     const tCurrIdx = absoluteTranspositionToIndex.get(t);
                     if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                    // Check if any ensemble voice pair admits this transition at this depth.
-                    // Voice assignment is post-hoc so we accept if ANY (vPrev, vCurr) is FSM-valid.
-                    let voiceAdmissible = false;
-                    const nV = options.ensembleTotal;
-                    outer1: for (let vp = 0; vp < nV; vp++) {
-                        for (let vc = 0; vc < nV; vc++) {
-                            if (voiceTranspositionAdmissibilityIndex.has(depth, vp, vc, tPrevIdx, tCurrIdx)) {
-                                voiceAdmissible = true; break outer1;
-                            }
-                        }
-                    }
-                    if (!voiceAdmissible) continue;
+                    if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
                     // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
@@ -3162,16 +3216,7 @@ export async function searchStrettoChains(
                         const tPrevIdx = absoluteTranspositionToIndex.get(chain[depth - 1].transposition);
                         const tCurrIdx = absoluteTranspositionToIndex.get(t);
                         if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                        let voiceAdmissible2 = false;
-                        const nV2 = options.ensembleTotal;
-                        outer2: for (let vp = 0; vp < nV2; vp++) {
-                            for (let vc = 0; vc < nV2; vc++) {
-                                if (voiceTranspositionAdmissibilityIndex.has(depth, vp, vc, tPrevIdx, tCurrIdx)) {
-                                    voiceAdmissible2 = true; break outer2;
-                                }
-                            }
-                        }
-                        if (!voiceAdmissible2) continue;
+                        if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
                         stageStats.candidateTransitionsEnumerated++;
                         candidateTransitions.push({
                             varIdx,
