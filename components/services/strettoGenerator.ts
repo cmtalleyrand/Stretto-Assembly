@@ -1332,13 +1332,10 @@ function checkMetricCompliance(
             let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
             if (!isDiss && interval === 5 && lo === overallBassAt(start)) isDiss = true;
 
-            // Corrected Metric Check using Absolute Grid alignment
-            const isStrong = isStrongBeat(start + metricOffset, ppq, tsNum, tsDenom);
-
             if (isDiss) {
                 if (!lastIsDiss) dissRunLength = 1; else dissRunLength++;
-                if (isStrong && dissRunLength > 1) return false;
                 if (dissRunLength === 2) {
+                    const isStrong = isStrongBeat(start + metricOffset, ppq, tsNum, tsDenom);
                     // Check if previous interval started on strong beat?
                     // Or check if *this* interval is strong?
                     // Original logic: if current is strong, fail.
@@ -1384,10 +1381,9 @@ export function violatesCombinedDissonanceStarts(
             macroRunEnd = span.endTick;
             prevStart = span.startTick;
         }
-        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
         if (macroRunCount > 2) return true;
-        if (isStrong && macroRunCount > 1) return true;
         if (macroRunCount === 2) {
+            const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
             const prevIsStrong = isStrongBeat(prevStart + metricOffset, ppq, tsNum, tsDenom);
             if (isStrong || prevIsStrong) return true;
         }
@@ -1416,16 +1412,12 @@ function extendPrefixDissonanceState(
             nextState.macroRunEnd = span.endTick;
             nextState.macroRunFirstStart = span.startTick;
         }
-        const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
         if (nextState.macroRunCount > 2) {
             nextState.violated = true;
             break;
         }
-        if (isStrong && nextState.macroRunCount > 1) {
-            nextState.violated = true;
-            break;
-        }
         if (nextState.macroRunCount === 2) {
+            const isStrong = isStrongBeat(span.startTick + metricOffset, ppq, tsNum, tsDenom);
             const prevIsStrong = isStrongBeat(nextState.macroRunFirstStart + metricOffset, ppq, tsNum, tsDenom);
             if (isStrong || prevIsStrong) {
                 nextState.violated = true;
