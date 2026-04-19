@@ -25,7 +25,8 @@
     "test:assembly-proxy": "node --import tsx server/assemblyProxyCore.test.ts",
     "test:stretto:dag:invariants": "node --import tsx components/services/strettoDagInvariants.test.ts",
     "test:stretto:dag:heavy": "node --import tsx components/services/strettoDagTraversal.heavy.test.ts",
-    "test:stretto:in-app-functionality": "node --import tsx components/services/strettoInAppFunctionality.test.ts"
+    "test:stretto:in-app-functionality": "node --import tsx components/services/strettoInAppFunctionality.test.ts",
+    "test:stretto:triplet-refactor-compare": "node --import tsx components/services/strettoTripletRecordRefactorComparison.ts"
   },
   "dependencies": {
     "@google/genai": "^1.40.0",

@@ -682,6 +682,8 @@ export interface StrettoSearchReport {
             transitionWindowLookups?: number;
             transitionsReturned?: number;
             candidateTransitionsEnumerated?: number;
+            voiceTransitionProbeCount?: number;
+            voiceTransitionProbeBaselineCount?: number;
             prunedByPrefixAdmissibility?: number;
         };
     };

@@ -376,6 +376,8 @@ export interface StrettoSearchReport {
             tripletAcceptedTotal?: number;
             tripletCandidatesAccepted?: number;
             tripletDistinctShapesAccepted?: number;
+            voiceTransitionProbeCount?: number;
+            voiceTransitionProbeBaselineCount?: number;
         };
     };
 }
