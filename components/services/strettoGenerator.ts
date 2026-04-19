@@ -2364,36 +2364,15 @@ export async function searchStrettoChains(
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
     // variant indices being mistakenly used as voice labels.
     const hasVoiceTranspositionTripletContext = (
-        transpositionAB: number,
-        transpositionBC: number,
+        _transpositionAB: number,
+        _transpositionBC: number,
         startReachable: boolean,
         interiorReachable: boolean
     ): boolean => {
-        const nVoices = options.ensembleTotal;
-        if (startReachable) {
-            const tPrevIdx = absoluteTranspositionToIndex.get(transpositionAB);
-            const tCurrIdx = absoluteTranspositionToIndex.get(transpositionAB + transpositionBC);
-            if (tPrevIdx !== undefined && tCurrIdx !== undefined) {
-                for (let vp = 0; vp < nVoices; vp++) {
-                    for (let vc = 0; vc < nVoices; vc++) {
-                        if (voiceTranspositionAdmissibilityIndex.has(2, vp, vc, tPrevIdx, tCurrIdx)) return true;
-                    }
-                }
-            }
-        }
+        if (startReachable && voiceTranspositionAdmissibilityIndex.hasAnyVoicePairAtPosition(2)) return true;
         if (!interiorReachable) return false;
-        for (const transpositionBase of transpositions) {
-            const tPrevIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB);
-            if (tPrevIdx === undefined) continue;
-            const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
-            if (tCurrIdx === undefined) continue;
-            for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
-                for (let vp = 0; vp < nVoices; vp++) {
-                    for (let vc = 0; vc < nVoices; vc++) {
-                        if (voiceTranspositionAdmissibilityIndex.has(absEntryIndex, vp, vc, tPrevIdx, tCurrIdx)) return true;
-                    }
-                }
-            }
+        for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
+            if (voiceTranspositionAdmissibilityIndex.hasAnyVoicePairAtPosition(absEntryIndex)) return true;
         }
         return false;
     };

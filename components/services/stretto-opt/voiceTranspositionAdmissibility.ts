@@ -5,6 +5,7 @@ export interface VoiceTranspositionAdmissibilityIndex {
     readonly transitionCount: number;
     has(i: number, vPrev: number, vCurr: number, tPrevIdx: number, tCurrIdx: number): boolean;
     hasAnyTranspositionPair(i: number, vPrev: number, vCurr: number): boolean;
+    hasAnyVoicePairAtPosition(i: number): boolean;
 }
 
 export interface BuildVoiceTranspositionAdmissibilityParams {
@@ -54,6 +55,7 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
     private readonly tupleCount: number;
     private readonly bitset: Uint32Array;
     private readonly anyTranspositionByEdge: Uint8Array;
+    private readonly anyVoicePairByPosition: Uint8Array;
 
     public constructor(targetChainLength: number, voiceCount: number, transpositionCount: number) {
         this.targetChainLength = targetChainLength;
@@ -62,6 +64,7 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
         this.tupleCount = (targetChainLength + 1) * voiceCount * voiceCount * transpositionCount * transpositionCount;
         this.bitset = new Uint32Array(Math.ceil(this.tupleCount / 32));
         this.anyTranspositionByEdge = new Uint8Array((targetChainLength + 1) * voiceCount * voiceCount);
+        this.anyVoicePairByPosition = new Uint8Array(targetChainLength + 1);
         this.transitionCount = 0;
     }
 
@@ -76,6 +79,7 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
     public setAllTranspositionPairs(i: number, vPrev: number, vCurr: number): void {
         const edge = this.edgeOffset(i, vPrev, vCurr);
         this.anyTranspositionByEdge[edge] = 1;
+        this.anyVoicePairByPosition[i] = 1;
         for (let tPrevIdx = 0; tPrevIdx < this.transpositionCount; tPrevIdx++) {
             for (let tCurrIdx = 0; tCurrIdx < this.transpositionCount; tCurrIdx++) {
                 const tuple = this.tupleOffset(i, vPrev, vCurr, tPrevIdx, tCurrIdx);
@@ -100,7 +104,10 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
                 hasAny = true;
             }
         }
-        if (hasAny) this.anyTranspositionByEdge[edge] = 1;
+        if (hasAny) {
+            this.anyTranspositionByEdge[edge] = 1;
+            this.anyVoicePairByPosition[i] = 1;
+        }
     }
 
     public has(i: number, vPrev: number, vCurr: number, tPrevIdx: number, tCurrIdx: number): boolean {
@@ -115,6 +122,11 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
         if (i < 0 || i > this.targetChainLength) return false;
         if (vPrev < 0 || vPrev >= this.voiceCount || vCurr < 0 || vCurr >= this.voiceCount) return false;
         return this.anyTranspositionByEdge[this.edgeOffset(i, vPrev, vCurr)] === 1;
+    }
+
+    public hasAnyVoicePairAtPosition(i: number): boolean {
+        if (i < 0 || i > this.targetChainLength) return false;
+        return this.anyVoicePairByPosition[i] === 1;
     }
 }
 
