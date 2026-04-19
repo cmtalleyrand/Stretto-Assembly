@@ -14,7 +14,7 @@ import { foldTranspositionWithinSpan } from './strettoGenerator';
 export function computeU1(
     results: StrettoChainResult[],
     targetLength: number,
-    subjectSpanSemitones?: number
+    subjectSpanSemitones: number
 ): number {
     const best = new Map<string, number>(); // key → best dissonance factor seen
     const contributions = new Map<string, number>(); // key → contribution value
@@ -45,7 +45,7 @@ export function computeU1(
 export function computeU2(
     results: StrettoChainResult[],
     targetLength: number,
-    subjectSpanSemitones?: number
+    subjectSpanSemitones: number
 ): number {
     const filtered = results.filter(c => c.entries.length >= targetLength - 2);
     if (filtered.length === 0) return 0;
@@ -72,19 +72,14 @@ export function computeU2(
     return total;
 }
 
-function chainCanonicalKey(entries: StrettoChainOption[], subjectSpanSemitones?: number): string {
+function chainCanonicalKey(entries: StrettoChainOption[], subjectSpanSemitones: number): string {
     if (entries.length === 0) return '';
     const delays: number[] = [];
     for (let i = 1; i < entries.length; i++) {
         delays.push(Math.round((entries[i].startBeat - entries[i - 1].startBeat) * 1000) / 1000);
     }
     const t0 = entries[0].transposition;
-    const relT = entries.map(e => {
-        const raw = e.transposition - t0;
-        return subjectSpanSemitones !== undefined
-            ? foldTranspositionWithinSpan(raw, subjectSpanSemitones)
-            : raw;
-    });
+    const relT = entries.map(e => foldTranspositionWithinSpan(e.transposition - t0, subjectSpanSemitones));
     const shapes = entries.map(e => `${e.type}:${e.length}`);
     return JSON.stringify([delays, relT, shapes]);
 }
