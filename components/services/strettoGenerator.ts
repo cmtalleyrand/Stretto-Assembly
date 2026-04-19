@@ -2789,6 +2789,7 @@ export async function searchStrettoChains(
         }
 
         function valid(pos: number, v: number): boolean {
+            if (pos === 0) return v === options.subjectVoiceIndex;
             for (let k = 0; k < pos; k++) {
                 // Voice ordering applies to ALL temporal pairs — even after prior entry has ended.
                 if (!isVoicePairAllowedForTransposition(
