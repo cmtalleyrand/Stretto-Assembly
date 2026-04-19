@@ -235,8 +235,11 @@ for (const [fixtureName, fixture] of Object.entries(FIXTURES)) {
         }
 
         // b) Increment target chain length by 1 at 15s budget until the search times out.
+        //    Cap at 20 probes: subjects with a sparse search space exhaust at every depth
+        //    and will never hit Timeout regardless of how deep we go.
         let depth = fixture.options.targetChainLength + 1;
-        while (true) {
+        const maxDepthProbes = 20;
+        while (depth <= fixture.options.targetChainLength + maxDepthProbes) {
             const r = await searchStrettoChains(
                 fixture.subject,
                 { ...fixture.options, targetChainLength: depth, maxSearchTimeMs: 15000 },
