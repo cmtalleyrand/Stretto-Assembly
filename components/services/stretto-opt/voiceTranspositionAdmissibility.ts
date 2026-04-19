@@ -12,6 +12,7 @@ export interface BuildVoiceTranspositionAdmissibilityParams {
     voiceCount: number;
     transpositionCount: number;
     rootVoiceIndex?: number;
+    transpositionPairPredicate?: (tPrevIdx: number, tCurrIdx: number) => boolean;
 }
 
 interface FSMState {
@@ -83,6 +84,25 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
         }
     }
 
+    public setTranspositionPairsByPredicate(
+        i: number,
+        vPrev: number,
+        vCurr: number,
+        predicate: (tPrevIdx: number, tCurrIdx: number) => boolean
+    ): void {
+        const edge = this.edgeOffset(i, vPrev, vCurr);
+        let hasAny = false;
+        for (let tPrevIdx = 0; tPrevIdx < this.transpositionCount; tPrevIdx++) {
+            for (let tCurrIdx = 0; tCurrIdx < this.transpositionCount; tCurrIdx++) {
+                if (!predicate(tPrevIdx, tCurrIdx)) continue;
+                const tuple = this.tupleOffset(i, vPrev, vCurr, tPrevIdx, tCurrIdx);
+                this.bitset[tuple >>> 5] |= (1 << (tuple & 31));
+                hasAny = true;
+            }
+        }
+        if (hasAny) this.anyTranspositionByEdge[edge] = 1;
+    }
+
     public has(i: number, vPrev: number, vCurr: number, tPrevIdx: number, tCurrIdx: number): boolean {
         if (i < 0 || i > this.targetChainLength) return false;
         if (vPrev < 0 || vPrev >= this.voiceCount || vCurr < 0 || vCurr >= this.voiceCount) return false;
@@ -101,7 +121,13 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
 export function buildVoiceTranspositionAdmissibilityIndex(
     params: BuildVoiceTranspositionAdmissibilityParams
 ): VoiceTranspositionAdmissibilityIndex {
-    const { targetChainLength, voiceCount, transpositionCount, rootVoiceIndex = 0 } = params;
+    const {
+        targetChainLength,
+        voiceCount,
+        transpositionCount,
+        rootVoiceIndex = 0,
+        transpositionPairPredicate
+    } = params;
     if (!Number.isInteger(targetChainLength) || targetChainLength < 1) {
         throw new Error(`targetChainLength must be an integer >= 1. Received ${targetChainLength}`);
     }
@@ -169,7 +195,16 @@ export function buildVoiceTranspositionAdmissibilityIndex(
             if (popcountBigInt(missingVoicesMask) > remainingSlots) continue;
             if (nextPosition === targetChainLength - 1 && nextCoverageMask !== allVoicesMask) continue;
 
-            index.setAllTranspositionPairs(nextPosition, state.currentVoice, nextVoice);
+            if (transpositionPairPredicate) {
+                index.setTranspositionPairsByPredicate(
+                    nextPosition,
+                    state.currentVoice,
+                    nextVoice,
+                    transpositionPairPredicate
+                );
+            } else {
+                index.setAllTranspositionPairs(nextPosition, state.currentVoice, nextVoice);
+            }
 
             const nextLastSeen = Int16Array.from(state.lastSeen);
             const nextSeenSinceLast = state.seenSinceLast.slice();

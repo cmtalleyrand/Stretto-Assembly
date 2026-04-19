@@ -1925,7 +1925,8 @@ export async function searchStrettoChains(
         targetChainLength: options.targetChainLength,
         voiceCount: options.ensembleTotal,
         transpositionCount: transpositions.length,
-        rootVoiceIndex: options.subjectVoiceIndex
+        rootVoiceIndex: options.subjectVoiceIndex,
+        transpositionPairPredicate: (tPrevIdx, tCurrIdx) => Math.abs(transpositions[tCurrIdx] - transpositions[tPrevIdx]) >= 5
     });
     const allowedTranspositions = new Set(transpositions);
     const relativeTranspositionDeltas = Array.from(new Set(

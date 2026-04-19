@@ -29,3 +29,27 @@ for (let tPrevIdx = 0; tPrevIdx < 3; tPrevIdx++) {
 }
 
 console.log('voiceTranspositionAdmissibility.test: all assertions passed.');
+
+const transpositions = [0, 12, 15];
+const prunedByAdjacentSeparation = buildVoiceTranspositionAdmissibilityIndex({
+    targetChainLength: 8,
+    voiceCount: 4,
+    transpositionCount: transpositions.length,
+    rootVoiceIndex: 0,
+    transpositionPairPredicate: (tPrevIdx, tCurrIdx) => Math.abs(transpositions[tCurrIdx] - transpositions[tPrevIdx]) >= 5
+});
+
+// Adjacent-transposition rule: absolute deltas below 5 semitones are illegal for immediate neighbors.
+// Example raised in review: +15 followed by +12 (delta -3) must be pruned by the index.
+assert.equal(
+    prunedByAdjacentSeparation.has(4, 3, 0, 2, 1),
+    false,
+    'adjacent transition +15 -> +12 (|Δ|=3) must be inadmissible'
+);
+assert.equal(
+    prunedByAdjacentSeparation.has(4, 3, 0, 1, 0),
+    true,
+    'adjacent transition +12 -> 0 (|Δ|=12) remains admissible'
+);
+
+console.log('voiceTranspositionAdmissibility.test: predicate-filter assertions passed.');

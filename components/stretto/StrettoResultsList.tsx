@@ -154,6 +154,8 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                 const isExpanded = expandedIds.has(res.id);
                 const isSelected = selectedId === res.id;
                 const showTooltip = scoreTooltipId === res.id;
+                const hasFallbackWarning = res.warnings.some((warning) => warning.startsWith('Timeout fallback:'));
+                const isStrictlyValid = res.isValid !== false;
 
                 return (
                     <div key={res.id} className="border-b border-gray-700 bg-gray-900/50 relative">
@@ -182,6 +184,22 @@ export default function StrettoResultsList({ results, selectedId, onSelect, voic
                                 <div className="flex items-center gap-2 flex-wrap justify-end">
                                     {renderMetricBadge("DISS", res.dissonanceRatio || 0, "Dissonance Ratio (S1/S2)")}
                                     {renderMetricBadge("NCT", res.nctRatio || 0, "Non-Chord Tone Ratio (S3)")}
+                                    {!isStrictlyValid && (
+                                        <span
+                                            className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border border-red-800/70 bg-red-900/30 text-red-300"
+                                            title="Displayed as timeout fallback. Fails strict validity constraints."
+                                        >
+                                            Invalid (fallback)
+                                        </span>
+                                    )}
+                                    {hasFallbackWarning && (
+                                        <span
+                                            className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded border border-yellow-800/70 bg-yellow-900/30 text-yellow-300"
+                                            title={res.warnings.join(' | ')}
+                                        >
+                                            Timeout fallback
+                                        </span>
+                                    )}
                                     
                                     <div className="relative">
                                         <button 
