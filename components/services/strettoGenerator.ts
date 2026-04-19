@@ -2450,17 +2450,14 @@ export async function searchStrettoChains(
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
     // variant indices being mistakenly used as voice labels.
     const hasVoiceTranspositionTripletContext = (
-        _transpositionAB: number,
-        _transpositionBC: number,
+        transpositionAB: number,
+        transpositionBC: number,
         startReachable: boolean,
         interiorReachable: boolean
     ): boolean => {
-        if (startReachable && voiceTranspositionAdmissibilityIndex.hasAnyVoicePairAtPosition(2)) return true;
-        if (!interiorReachable) return false;
-        for (let absEntryIndex = 3; absEntryIndex <= maxTripletTransitionAbsIndex; absEntryIndex++) {
-            if (voiceTranspositionAdmissibilityIndex.hasAnyVoicePairAtPosition(absEntryIndex)) return true;
-        }
-        return false;
+        const ctx = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
+        if (!ctx) return false;
+        return (startReachable && ctx.start) || (interiorReachable && ctx.interior);
     };
 
     // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
