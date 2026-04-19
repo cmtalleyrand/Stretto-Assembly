@@ -286,7 +286,7 @@ async function assertAdmissibilityPruningParity(
   const options: StrettoSearchOptions = {
     ensembleTotal: 4,
     targetChainLength: 7,
-    subjectVoiceIndex: 1,
+    subjectVoiceIndex: 0,
     truncationMode: 'None',
     truncationTargetBeats: 1,
     inversionMode: 'None',

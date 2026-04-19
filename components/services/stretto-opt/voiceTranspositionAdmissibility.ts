@@ -5,6 +5,7 @@ export interface VoiceTranspositionAdmissibilityIndex {
     readonly transitionCount: number;
     has(i: number, vPrev: number, vCurr: number, tPrevIdx: number, tCurrIdx: number): boolean;
     hasAnyTranspositionPair(i: number, vPrev: number, vCurr: number): boolean;
+    hasAnyVoicePairAtPosition(i: number): boolean;
 }
 
 export interface BuildVoiceTranspositionAdmissibilityParams {
@@ -12,6 +13,7 @@ export interface BuildVoiceTranspositionAdmissibilityParams {
     voiceCount: number;
     transpositionCount: number;
     rootVoiceIndex?: number;
+    transpositionPairPredicate?: (tPrevIdx: number, tCurrIdx: number) => boolean;
 }
 
 interface FSMState {
@@ -53,6 +55,7 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
     private readonly tupleCount: number;
     private readonly bitset: Uint32Array;
     private readonly anyTranspositionByEdge: Uint8Array;
+    private readonly anyVoicePairByPosition: Uint8Array;
 
     public constructor(targetChainLength: number, voiceCount: number, transpositionCount: number) {
         this.targetChainLength = targetChainLength;
@@ -61,6 +64,7 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
         this.tupleCount = (targetChainLength + 1) * voiceCount * voiceCount * transpositionCount * transpositionCount;
         this.bitset = new Uint32Array(Math.ceil(this.tupleCount / 32));
         this.anyTranspositionByEdge = new Uint8Array((targetChainLength + 1) * voiceCount * voiceCount);
+        this.anyVoicePairByPosition = new Uint8Array(targetChainLength + 1);
         this.transitionCount = 0;
     }
 
@@ -75,11 +79,34 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
     public setAllTranspositionPairs(i: number, vPrev: number, vCurr: number): void {
         const edge = this.edgeOffset(i, vPrev, vCurr);
         this.anyTranspositionByEdge[edge] = 1;
+        this.anyVoicePairByPosition[i] = 1;
         for (let tPrevIdx = 0; tPrevIdx < this.transpositionCount; tPrevIdx++) {
             for (let tCurrIdx = 0; tCurrIdx < this.transpositionCount; tCurrIdx++) {
                 const tuple = this.tupleOffset(i, vPrev, vCurr, tPrevIdx, tCurrIdx);
                 this.bitset[tuple >>> 5] |= (1 << (tuple & 31));
             }
+        }
+    }
+
+    public setTranspositionPairsByPredicate(
+        i: number,
+        vPrev: number,
+        vCurr: number,
+        predicate: (tPrevIdx: number, tCurrIdx: number) => boolean
+    ): void {
+        const edge = this.edgeOffset(i, vPrev, vCurr);
+        let hasAny = false;
+        for (let tPrevIdx = 0; tPrevIdx < this.transpositionCount; tPrevIdx++) {
+            for (let tCurrIdx = 0; tCurrIdx < this.transpositionCount; tCurrIdx++) {
+                if (!predicate(tPrevIdx, tCurrIdx)) continue;
+                const tuple = this.tupleOffset(i, vPrev, vCurr, tPrevIdx, tCurrIdx);
+                this.bitset[tuple >>> 5] |= (1 << (tuple & 31));
+                hasAny = true;
+            }
+        }
+        if (hasAny) {
+            this.anyTranspositionByEdge[edge] = 1;
+            this.anyVoicePairByPosition[i] = 1;
         }
     }
 
@@ -96,12 +123,23 @@ class DenseVoiceTranspositionAdmissibilityIndex implements VoiceTranspositionAdm
         if (vPrev < 0 || vPrev >= this.voiceCount || vCurr < 0 || vCurr >= this.voiceCount) return false;
         return this.anyTranspositionByEdge[this.edgeOffset(i, vPrev, vCurr)] === 1;
     }
+
+    public hasAnyVoicePairAtPosition(i: number): boolean {
+        if (i < 0 || i > this.targetChainLength) return false;
+        return this.anyVoicePairByPosition[i] === 1;
+    }
 }
 
 export function buildVoiceTranspositionAdmissibilityIndex(
     params: BuildVoiceTranspositionAdmissibilityParams
 ): VoiceTranspositionAdmissibilityIndex {
-    const { targetChainLength, voiceCount, transpositionCount, rootVoiceIndex = 0 } = params;
+    const {
+        targetChainLength,
+        voiceCount,
+        transpositionCount,
+        rootVoiceIndex = 0,
+        transpositionPairPredicate
+    } = params;
     if (!Number.isInteger(targetChainLength) || targetChainLength < 1) {
         throw new Error(`targetChainLength must be an integer >= 1. Received ${targetChainLength}`);
     }
@@ -169,7 +207,16 @@ export function buildVoiceTranspositionAdmissibilityIndex(
             if (popcountBigInt(missingVoicesMask) > remainingSlots) continue;
             if (nextPosition === targetChainLength - 1 && nextCoverageMask !== allVoicesMask) continue;
 
-            index.setAllTranspositionPairs(nextPosition, state.currentVoice, nextVoice);
+            if (transpositionPairPredicate) {
+                index.setTranspositionPairsByPredicate(
+                    nextPosition,
+                    state.currentVoice,
+                    nextVoice,
+                    transpositionPairPredicate
+                );
+            } else {
+                index.setAllTranspositionPairs(nextPosition, state.currentVoice, nextVoice);
+            }
 
             const nextLastSeen = Int16Array.from(state.lastSeen);
             const nextSeenSinceLast = state.seenSinceLast.slice();

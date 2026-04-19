@@ -1921,7 +1921,8 @@ export async function searchStrettoChains(
         targetChainLength: options.targetChainLength,
         voiceCount: options.ensembleTotal,
         transpositionCount: transpositions.length,
-        rootVoiceIndex: options.subjectVoiceIndex
+        rootVoiceIndex: options.subjectVoiceIndex,
+        transpositionPairPredicate: (tPrevIdx, tCurrIdx) => Math.abs(transpositions[tCurrIdx] - transpositions[tPrevIdx]) >= 5
     });
     const maxVoiceTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
     const edgeReachableByDepth: boolean[][][] = Array.from(
@@ -2454,10 +2455,9 @@ export async function searchStrettoChains(
         startReachable: boolean,
         interiorReachable: boolean
     ): boolean => {
-        const reachability = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
-        if (!reachability) return false;
-        if (startReachable && reachability.start) return true;
-        return interiorReachable && reachability.interior;
+        const ctx = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
+        if (!ctx) return false;
+        return (startReachable && ctx.start) || (interiorReachable && ctx.interior);
     };
 
     // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
@@ -2851,6 +2851,7 @@ export async function searchStrettoChains(
         }
 
         function valid(pos: number, v: number): boolean {
+            if (pos === 0) return v === options.subjectVoiceIndex;
             for (let k = 0; k < pos; k++) {
                 // Voice ordering applies to ALL temporal pairs — even after prior entry has ended.
                 if (!isVoicePairAllowedForTransposition(

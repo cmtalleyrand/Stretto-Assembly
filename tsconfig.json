@@ -21,10 +21,10 @@
         "./*"
       ],
       "@analysis/*": [
-        "components/services/*"
+        "./components/services/*"
       ],
       "@analysis/midi": [
-        "components/services/midiAnalysis.ts"
+        "./components/services/midiAnalysis.ts"
       ]
     },
     "allowImportingTsExtensions": true,
