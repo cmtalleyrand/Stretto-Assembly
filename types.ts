@@ -661,6 +661,7 @@ export interface StrettoSearchReport {
             tripletRejectParallel?: number;
             tripletRejectVoice?: number;
             tripletRejectP4Bass?: number;
+            tripletRejectPrefixRunBound?: number;
             tripletRejectNoDelayContext?: number;
             tripletRejectedTotal?: number;
             tripletAcceptedTotal?: number;

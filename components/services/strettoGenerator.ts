@@ -2548,47 +2548,75 @@ export async function searchStrettoChains(
             const startC = d_te_1 + d_te_2;
             const nextFromC = adjacentNextPairsByVariant.get(vC)?.[0]?.d ?? Number.POSITIVE_INFINITY;
             const startNextCandidate = Number.isFinite(nextFromC) ? (startC + nextFromC) : Number.POSITIVE_INFINITY;
+            const r2End = startNextCandidate;
+
+            // Global bass determination from absolute transpositions (A=0, B=p1.t, C=p1.t+p2.t).
+            // Lower MIDI pitch number = lower sounding pitch = global bass.
+            const tB = p1.t;
+            const tC = p1.t + p2.t;
+            const globalBassIsA = tB > 0 && tC > 0;
+            const globalBassIsB = tB < 0 && p2.t > 0;
+            const globalBassIsC = tC < 0 && p2.t < 0;
+
+            // No-crossing guards: voice X cannot cross voice Y when |tX - tY| > subjectSpanSemitones.
+            // For pairBC in R2 (third voice = A): A cannot cross B or C.
+            const noCrossingA_forPairBC =
+                Math.abs(tB) > subjectSpanSemitones && Math.abs(tC) > subjectSpanSemitones;
+
+            // For pairAC in R2 (third voice = B): B cannot cross A or C.
+            const noCrossingB_forPairAC =
+                Math.abs(tB) > subjectSpanSemitones && Math.abs(p2.t) > subjectSpanSemitones;
+
+            // Bass-role selection for pairBC (B=record-first, C=record-second).
+            // Only use precise role when the third voice (A) cannot cross B or C.
+            const pairBCrole: 'none' | 'a' | 'b' =
+                noCrossingA_forPairBC
+                    ? (globalBassIsA ? 'none' : globalBassIsB ? 'a' : globalBassIsC ? 'b' : 'none')
+                    : 'none';
+
+            // Bass-role selection for pairAC (A=record-first, C=record-second).
+            // Only use precise role when the third voice (B) cannot cross A or C.
+            const pairACrole: 'none' | 'a' | 'b' =
+                noCrossingB_forPairAC
+                    ? (globalBassIsA ? 'a' : globalBassIsB ? 'none' : globalBassIsC ? 'b' : 'none')
+                    : 'none';
+
+            // pairAB: process as a single window [startB, r2End] using union of .a and .b spans.
+            // This correctly handles R1 (2-voice: lower IS always global bass → P4 dissonant)
+            // and is conservative but safe for R2 when global bass is A or B. When global bass
+            // is C in R2, .a/.b are per-tick accurate (only fire when A<B or B<A respectively),
+            // so a P4 where C is lower (and thus consonant) won't appear in either span.
+            // If noCrossing holds for C w.r.t. both A and B, we can use the precise role for R2
+            // and union for R1; since we process as one window, use union throughout (safe over-estimate).
+            const rebasedAB_a = rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.a, startA);
+            const rebasedAB_b = rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.b, startA);
+            const unionAB = [...rebasedAB_a, ...rebasedAB_b];
+
             const tripletLocalRunSpans: SimultaneitySpan[] = [];
-            // Region R1: A∩B without C (triplet-local deterministic P4 regime).
+
+            // pairAB full window [startB, r2End] — single clip (no R1/R2 split).
+            for (const span of clipRunSpansToWindow(unionAB, startB, r2End)) {
+                tripletLocalRunSpans.push(span);
+            }
+            // pairBC — R2 only [startC, r2End].
             for (const span of clipRunSpansToWindow(
-                rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.none, startA),
-                startB,
-                startC
+                rebaseRunSpansToAbsolute(pairBC.bassRoleDissonanceRunSpans[pairBCrole], startB),
+                startC,
+                r2End
             )) {
                 tripletLocalRunSpans.push(span);
             }
-            // Region R2: from C entry to earliest possible next valid entry onset.
-            const r2Start = startC;
-            const r2End = startNextCandidate;
-            if (!pairAB.hasFourth) {
-                for (const span of clipRunSpansToWindow(
-                    rebaseRunSpansToAbsolute(pairAB.bassRoleDissonanceRunSpans.none, startA),
-                    r2Start,
-                    r2End
-                )) {
-                    tripletLocalRunSpans.push(span);
-                }
-            }
-            if (!pairBC.hasFourth) {
-                for (const span of clipRunSpansToWindow(
-                    rebaseRunSpansToAbsolute(pairBC.bassRoleDissonanceRunSpans.none, startB),
-                    r2Start,
-                    r2End
-                )) {
-                    tripletLocalRunSpans.push(span);
-                }
-            }
+            // pairAC — R2 only [startC, r2End] (only when A and C overlap).
             if (pairAC) {
-                if (!pairAC.hasFourth) {
-                    for (const span of clipRunSpansToWindow(
-                        rebaseRunSpansToAbsolute(pairAC.bassRoleDissonanceRunSpans.none, startA),
-                        r2Start,
-                        r2End
-                    )) {
-                        tripletLocalRunSpans.push(span);
-                    }
+                for (const span of clipRunSpansToWindow(
+                    rebaseRunSpansToAbsolute(pairAC.bassRoleDissonanceRunSpans[pairACrole], startA),
+                    startC,
+                    r2End
+                )) {
+                    tripletLocalRunSpans.push(span);
                 }
             }
+
             const conservativeTripletLocalPrefixState = extendPrefixDissonanceState(
                 {
                     macroRunCount: 0,
