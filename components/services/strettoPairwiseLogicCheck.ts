@@ -114,13 +114,13 @@ function assertPerfectGuardPolicy(subject: SubjectVariant): void {
 }
 
 function assertBassInclusiveModeMakesFourthDissonant(): void {
-    const maxDissonance = 0;
-    const neutral = checkCounterpointStructureWithBassRole(
+    const permissiveMaxDissonance = 1;
+    const provisional = checkCounterpointStructureWithBassRole(
         pureFourthFixtureA,
         pureFourthFixtureB,
         0,
         0,
-        maxDissonance,
+        permissiveMaxDissonance,
         'provisional'
     );
     const dissonant = checkCounterpointStructureWithBassRole(
@@ -128,12 +128,14 @@ function assertBassInclusiveModeMakesFourthDissonant(): void {
         pureFourthFixtureB,
         0,
         0,
-        maxDissonance,
+        permissiveMaxDissonance,
         'dissonant'
     );
-    assert(neutral.hasFourth, 'Neutral fixture must contain a fourth.');
-    assert(neutral.compatible, 'Neutral mode must treat isolated P4 as provisionally consonant.');
-    assert(!dissonant.compatible, 'Dissonant mode must treat isolated P4 as dissonant.');
+    assert(provisional.hasFourth, 'Fixture must contain a fourth.');
+    assert(provisional.compatible, 'With maxDissonanceRatio=1, provisional mode should be compatible.');
+    assert(dissonant.compatible, 'With maxDissonanceRatio=1, dissonant mode should remain compatible for a single-event overlap.');
+    assert(Math.abs(provisional.dissonanceRatio - 0) < 1e-9, 'Provisional mode should classify isolated P4 as consonant (ratio 0).');
+    assert(Math.abs(dissonant.dissonanceRatio - 1) < 1e-9, 'Dissonant mode should classify isolated P4 as dissonant (ratio 1).');
 }
 
 assertOctaveParityWhenNoPerfectBehavior(consonantFixture);
