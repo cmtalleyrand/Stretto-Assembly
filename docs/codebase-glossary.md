@@ -5,10 +5,22 @@ This glossary maps implementation symbols to musical semantics and algorithm rol
 ## Notation and Units
 
 - Delay/onset distance between entries: `d` with units in beats (`b`) or quarter-note units (`q`).
-- Pitch displacement/transposition: `p` with units in semitones (`st`).
+- Pitch displacement/transposition: `t` with units in semitones (`st`).
 - Tick-domain values are explicitly marked as ticks.
 
-Cross-reference: pending normalization tasks are tracked in `docs/glossary-todo.md`.
+Cross-reference: normalization status is tracked in `docs/glossary-todo.md`.
+
+
+## Entry-index notation standard
+
+For canonical entry index `e_i`, the glossary uses:
+- `t_i`: transposition relative to the first entry (`st`).
+- `d_i`: onset distance from the previous entry (`b` or `q`).
+- `Dis_i`: distance from first entry (`b` or `q`).
+- `mod_i`: modification status in `{normal, inverted, truncated}`.
+- `vox_i`: allocated voice index.
+
+For local pair/triplet relations inside a sliding window, uppercase local indices (`I`, `J`, `K`) denote window-relative quantities (for example `d_{I,J}`, `t_{J,K}`).
 
 ---
 
@@ -95,7 +107,7 @@ These fields are related but represent distinct data layers: existence, localiza
 ### First-principles rationale
 For any local triplet window over consecutive entries `(e_k, e_{k+1}, e_{k+2})`, the index state is defined by adjacent-edge quantities:
 - onset distances: `d_{k,k+1}`, `d_{k+1,k+2}`
-- pitch displacements: `p_{k,k+1}`, `p_{k+1,k+2}`
+- pitch displacements: `t_{k,k+1}`, `t_{k+1,k+2}`
 - selected realization identities for the three entries.
 
 Transition-window indexes consume these adjacent-edge quantities. Therefore canonical equality for this index is equality over those local edge quantities plus realization identities. The same rule is applied for each local triplet window encountered during extension.
@@ -162,4 +174,4 @@ Hence, these are different canonicalizations over different state spaces (entry 
 
 ## Normalization notes
 
-Deferred terminology simplifications are tracked in `docs/glossary-todo.md`.
+Applied and deferred terminology tasks are tracked in `docs/glossary-todo.md`.

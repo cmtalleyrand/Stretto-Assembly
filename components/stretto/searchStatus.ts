@@ -72,15 +72,15 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
   if (coverage) {
     const coverageTerms: string[] = [];
     if (typeof coverage.nodeBudgetUsedPercent === 'number') {
-      coverageTerms.push(`nodeBudget=${coverage.nodeBudgetUsedPercent}%`);
+      coverageTerms.push(`nodeBudgetUsedPercent=${coverage.nodeBudgetUsedPercent}%`);
     }
     const completionAssumptionsHold = coverage.completionLowerBoundAssumptions?.monotoneQueuedWorkItems === true;
     if (completionAssumptionsHold && typeof coverage.completionLowerBound === 'number') {
-      coverageTerms.push(`completionLowerBound(heuristic)=${Math.round(coverage.completionLowerBound * 100)}%`);
+      coverageTerms.push(`completionRatioLowerBound(heuristic)=${Math.round(coverage.completionLowerBound * 100)}%`);
     }
-    coverageTerms.push(`explored=${coverage.exploredWorkItems.toLocaleString()}`);
-    coverageTerms.push(`live=${coverage.liveFrontierWorkItems.toLocaleString()}`);
-    coverageTerms.push(`maxFrontier=${coverage.maxFrontierSize.toLocaleString()}`);
+    coverageTerms.push(`exploredWorkItems=${coverage.exploredWorkItems.toLocaleString()}`);
+    coverageTerms.push(`liveFrontierWorkItems=${coverage.liveFrontierWorkItems.toLocaleString()}`);
+    coverageTerms.push(`maxFrontierSize=${coverage.maxFrontierSize.toLocaleString()}`);
     coverageTerms.push(`classes=${coverage.maxFrontierClassCount.toLocaleString()}`);
     coverageTerms.push(`terminationFrontier=${coverage.frontierSizeAtTermination.toLocaleString()} (${coverage.frontierClassesAtTermination.toLocaleString()} classes)`);
     signals.push(`Coverage: ${coverageTerms.join(' ')}.`);

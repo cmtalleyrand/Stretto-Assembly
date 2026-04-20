@@ -29,37 +29,37 @@ export function deriveCoverageDisplayMetrics(coverage: CoverageDiagnostics): Cov
     return [
         {
             metricKey: 'nodeBudgetUsedPercent',
-            label: 'node budget',
+            label: 'Node budget usage',
             value: coverage.nodeBudgetUsedPercent != null ? `${coverage.nodeBudgetUsedPercent}%` : 'n/a',
             show: true
         },
         {
             metricKey: 'completionRatioLowerBound',
-            label: 'completion lower bound (heuristic)',
+            label: 'Completion lower bound (heuristic)',
             value: completionLowerBoundPercent != null ? `${completionLowerBoundPercent}%` : 'n/a',
             show: completionAssumptionsHold
         },
         {
             metricKey: 'exploredWorkItems',
-            label: 'explored',
+            label: 'Explored work items',
             value: coverage.exploredWorkItems.toLocaleString(),
             show: true
         },
         {
             metricKey: 'liveFrontierWorkItems',
-            label: 'live frontier',
+            label: 'Live frontier work items',
             value: coverage.liveFrontierWorkItems.toLocaleString(),
             show: true
         },
         {
             metricKey: 'maxFrontierSize',
-            label: 'max frontier',
+            label: 'Max frontier size',
             value: `${coverage.maxFrontierSize.toLocaleString()} (${coverage.maxFrontierClassCount.toLocaleString()} classes)`,
             show: true
         },
         {
             metricKey: 'depthHistogram',
-            label: 'depth histogram',
+            label: 'Depth histogram',
             value: Object.entries(coverage.depthHistogram).map(([depth, count]) => `${depth}:${count}`).join(', ') || 'n/a',
             show: true
         }

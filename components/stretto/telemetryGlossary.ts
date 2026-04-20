@@ -109,7 +109,7 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
   },
   completionRatioLowerBound: {
     label: 'Completion lower bound',
-    formalDefinition: 'Heuristic lower-bound estimator exploredWorkItems / (exploredWorkItems + liveFrontierWorkItems); exact only for discovered queue coverage, not global search completion.',
+    formalDefinition: 'Heuristic frontier-coverage lower bound: exploredWorkItems / (exploredWorkItems + liveFrontierWorkItems); it is not an exact global-search completion metric.',
     unit: 'percent (%)',
     incrementSite: 'Derived from termination frontier coverage metrics.',
     estimateClass: 'heuristic'
@@ -165,14 +165,14 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
   },
   pairwiseOperationsProcessed: {
     label: 'Pairwise operations processed',
-    formalDefinition: 'Number of pairwise candidate operations processed by the pairwise stage, including accepted and rejected operations.',
+    formalDefinition: 'Total pairwise-stage candidate operations processed (accepted + rejected); this is work attempted, not work retained.',
     unit: 'count (operations)',
     incrementSite: 'Incremented per pairwise-stage candidate operation processed in the precompute/filter loop.',
     estimateClass: 'exact'
   },
   tripletOperationsProcessed: {
     label: 'Triplet operations processed',
-    formalDefinition: 'Number of triplet candidate operations processed by the triplet stage, including accepted and rejected operations.',
+    formalDefinition: 'Total triplet candidate operations processed by the triplet stage (accepted + rejected); this is work attempted, not retained triplet count.',
     unit: 'count (operations)',
     incrementSite: 'Incremented per triplet-stage candidate operation processed in triplet gate evaluation.',
     estimateClass: 'exact'
@@ -186,7 +186,7 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
   },
   dagEdgesEvaluated: {
     label: 'DAG edges evaluated',
-    formalDefinition: 'Number of transition edges evaluated while expanding DAG frontier states.',
+    formalDefinition: 'Number of transition edges evaluated during DAG successor expansion; each evaluated edge corresponds to one tested transition relation.',
     unit: 'count (edges)',
     incrementSite: 'Incremented for each candidate transition tested during successor enumeration.',
     estimateClass: 'exact'

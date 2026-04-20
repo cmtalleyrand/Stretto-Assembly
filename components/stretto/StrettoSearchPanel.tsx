@@ -540,14 +540,14 @@ export default function StrettoSearchPanel({
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {searchProgress.stage === 'dag'
-                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · queue coverage lower bound ${progressDisplay.dagCompletionLowerBoundPercent ?? 0}% · edges/node ${(progressDisplay.dagEdgesPerExpandedNode ?? 0).toFixed(2)}`
+                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · completion lower bound (heuristic) ${progressDisplay.dagCompletionLowerBoundPercent ?? 0}% · edges/node ${(progressDisplay.dagEdgesPerExpandedNode ?? 0).toFixed(2)}`
                             : `Stage progress: ${progressDisplay.stageEstimatePercent}% · units ${progressDisplay.unitLabel}`}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Valid pairs {searchProgress.telemetry.validPairs.toLocaleString()}<MetricHelp metricKey="validPairs" /> · valid triplets {searchProgress.telemetry.validTriplets.toLocaleString()}<MetricHelp metricKey="validTriplets" /> · chains {searchProgress.telemetry.chainsFound.toLocaleString()}<MetricHelp metricKey="chainsFound" />
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
-                        Pairwise ops {searchProgress.telemetry.pairwiseOperationsProcessed.toLocaleString()}<MetricHelp metricKey="pairwiseOperationsProcessed" /> · Triplet ops {searchProgress.telemetry.tripletOperationsProcessed.toLocaleString()}<MetricHelp metricKey="tripletOperationsProcessed" />
+                        Pairwise operations processed {searchProgress.telemetry.pairwiseOperationsProcessed.toLocaleString()}<MetricHelp metricKey="pairwiseOperationsProcessed" /> · Triplet operations processed {searchProgress.telemetry.tripletOperationsProcessed.toLocaleString()}<MetricHelp metricKey="tripletOperationsProcessed" />
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         Max depth {searchProgress.telemetry.maxDepthReached}<MetricHelp metricKey="maxDepthReached" /> / target {searchProgress.telemetry.targetChainLength}<MetricHelp metricKey="targetChainLength" />

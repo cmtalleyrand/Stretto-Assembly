@@ -106,7 +106,7 @@ export function computeSearchProgressDisplay(
             isHeartbeat: false,
             depthAxisPercent: 0,
             traversalCompletionPercent: null,
-            countersLabel: 'explored 0 · live 0 · nodes 0 · edges 0 · maxDepth 0',
+            countersLabel: 'Explored work items 0 · Live frontier work items 0 · DAG nodes expanded 0 · DAG edges evaluated 0 · Max depth reached 0',
             dagEdgesPerExpandedNode: null,
             dagFrontierPressurePercent: null,
             dagCompletionLowerBoundPercent: null,
@@ -178,10 +178,10 @@ export function computeSearchProgressDisplay(
             : 0;
     const dagCompletionLowerBoundPercent = Math.round(lowerBoundRatio * 100);
     const countersLabel = progress.stage === 'dag'
-        ? `DAG explored ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · live ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · edges/node ${(dagEdgesPerExpandedNode ?? 0).toFixed(2)} · frontier pressure ${(dagFrontierPressurePercent ?? 0).toFixed(1)}% · completion lower bound ${dagCompletionLowerBoundPercent}% · maxDepth ${progress.telemetry.maxDepthReached.toLocaleString()}`
+        ? `Explored work items ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · Live frontier work items ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · DAG edges evaluated per DAG node expanded ${(dagEdgesPerExpandedNode ?? 0).toFixed(2)} · Frontier pressure ${(dagFrontierPressurePercent ?? 0).toFixed(1)}% · Completion lower bound (heuristic) ${dagCompletionLowerBoundPercent}% · Max depth reached ${progress.telemetry.maxDepthReached.toLocaleString()}`
         : progress.stage === 'triplet'
-            ? `Triplet operations ${progress.telemetry.tripletOperationsProcessed.toLocaleString()} · valid triplets ${progress.telemetry.validTriplets.toLocaleString()} · valid pairs ${progress.telemetry.validPairs.toLocaleString()}`
-            : `Pairwise operations ${progress.telemetry.pairwiseOperationsProcessed.toLocaleString()} · valid pairs ${progress.telemetry.validPairs.toLocaleString()}`;
+            ? `Triplet operations processed ${progress.telemetry.tripletOperationsProcessed.toLocaleString()} · Valid triplets ${progress.telemetry.validTriplets.toLocaleString()} · Valid pairs ${progress.telemetry.validPairs.toLocaleString()}`
+            : `Pairwise operations processed ${progress.telemetry.pairwiseOperationsProcessed.toLocaleString()} · Valid pairs ${progress.telemetry.validPairs.toLocaleString()}`;
 
     return {
         stageLabel: progress.heartbeat ? 'Search active (collecting stage metrics)' : STAGE_LABELS[progress.stage],
