@@ -2433,15 +2433,18 @@ export async function searchStrettoChains(
     // is FSM-admissible at this depth. This preserves terminal coverage pruning (last
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
     // variant indices being mistakenly used as voice labels.
-    const hasVoiceTranspositionTripletContext = (
+    const getTripletVoiceTranspositionContext = (
         transpositionAB: number,
         transpositionBC: number,
         startReachable: boolean,
         interiorReachable: boolean
-    ): boolean => {
+    ): { start: boolean; interior: boolean } | null => {
         const ctx = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
-        if (!ctx) return false;
-        return (startReachable && ctx.start) || (interiorReachable && ctx.interior);
+        if (!ctx) return null;
+        return {
+            start: startReachable && ctx.start,
+            interior: interiorReachable && ctx.interior
+        };
     };
 
     // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
@@ -2513,7 +2516,7 @@ export async function searchStrettoChains(
                 const interiorReachable = Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
                 if (!startReachable && !interiorReachable) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                } else if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
+                } else if (!getTripletVoiceTranspositionContext(p1.t, p2.t, startReachable, interiorReachable)) {
                     rejectReason = TRIPLET_REJECT_REASON.VOICE;
                 }
             } else {
@@ -2616,14 +2619,27 @@ export async function searchStrettoChains(
                 continue;
             }
 
+            const voiceTripletContext = getTripletVoiceTranspositionContext(
+                p1.t,
+                p2.t,
+                Boolean(validDelayTransitionsStartPos),
+                Boolean(validDelayTransitionsInteriorPos)
+            );
+            if (!voiceTripletContext) {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.VOICE);
+                continue;
+            }
+
             let tripletHasValidDelayContext = false;
             for (const dCtx of validTripletDelayAs) {
                 if (validDelayTransitionsByAbsPos !== null) {
                     const transitionKey = `${vB}:${vC}:${d_te_1}:${d_te_2}`;
                     if (dCtx === 0) {
                         if (!validDelayTransitionsStartPos?.has(transitionKey)) continue;
+                        if (!voiceTripletContext.start) continue;
                     } else {
                         if (!validDelayTransitionsInteriorPos?.has(transitionKey)) continue;
+                        if (!voiceTripletContext.interior) continue;
                     }
                 }
                 if (isCanonDelaySearch) {
@@ -2699,7 +2715,7 @@ export async function searchStrettoChains(
                     ? true : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
                 const interiorReachable = validDelayTransitionsByAbsPos === null
                     ? true : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
-                if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) continue;
+                if (!getTripletVoiceTranspositionContext(p1.t, p2.t, startReachable, interiorReachable)) continue;
                 const dAC = p1.d + p2.d;
                 const tAC = p1.t + p2.t;
                 const lenA = variants[p1.vA].lengthTicks;
@@ -3669,6 +3685,10 @@ export async function searchStrettoChains(
                     if (!allowedTranspositions.has(tE1)) continue;
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
+                    const tE0Idx = absoluteTranspositionToIndex.get(0);
+                    const tE1Idx = absoluteTranspositionToIndex.get(tE1);
+                    if (tE0Idx === undefined || tE1Idx === undefined) continue;
+                    if (!probeVoiceTransitionReachability(1, tE0Idx, tE1Idx)) continue;
                     const firstWindowTransitions = precomputeIndex.getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
                     if (!firstWindowTransitions || firstWindowTransitions.size === 0) continue;
 
@@ -3688,6 +3708,9 @@ export async function searchStrettoChains(
                             const tE2 = tE1 + tAB;
                             if (!allowedTranspositions.has(tE2)) continue;
                             if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
+                            const tE2Idx = absoluteTranspositionToIndex.get(tE2);
+                            if (tE2Idx === undefined) continue;
+                            if (!probeVoiceTransitionReachability(2, tE1Idx, tE2Idx)) continue;
 
                             const secondWindowMap = precomputeIndex.getWindowTransitions(vA, vB, firstDelay, delayAB, tAB);
                             if (!secondWindowMap || secondWindowMap.size === 0) continue;
@@ -3716,6 +3739,9 @@ export async function searchStrettoChains(
                                     const tE3 = tE2 + tBC;
                                     if (!allowedTranspositions.has(tE3)) continue;
                                     if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
+                                    const tE3Idx = absoluteTranspositionToIndex.get(tE3);
+                                    if (tE3Idx === undefined) continue;
+                                    if (!probeVoiceTransitionReachability(3, tE2Idx, tE3Idx)) continue;
 
                                     const varC = variants[vC];
                                     const e3Start_pre = e2Start_pre + delayBC;
