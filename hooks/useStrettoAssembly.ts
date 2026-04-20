@@ -1,19 +1,17 @@
-
 import { useState, useCallback } from 'react';
-import { StrettoCandidate, RawNote, StrettoListFilterContext } from '../types';
+import { StrettoCandidate, RawNote } from '../types';
 import { parseSimpleAbc } from '../components/services/abcBridge';
+import type { AssemblyFilterContextPayload, AssemblyGateway } from '../components/services/contracts/gateways';
+import { defaultAssemblyGateway } from '../components/services/gateways/defaultGateways';
 
-interface UseStrettoAssemblyProps {
+export interface UseStrettoAssemblyProps {
     notes: RawNote[];
     ppq: number;
     ts?: { num: number, den: number };
+    assemblyGateway?: AssemblyGateway;
 }
 
-interface AssemblyFilterContextPayload {
-    filterContext?: StrettoListFilterContext | null;
-}
-
-export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts }: UseStrettoAssemblyProps) => {
+export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts, assemblyGateway = defaultAssemblyGateway }: UseStrettoAssemblyProps) => {
     const [isAssembling, setIsAssembling] = useState(false);
     const [assemblyStatus, setAssemblyStatus] = useState<string>('');
     const [assemblyResult, setAssemblyResult] = useState<string>('');
@@ -21,7 +19,7 @@ export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts }: UseStrettoA
     const [attemptCount, setAttemptCount] = useState(0);
 
     const runAssembly = useCallback(async (
-        candidates: StrettoCandidate[], 
+        candidates: StrettoCandidate[],
         abcInput: string,
         payload?: AssemblyFilterContextPayload
     ) => {
@@ -34,8 +32,8 @@ export const useStrettoAssembly = ({ notes: subjectNotes, ppq, ts }: UseStrettoA
         setAssemblyLog([]);
         setAttemptCount(1);
         setAssemblyResult('');
-        
-        const totalEntries = candidates.length + 1; // Candidates + Original Subject
+
+        const totalEntries = candidates.length + 1;
         const timeSigStr = ts ? `${ts.num}/${ts.den}` : '4/4';
 
         const systemPrompt = `You are a master of fugal counterpoint. 
@@ -65,25 +63,28 @@ V:1 name="Subject"
 ...
 `;
 
-        // Explicitly defining absolute start times for the LLM
-        const candidateList = candidates.map((r, i) => {
-            const startBeat = r.delayBeats;
-            return `Voice ${i+2}: Transpose ${r.intervalLabel}. START BEAT: ${startBeat} (This voice enters ${startBeat} beats after the beginning of the piece).`;
-        }).join('\n');
+        const candidateList = candidates
+            .map((r, i) => {
+                const startBeat = r.delayBeats;
+                return `Voice ${i + 2}: Transpose ${r.intervalLabel}. START BEAT: ${startBeat} (This voice enters ${startBeat} beats after the beginning of the piece).`;
+            })
+            .join('\n');
 
         const filterContext = payload?.filterContext;
-        const filterContextText = filterContext ? [
-            'Discovery Filter Context (hard constraints from user intent):',
-            `- Visible candidate subset size: ${filterContext.visibleCount}/${filterContext.totalCount}`,
-            `- Selected intervals: ${filterContext.selectedIntervals.length > 0 ? filterContext.selectedIntervals.join(', ') : 'ALL'}`,
-            `- Selected delays: ${filterContext.selectedDelays.length > 0 ? filterContext.selectedDelays.join(', ') : 'ALL'}`,
-            `- Selected entry pitch classes: ${filterContext.selectedPitches.length > 0 ? filterContext.selectedPitches.join(', ') : 'ALL'}`,
-            `- Dissonance cap (%): ${filterContext.maxDissonance}`,
-            `- Require resolved ending: ${filterContext.onlyResolved ? 'YES' : 'NO'}`,
-            `- Discovery sorting context: ${filterContext.sortKey} (${filterContext.sortDir})`,
-            'Constraint: preserve the supplied candidate order exactly; do not introduce unlisted transformations or delays.'
-        ].join('\n') : 'Discovery Filter Context: not provided.';
-        
+        const filterContextText = filterContext
+            ? [
+                'Discovery Filter Context (hard constraints from user intent):',
+                `- Visible candidate subset size: ${filterContext.visibleCount}/${filterContext.totalCount}`,
+                `- Selected intervals: ${filterContext.selectedIntervals.length > 0 ? filterContext.selectedIntervals.join(', ') : 'ALL'}`,
+                `- Selected delays: ${filterContext.selectedDelays.length > 0 ? filterContext.selectedDelays.join(', ') : 'ALL'}`,
+                `- Selected entry pitch classes: ${filterContext.selectedPitches.length > 0 ? filterContext.selectedPitches.join(', ') : 'ALL'}`,
+                `- Dissonance cap (%): ${filterContext.maxDissonance}`,
+                `- Require resolved ending: ${filterContext.onlyResolved ? 'YES' : 'NO'}`,
+                `- Discovery sorting context: ${filterContext.sortKey} (${filterContext.sortDir})`,
+                'Constraint: preserve the supplied candidate order exactly; do not introduce unlisted transformations or delays.',
+            ].join('\n')
+            : 'Discovery Filter Context: not provided.';
+
         let currentInput = `Subject ABC: ${abcInput}
 
 Configuration (Total ${totalEntries} Voices):
@@ -98,29 +99,14 @@ ${filterContextText}`;
             for (let i = 1; i <= 3; i++) {
                 setAttemptCount(i);
                 setAssemblyStatus(`Attempt ${i}: Querying Gemini...`);
-                
-                const response = await fetch('/api/assembly', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model: 'gemini-3-pro-preview',
-                        contents: currentInput,
-                        systemInstruction: systemPrompt
-                    })
+
+                const responseBody = await assemblyGateway.assemble({
+                    model: 'gemini-3-pro-preview',
+                    contents: currentInput,
+                    systemInstruction: systemPrompt,
                 });
 
-                if (!response.ok) {
-                    const errorPayload = await response.json().catch(() => ({}));
-                    const errorMessage = typeof errorPayload.error === 'string' ? errorPayload.error : `Proxy request failed with status ${response.status}.`;
-                    throw new Error(errorMessage);
-                }
-
-                const responseBody = await response.json() as { text?: string };
                 const generatedText = responseBody.text || '';
-                
-                // Extract ABC part if mixed with text
                 let abcContent = generatedText;
                 if (generatedText.includes('[ABC]')) {
                     abcContent = generatedText.split('[ABC]')[1].trim();
@@ -129,19 +115,16 @@ ${filterContextText}`;
                     abcContent = 'X:1' + parts[1];
                 }
 
-                setAssemblyResult(generatedText); // Save full text to show Order + ABC
+                setAssemblyResult(generatedText);
                 setAssemblyStatus(`Attempt ${i}: Verifying counterpoint...`);
 
-                // Algorithmic Verification (Basic Parse Check)
                 const genNotes = parseSimpleAbc(abcContent, ppq);
                 const errors: string[] = [];
-                
-                // Verification: Check if it looks polyphonic (short overall duration relative to sum of parts)
+
                 const subjectDuration = subjectNotes.reduce((max, n) => Math.max(max, n.ticks + n.durationTicks), 0);
                 const generatedDuration = genNotes.reduce((max, n) => Math.max(max, n.ticks + n.durationTicks), 0);
                 const sequentialDuration = subjectDuration * totalEntries;
-                
-                // If the generated duration is close to sequentialDuration, it failed to overlap
+
                 if (generatedDuration > sequentialDuration * 0.8 && totalEntries > 1) {
                     errors.push("Output appears sequential (too long). Ensure voices overlap.");
                 }
@@ -154,10 +137,10 @@ ${filterContextText}`;
                     setAssemblyLog(prev => [...prev, `Pass ${i}: ${errors.length === 0 ? "Verified Successful" : "Final Attempt Reached"}`]);
                     setAssemblyStatus('Assembly Complete');
                     break;
-                } else {
-                    setAssemblyLog(prev => [...prev, `Pass ${i}: Failed verification. Issues: ${errors.join(', ')}`]);
-                    currentInput = `The previous ABC had the following issues: ${errors.join('. ')}. Please correct and try again. Ensure you use the FULL subject for all voices and they OVERLAP in time.\n\nPrevious Output:\n${generatedText}`;
                 }
+
+                setAssemblyLog(prev => [...prev, `Pass ${i}: Failed verification. Issues: ${errors.join(', ')}`]);
+                currentInput = `The previous ABC had the following issues: ${errors.join('. ')}. Please correct and try again. Ensure you use the FULL subject for all voices and they OVERLAP in time.\n\nPrevious Output:\n${generatedText}`;
             }
         } catch (err) {
             console.error(err);
@@ -166,7 +149,7 @@ ${filterContextText}`;
         } finally {
             setIsAssembling(false);
         }
-    }, [ppq, subjectNotes, ts]);
+    }, [assemblyGateway, ppq, subjectNotes, ts]);
 
     return {
         isAssembling,
