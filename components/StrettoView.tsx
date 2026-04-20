@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext, CanonSearchOptions, CanonChainResult, CanonSearchReport } from '../types';
 import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
 import { analyzeStrettoCandidate, analyzeStrettoTripletCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
@@ -7,9 +7,9 @@ import { getStrictPitchName } from './services/midiSpelling';
 import { downloadStrettoCandidate, downloadStrettoSelection } from './services/strettoExport';
 import { Spinner, DocumentTextIcon } from './Icons';
 import FileUpload from './FileUpload';
-import { playSequence, stopPlayback } from './midiPlaybackService';
 import { useStrettoAssembly } from '../hooks/useStrettoAssembly';
-import { predictKey } from './services/analysis/keyPrediction'; // Robust key finding
+import { deriveInitialPivotSettings } from './services/stretto/pivotInitialization';
+import { computeMaxDelayAutoBeats } from './services/stretto/delayUtils';
 
 import StrettoConfig, { SearchResolution } from './stretto/StrettoConfig';
 import { computeSubjectPivotCandidates, rankPivotCandidates, PivotSearchMetric, PivotCandidateObservation } from './services/pairwisePivotSearch';
@@ -20,11 +20,11 @@ import StrettoChainView from './stretto/StrettoChainView';
 import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePolicy } from './stretto/selectionPolicy';
 import CanonSearchPanel from './stretto/CanonSearchPanel';
 import CanonResultsList from './stretto/CanonResultsList';
-import { runCanonSearch } from './services/canonSearch';
 import PianoRoll from './PianoRoll';
 import { computeSecondDelayStart, computeSecondDelayEnd, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
+import type { AssemblyGateway, PlaybackGateway, SearchGateway, StrettoSearchProgressState, SubjectRepository } from './services/contracts/gateways';
 
-interface StrettoViewProps {
+export interface StrettoViewProps {
     notes: RawNote[]; 
     ppq: number;
     ts: { num: number, den: number };
@@ -35,80 +35,18 @@ interface StrettoViewProps {
     midiTracks: { id: number; name: string; noteCount: number }[];
     selectedMidiTrackId: number | null;
     onSelectMidiTrack: (trackId: number) => void;
+    gateways?: {
+        search?: SearchGateway;
+        playback?: PlaybackGateway;
+        subjects?: SubjectRepository;
+        assembly?: AssemblyGateway;
+    };
 }
 
 interface SavedSubject {
     id: string;
     name: string;
     data: string;
-}
-
-interface StrettoSearchWorkerRequest {
-    subject: RawNote[];
-    options: StrettoSearchOptions;
-    ppq: number;
-}
-
-interface StrettoSearchProgressState {
-    elapsedMs: number;
-    stage: 'pairwise' | 'triplet' | 'dag';
-    completedUnits: number;
-    totalUnits: number;
-    terminal: boolean;
-    telemetry: {
-        validPairs: number;
-        validTriplets: number;
-        chainsFound: number;
-        maxDepthReached: number;
-        targetChainLength: number;
-        pairwiseOperationsProcessed: number;
-        tripletOperationsProcessed: number;
-        dagNodesExpanded: number;
-        dagEdgesEvaluated: number;
-        dagExploredWorkItems: number;
-        dagLiveFrontierWorkItems: number;
-        dagHeuristicCompletionRatio?: number;
-    };
-    heartbeat: boolean;
-}
-
-interface StrettoSearchWorkerProgress {
-    ok: true;
-    kind: 'progress';
-    elapsedMs: number;
-    stage: 'pairwise' | 'triplet' | 'dag';
-    completedUnits: number;
-    totalUnits: number;
-    terminal: boolean;
-    telemetry: {
-        validPairs: number;
-        validTriplets: number;
-        chainsFound: number;
-        maxDepthReached: number;
-        targetChainLength: number;
-        pairwiseOperationsProcessed: number;
-        tripletOperationsProcessed: number;
-        dagNodesExpanded: number;
-        dagEdgesEvaluated: number;
-        dagExploredWorkItems: number;
-        dagLiveFrontierWorkItems: number;
-        dagHeuristicCompletionRatio?: number;
-    };
-    heartbeat: boolean;
-    progressPercent: number;
-    stars: string;
-    stageLabel: string;
-}
-
-interface StrettoSearchWorkerResult {
-    ok: true;
-    kind: 'result';
-    report: StrettoSearchReport;
-}
-
-interface StrettoSearchWorkerFailure {
-    ok: false;
-    error: string;
 }
 
 export default function StrettoView({
@@ -121,8 +59,13 @@ export default function StrettoView({
     isMidiLoading,
     midiTracks,
     selectedMidiTrackId,
-    onSelectMidiTrack
+    onSelectMidiTrack,
+    gateways
 }: StrettoViewProps) {
+    const searchGateway = gateways?.search;
+    const playbackGateway = gateways?.playback;
+    const subjectRepository = gateways?.subjects;
+    const assemblyGateway = gateways?.assembly;
     const [mode, setMode] = useState<'midi' | 'abc'>('abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
     const [viewMode, setViewMode] = useState<'pairwise' | 'chain' | 'canon'>('chain');
@@ -183,7 +126,6 @@ export default function StrettoView({
     const [searchReport, setSearchReport] = useState<StrettoSearchReport | null>(null);
     const [isSearching, setIsSearching] = useState(false);
     const [searchProgress, setSearchProgress] = useState<StrettoSearchProgressState | null>(null);
-    const activeWorkerRef = useRef<Worker | null>(null);
     const [selectedChain, setSelectedChain] = useState<StrettoChainResult | null>(null);
 
     // --- Canon Search State ---
@@ -211,11 +153,9 @@ export default function StrettoView({
     const [isPlaying, setIsPlaying] = useState(false);
 
     useEffect(() => {
-        const saved = localStorage.getItem('stretto_subject_library');
-        if (saved) {
-            try { setSavedSubjects(JSON.parse(saved)); } catch (e) { console.error(e); }
-        }
-    }, []);
+        if (!subjectRepository) return;
+        setSavedSubjects(subjectRepository.loadAll());
+    }, [subjectRepository]);
 
     const subjectTitle = useMemo(() => {
         if (mode === 'abc') {
@@ -282,72 +222,14 @@ export default function StrettoView({
 
     // Intelligent Pivot Initialization using Key Prediction or ABC Context
     useEffect(() => {
-        if (subjectNotes && subjectNotes.length > 0) {
-            let derivedRoot = 0;
-            let derivedMode = 'Major';
-            
-            // 1. Determine Root & Mode
-            if (mode === 'abc') {
-                const abcKey = extractKeyFromAbc(abcInput);
-                if (abcKey) {
-                    derivedRoot = abcKey.root;
-                    derivedMode = abcKey.mode;
-                } else {
-                    // Fallback to prediction if ABC has no K: field
-                    const histogram: Record<number, number> = {};
-                    for (let i = 0; i < 12; i++) histogram[i] = 0;
-                    subjectNotes.forEach(n => histogram[n.midi % 12]++);
-                    const prediction = predictKey(histogram, subjectNotes.length);
-                    if (prediction.length > 0) {
-                        derivedRoot = prediction[0].winner.root;
-                        derivedMode = prediction[0].winner.mode;
-                    }
-                }
-            } else {
-                // MIDI Mode: Use Prediction
-                const histogram: Record<number, number> = {};
-                for (let i = 0; i < 12; i++) histogram[i] = 0;
-                subjectNotes.forEach(n => histogram[n.midi % 12]++);
-                const prediction = predictKey(histogram, subjectNotes.length);
-                if (prediction.length > 0) {
-                    derivedRoot = prediction[0].winner.root;
-                    derivedMode = prediction[0].winner.mode;
-                }
-            }
-
-            // 2. Find the best octave for the pivot (Average Pitch Centroid)
-            const sumMidi = subjectNotes.reduce((sum, n) => sum + n.midi, 0);
-            const avgMidi = sumMidi / subjectNotes.length;
-            
-            // Candidates: Root in octave below, same, above average
-            const baseOctave = Math.floor(avgMidi / 12);
-            const candidates = [
-                derivedRoot + (baseOctave - 1) * 12,
-                derivedRoot + (baseOctave) * 12,
-                derivedRoot + (baseOctave + 1) * 12,
-            ];
-            
-            // Choose the one closest to the Average Pitch
-            let closest = candidates[0];
-            let minDiff = Math.abs(candidates[0] - avgMidi);
-            
-            for (let i=1; i<candidates.length; i++) {
-                const diff = Math.abs(candidates[i] - avgMidi);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = candidates[i];
-                }
-            }
-
-            const validPivot = Math.max(0, Math.min(127, closest));
-            
-            setSearchOptions(prev => ({ 
-                ...prev, 
-                pivotMidi: validPivot,
-                scaleRoot: derivedRoot,
-                scaleMode: derivedMode 
-            }));
-        }
+        const derived = deriveInitialPivotSettings(subjectNotes, mode, abcInput);
+        if (!derived) return;
+        setSearchOptions(prev => ({
+            ...prev,
+            pivotMidi: derived.pivotMidi,
+            scaleRoot: derived.scaleRoot,
+            scaleMode: derived.scaleMode
+        }));
     }, [subjectNotes, mode, abcInput]);
 
     const handleSaveSubject = () => {
@@ -355,14 +237,14 @@ export default function StrettoView({
         const newSubject: SavedSubject = { id: Date.now().toString(), name: saveName.trim(), data: abcInput };
         const updated = [...savedSubjects, newSubject];
         setSavedSubjects(updated);
-        localStorage.setItem('stretto_subject_library', JSON.stringify(updated));
+        subjectRepository?.saveAll(updated);
         setSaveName('');
     };
 
     const handleDeleteSubject = (id: string) => {
         const updated = savedSubjects.filter(s => s.id !== id);
         setSavedSubjects(updated);
-        localStorage.setItem('stretto_subject_library', JSON.stringify(updated));
+        subjectRepository?.saveAll(updated);
     };
 
     const handleLoadSubject = (data: string) => { setAbcInput(data); };
@@ -370,17 +252,13 @@ export default function StrettoView({
     const { 
         isAssembling, assemblyStatus, assemblyResult, assemblyLog, 
         setAssemblyResult, runAssembly 
-    } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts: activeMeter });
+    } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts: activeMeter, assemblyGateway });
 
     /** Auto-computed max delay in beats (2/3 of subject length), shown as placeholder. */
-    const maxDelayAutoBeats = useMemo(() => {
-        const validNotes = subjectNotes.filter(n => !!n);
-        if (validNotes.length === 0) return 0;
-        const currentPpq = ppq || 480;
-        const durationTicks = Math.max(...validNotes.map(n => n.ticks + n.durationTicks));
-        const beatDiv = currentPpq * (4 / activeMeter.den);
-        return parseFloat(((durationTicks * (2/3)) / beatDiv).toFixed(2));
-    }, [subjectNotes, ppq, activeMeter]);
+    const maxDelayAutoBeats = useMemo(
+        () => computeMaxDelayAutoBeats(subjectNotes, ppq || 480, activeMeter.den),
+        [subjectNotes, ppq, activeMeter.den]
+    );
 
     const runDiscovery = () => {
         const validNotes = subjectNotes.filter(n => !!n);
@@ -475,52 +353,7 @@ export default function StrettoView({
 
     const getSelectedCandidates = () => pairwiseResults.filter(r => checkedIds.has(r.id));
 
-    const runChainSearchInWorker = (
-        request: StrettoSearchWorkerRequest,
-        onProgress: (progress: StrettoSearchProgressState) => void
-    ): Promise<StrettoSearchReport> => {
-        if (activeWorkerRef.current) {
-            activeWorkerRef.current.terminate();
-            activeWorkerRef.current = null;
-        }
-        return new Promise((resolve, reject) => {
-            const worker = new Worker(new URL('./workers/strettoSearchWorker.ts', import.meta.url), { type: 'module' });
-            activeWorkerRef.current = worker;
-            worker.onmessage = (event: MessageEvent<StrettoSearchWorkerProgress | StrettoSearchWorkerResult | StrettoSearchWorkerFailure>) => {
-                const payload = event.data;
-                if (payload.ok && payload.kind === 'progress') {
-                    const telemetry = {
-                        ...payload.telemetry,
-                        dagExploredWorkItems: payload.telemetry.dagExploredWorkItems ?? 0,
-                        dagLiveFrontierWorkItems: payload.telemetry.dagLiveFrontierWorkItems ?? 0
-                    };
-                    onProgress({
-                        elapsedMs: payload.elapsedMs,
-                        stage: payload.stage,
-                        completedUnits: payload.completedUnits,
-                        totalUnits: payload.totalUnits,
-                        terminal: payload.terminal,
-                        telemetry,
-                        heartbeat: payload.heartbeat
-                    });
-                    return;
-                }
-                worker.terminate();
-                activeWorkerRef.current = null;
-                if (payload.ok && payload.kind === 'result') {
-                    resolve(payload.report);
-                    return;
-                }
-                reject(new Error((payload as StrettoSearchWorkerFailure).error));
-            };
-            worker.onerror = (event: ErrorEvent) => {
-                worker.terminate();
-                activeWorkerRef.current = null;
-                reject(new Error(event.message || 'Stretto search worker failed.'));
-            };
-            worker.postMessage(request);
-        });
-    };
+
 
     const handleChainSearch = async () => {
         setIsSearching(true); setChainResults([]); setSearchReport(null); setSelectedChain(null);
@@ -547,7 +380,8 @@ export default function StrettoView({
         });
         setTimeout(async () => {
             try {
-                const report = await runChainSearchInWorker({
+                if (!searchGateway) throw new Error('SearchGateway is not configured.');
+                const report = await searchGateway.runChainSearch({
                     subject: subjectNotes.filter(n => !!n),
                     options: {
                     ...searchOptions,
@@ -571,7 +405,8 @@ export default function StrettoView({
         setSelectedCanonResult(null);
         setCanonProgress({ pct: 0, msg: 'Starting…' });
         try {
-            const report = await runCanonSearch(
+            if (!searchGateway) throw new Error('SearchGateway is not configured.');
+            const report = await searchGateway.runCanonSearch(
                 validNotes,
                 canonOptions,
                 ppq || 480,
@@ -732,10 +567,10 @@ export default function StrettoView({
     }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
 
     const handlePlay = (notes: RawNote[]) => {
-        if (isPlaying) { stopPlayback(); setIsPlaying(false); return; }
+        if (isPlaying) { playbackGateway?.stop(); setIsPlaying(false); return; }
         setIsPlaying(true);
         const currentPpq = ppq || 480;
-        playSequence(notes.filter(n => !!n).map(n => ({ 
+        void playbackGateway?.playSequence(notes.filter(n => !!n).map(n => ({ 
             midi: n.midi, 
             name: n.name, 
             time: n.ticks * (0.5 / currentPpq), 
