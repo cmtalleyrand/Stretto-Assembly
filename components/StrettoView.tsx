@@ -9,7 +9,8 @@ import { Spinner, DocumentTextIcon } from './Icons';
 import FileUpload from './FileUpload';
 import { playSequence, stopPlayback } from './midiPlaybackService';
 import { useStrettoAssembly } from '../hooks/useStrettoAssembly';
-import { predictKey } from './services/analysis/keyPrediction'; // Robust key finding
+import { deriveInitialPivotSettings } from './services/stretto/pivotInitialization';
+import { computeMaxDelayAutoBeats } from './services/stretto/delayUtils';
 
 import StrettoConfig, { SearchResolution } from './stretto/StrettoConfig';
 import { computeSubjectPivotCandidates, rankPivotCandidates, PivotSearchMetric, PivotCandidateObservation } from './services/pairwisePivotSearch';
@@ -282,72 +283,14 @@ export default function StrettoView({
 
     // Intelligent Pivot Initialization using Key Prediction or ABC Context
     useEffect(() => {
-        if (subjectNotes && subjectNotes.length > 0) {
-            let derivedRoot = 0;
-            let derivedMode = 'Major';
-            
-            // 1. Determine Root & Mode
-            if (mode === 'abc') {
-                const abcKey = extractKeyFromAbc(abcInput);
-                if (abcKey) {
-                    derivedRoot = abcKey.root;
-                    derivedMode = abcKey.mode;
-                } else {
-                    // Fallback to prediction if ABC has no K: field
-                    const histogram: Record<number, number> = {};
-                    for (let i = 0; i < 12; i++) histogram[i] = 0;
-                    subjectNotes.forEach(n => histogram[n.midi % 12]++);
-                    const prediction = predictKey(histogram, subjectNotes.length);
-                    if (prediction.length > 0) {
-                        derivedRoot = prediction[0].winner.root;
-                        derivedMode = prediction[0].winner.mode;
-                    }
-                }
-            } else {
-                // MIDI Mode: Use Prediction
-                const histogram: Record<number, number> = {};
-                for (let i = 0; i < 12; i++) histogram[i] = 0;
-                subjectNotes.forEach(n => histogram[n.midi % 12]++);
-                const prediction = predictKey(histogram, subjectNotes.length);
-                if (prediction.length > 0) {
-                    derivedRoot = prediction[0].winner.root;
-                    derivedMode = prediction[0].winner.mode;
-                }
-            }
-
-            // 2. Find the best octave for the pivot (Average Pitch Centroid)
-            const sumMidi = subjectNotes.reduce((sum, n) => sum + n.midi, 0);
-            const avgMidi = sumMidi / subjectNotes.length;
-            
-            // Candidates: Root in octave below, same, above average
-            const baseOctave = Math.floor(avgMidi / 12);
-            const candidates = [
-                derivedRoot + (baseOctave - 1) * 12,
-                derivedRoot + (baseOctave) * 12,
-                derivedRoot + (baseOctave + 1) * 12,
-            ];
-            
-            // Choose the one closest to the Average Pitch
-            let closest = candidates[0];
-            let minDiff = Math.abs(candidates[0] - avgMidi);
-            
-            for (let i=1; i<candidates.length; i++) {
-                const diff = Math.abs(candidates[i] - avgMidi);
-                if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = candidates[i];
-                }
-            }
-
-            const validPivot = Math.max(0, Math.min(127, closest));
-            
-            setSearchOptions(prev => ({ 
-                ...prev, 
-                pivotMidi: validPivot,
-                scaleRoot: derivedRoot,
-                scaleMode: derivedMode 
-            }));
-        }
+        const derived = deriveInitialPivotSettings(subjectNotes, mode, abcInput);
+        if (!derived) return;
+        setSearchOptions(prev => ({
+            ...prev,
+            pivotMidi: derived.pivotMidi,
+            scaleRoot: derived.scaleRoot,
+            scaleMode: derived.scaleMode
+        }));
     }, [subjectNotes, mode, abcInput]);
 
     const handleSaveSubject = () => {
@@ -373,14 +316,10 @@ export default function StrettoView({
     } = useStrettoAssembly({ notes: subjectNotes, ppq: ppq || 480, ts: activeMeter });
 
     /** Auto-computed max delay in beats (2/3 of subject length), shown as placeholder. */
-    const maxDelayAutoBeats = useMemo(() => {
-        const validNotes = subjectNotes.filter(n => !!n);
-        if (validNotes.length === 0) return 0;
-        const currentPpq = ppq || 480;
-        const durationTicks = Math.max(...validNotes.map(n => n.ticks + n.durationTicks));
-        const beatDiv = currentPpq * (4 / activeMeter.den);
-        return parseFloat(((durationTicks * (2/3)) / beatDiv).toFixed(2));
-    }, [subjectNotes, ppq, activeMeter]);
+    const maxDelayAutoBeats = useMemo(
+        () => computeMaxDelayAutoBeats(subjectNotes, ppq || 480, activeMeter.den),
+        [subjectNotes, ppq, activeMeter.den]
+    );
 
     const runDiscovery = () => {
         const validNotes = subjectNotes.filter(n => !!n);
