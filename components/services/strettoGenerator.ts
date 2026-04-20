@@ -11,8 +11,8 @@ import { buildVoiceTranspositionAdmissibilityIndex } from './stretto-opt/voiceTr
 // Node budget removed — time is the only search limit.
 const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
-const FINALIZATION_TIMEOUT_GRACE_MS = 1500;
-const MIN_TIMEOUT_FINALIZATION_CANDIDATES = 64;
+const FINALIZATION_TIMEOUT_GRACE_MS = 10000;
+const MIN_TIMEOUT_FINALIZATION_CANDIDATES = 256;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 1024;
 // Removed EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY — no longer needed with active-tail DAG keys.
@@ -2433,15 +2433,18 @@ export async function searchStrettoChains(
     // is FSM-admissible at this depth. This preserves terminal coverage pruning (last
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
     // variant indices being mistakenly used as voice labels.
-    const hasVoiceTranspositionTripletContext = (
+    const getTripletVoiceTranspositionContext = (
         transpositionAB: number,
         transpositionBC: number,
         startReachable: boolean,
         interiorReachable: boolean
-    ): boolean => {
+    ): { start: boolean; interior: boolean } | null => {
         const ctx = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
-        if (!ctx) return false;
-        return (startReachable && ctx.start) || (interiorReachable && ctx.interior);
+        if (!ctx) return null;
+        return {
+            start: startReachable && ctx.start,
+            interior: interiorReachable && ctx.interior
+        };
     };
 
     // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
@@ -2513,7 +2516,7 @@ export async function searchStrettoChains(
                 const interiorReachable = Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
                 if (!startReachable && !interiorReachable) {
                     rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                } else if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) {
+                } else if (!getTripletVoiceTranspositionContext(p1.t, p2.t, startReachable, interiorReachable)) {
                     rejectReason = TRIPLET_REJECT_REASON.VOICE;
                 }
             } else {
@@ -2616,14 +2619,27 @@ export async function searchStrettoChains(
                 continue;
             }
 
+            const voiceTripletContext = getTripletVoiceTranspositionContext(
+                p1.t,
+                p2.t,
+                Boolean(validDelayTransitionsStartPos),
+                Boolean(validDelayTransitionsInteriorPos)
+            );
+            if (!voiceTripletContext) {
+                incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.VOICE);
+                continue;
+            }
+
             let tripletHasValidDelayContext = false;
             for (const dCtx of validTripletDelayAs) {
                 if (validDelayTransitionsByAbsPos !== null) {
                     const transitionKey = `${vB}:${vC}:${d_te_1}:${d_te_2}`;
                     if (dCtx === 0) {
                         if (!validDelayTransitionsStartPos?.has(transitionKey)) continue;
+                        if (!voiceTripletContext.start) continue;
                     } else {
                         if (!validDelayTransitionsInteriorPos?.has(transitionKey)) continue;
+                        if (!voiceTripletContext.interior) continue;
                     }
                 }
                 if (isCanonDelaySearch) {
@@ -2699,7 +2715,7 @@ export async function searchStrettoChains(
                     ? true : Boolean(validDelayTransitionsStartPos?.has(transitionKey));
                 const interiorReachable = validDelayTransitionsByAbsPos === null
                     ? true : Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
-                if (!hasVoiceTranspositionTripletContext(p1.t, p2.t, startReachable, interiorReachable)) continue;
+                if (!getTripletVoiceTranspositionContext(p1.t, p2.t, startReachable, interiorReachable)) continue;
                 const dAC = p1.d + p2.d;
                 const tAC = p1.t + p2.t;
                 const lenA = variants[p1.vA].lengthTicks;
@@ -2878,56 +2894,6 @@ export async function searchStrettoChains(
 
         if (!backtrack(0)) return null;
         return chain.map((e, i) => ({ ...e, voiceIndex: voices[i] }));
-    }
-
-    // Timeout-only fallback used for user-facing continuity when strict voice assignment
-    // fails under hard runtime limits. This enforces non-overlap plus cheap adjacent-edge
-    // admissibility from the dense voice/transposition index, and solves all positions
-    // using bounded backtracking (no expensive overlap-specific pairwise rescans).
-    function assignVoicesGreedyFallback(chain: StrettoChainOption[]): StrettoChainOption[] | null {
-        const n = chain.length;
-        const starts = new Array<number>(n);
-        const ends = new Array<number>(n);
-        const tIdx = new Array<number>(n).fill(-1);
-        const voices = new Array<number>(n).fill(-1);
-
-        for (let i = 0; i < n; i++) {
-            starts[i] = Math.round(chain[i].startBeat * ppq);
-            ends[i] = starts[i] + chain[i].length;
-            const idx = absoluteTranspositionToIndex.get(chain[i].transposition);
-            if (idx === undefined) return null;
-            tIdx[i] = idx;
-        }
-
-        const conflicts = (i: number, j: number): boolean => {
-            if (starts[i] > starts[j]) return conflicts(j, i);
-            return starts[j] < ends[i] - ppq;
-        };
-
-        const valid = (pos: number, v: number): boolean => {
-            if (pos === 0) return v === options.subjectVoiceIndex;
-            if (!voiceTranspositionAdmissibilityIndex.has(pos, voices[pos - 1], v, tIdx[pos - 1], tIdx[pos])) {
-                return false;
-            }
-            for (let k = 0; k < pos; k++) {
-                if (voices[k] === v && conflicts(k, pos)) return false;
-            }
-            return true;
-        };
-
-        const backtrack = (pos: number): boolean => {
-            if (pos === n) return true;
-            for (let v = 0; v < options.ensembleTotal; v++) {
-                if (!valid(pos, v)) continue;
-                voices[pos] = v;
-                if (backtrack(pos + 1)) return true;
-                voices[pos] = -1;
-            }
-            return false;
-        };
-
-        if (!backtrack(0)) return null;
-        return chain.map((entry, i) => ({ ...entry, voiceIndex: voices[i] }));
     }
 
     // Returns how many chain entries are still active (voice not yet freed) at `atTicks`.
@@ -3719,6 +3685,10 @@ export async function searchStrettoChains(
                     if (!allowedTranspositions.has(tE1)) continue;
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
+                    const tE0Idx = absoluteTranspositionToIndex.get(0);
+                    const tE1Idx = absoluteTranspositionToIndex.get(tE1);
+                    if (tE0Idx === undefined || tE1Idx === undefined) continue;
+                    if (!probeVoiceTransitionReachability(1, tE0Idx, tE1Idx)) continue;
                     const firstWindowTransitions = precomputeIndex.getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
                     if (!firstWindowTransitions || firstWindowTransitions.size === 0) continue;
 
@@ -3738,6 +3708,9 @@ export async function searchStrettoChains(
                             const tE2 = tE1 + tAB;
                             if (!allowedTranspositions.has(tE2)) continue;
                             if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
+                            const tE2Idx = absoluteTranspositionToIndex.get(tE2);
+                            if (tE2Idx === undefined) continue;
+                            if (!probeVoiceTransitionReachability(2, tE1Idx, tE2Idx)) continue;
 
                             const secondWindowMap = precomputeIndex.getWindowTransitions(vA, vB, firstDelay, delayAB, tAB);
                             if (!secondWindowMap || secondWindowMap.size === 0) continue;
@@ -3766,6 +3739,9 @@ export async function searchStrettoChains(
                                     const tE3 = tE2 + tBC;
                                     if (!allowedTranspositions.has(tE3)) continue;
                                     if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
+                                    const tE3Idx = absoluteTranspositionToIndex.get(tE3);
+                                    if (tE3Idx === undefined) continue;
+                                    if (!probeVoiceTransitionReachability(3, tE2Idx, tE3Idx)) continue;
 
                                     const varC = variants[vC];
                                     const e3Start_pre = e2Start_pre + delayBC;
@@ -4037,7 +4013,6 @@ export async function searchStrettoChains(
     sourceUnscored.sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
 
     const scoredResults: StrettoChainResult[] = [];
-    const timeoutFallbackResults: StrettoChainResult[] = [];
     const finalizationDeadlineMs = terminationReason === 'Timeout'
         ? activeTimeLimitMs + FINALIZATION_TIMEOUT_GRACE_MS
         : activeTimeLimitMs;
@@ -4064,16 +4039,6 @@ export async function searchStrettoChains(
         const assigned = assignVoices(workEntries, [...uc.variantIndices]);
         if (assigned === null) {
             finalizationRejectedVoiceAssignment++;
-            if (terminationReason === 'Timeout' && timeoutFallbackResults.length < MAX_RESULTS) {
-                const provisional = assignVoicesGreedyFallback([...uc.entries]);
-                if (provisional) {
-                    const scoredFallback = calculateStrettoScore(provisional, variants, uc.variantIndices, options, ppq);
-                    timeoutFallbackResults.push({
-                        ...scoredFallback,
-                        warnings: [...scoredFallback.warnings, 'Timeout fallback: provisional voice assignment used.']
-                    });
-                }
-            }
             continue;
         }
         finalizationScoredCount++;
@@ -4085,19 +4050,11 @@ export async function searchStrettoChains(
             const runEvents = scored.maxDissonanceRunEvents ?? 0;
             const histKey = String(runEvents);
             maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
-            if (terminationReason === 'Timeout' && timeoutFallbackResults.length < MAX_RESULTS) {
-                timeoutFallbackResults.push({
-                    ...scored,
-                    warnings: [...scored.warnings, 'Timeout fallback: chain shown despite scoring invalid under strict constraints.']
-                });
-            }
         }
     }
     fullChainsFound = structurallyCompleteChainsFound;
 
-    const finalizedResults: StrettoChainResult[] = scoredResults.length > 0
-        ? scoredResults
-        : (terminationReason === 'Timeout' ? timeoutFallbackResults : scoredResults);
+    const finalizedResults: StrettoChainResult[] = scoredResults;
 
     // Group by delay pattern + type sequence to avoid similar chains clogging display
     function getGroupKey(entries: StrettoChainOption[]): string {

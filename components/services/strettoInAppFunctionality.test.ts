@@ -145,9 +145,16 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
   };
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
-  assert.ok(report.results.length > 0, 'fixture-B: expected constrained search to still return at least one chain.');
-  const markup = renderResultsMarkup(report.results);
-  assertPopulatedResultsMarkup(markup, 'fixture-B');
+  if (report.results.length === 0) {
+    assert.equal(
+      report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0,
+      0,
+      'fixture-B: empty result set is only valid when no scoring-valid chains are finalized.'
+    );
+  } else {
+    const markup = renderResultsMarkup(report.results);
+    assertPopulatedResultsMarkup(markup, 'fixture-B');
+  }
   console.log(`[in-app:fixture-B] stopReason=${report.stats.stopReason} chains=${report.results.length}`);
 }
 
@@ -239,7 +246,8 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
 
 
 // E) UI-parity fixture (4 voices, target=8, disallow exceptions, max pairwise dissonance 50%).
-// This verifies the fixed behavior: target-depth traversal under timeout still yields user-visible chains.
+// Strict finalization must never surface timeout fallback chains; only fully validated
+// results are returned after timeout-aware finalization grace.
 {
   const options: StrettoSearchOptions = {
     ensembleTotal: 4,
@@ -270,10 +278,22 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
     report.stats.maxDepthReached >= Math.min(4, options.targetChainLength),
     `fixture-E: expected traversal depth to reach at least 4 levels, got ${report.stats.maxDepthReached}.`
   );
-  assert.ok(
-    report.results.length > 0,
-    'fixture-E: expected at least one finalized chain under timeout due timeout-aware finalization fallback.'
-  );
+  if (report.results.length === 0) {
+    assert.equal(
+      report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0,
+      0,
+      'fixture-E: empty result set is only valid when no scoring-valid chains were finalized.'
+    );
+  } else {
+    for (const chain of report.results) {
+      assert.equal(
+        chain.warnings.some((warning) => warning.startsWith('Timeout fallback:')),
+        false,
+        'fixture-E: strict finalization must not emit timeout fallback warnings.'
+      );
+      assert.equal(chain.isValid, true, 'fixture-E: strict finalization must only emit scoring-valid chains.');
+    }
+  }
   if (report.stats.maxDepthReached >= options.targetChainLength) {
     assert.ok(
       (report.stats.completionDiagnostics?.structurallyCompleteChainsFound ?? 0) > 0,
@@ -281,8 +301,10 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
     );
   }
 
-  const markup = renderResultsMarkup(report.results);
-  assertPopulatedResultsMarkup(markup, 'fixture-E');
+  if (report.results.length > 0) {
+    const markup = renderResultsMarkup(report.results);
+    assertPopulatedResultsMarkup(markup, 'fixture-E');
+  }
 
   console.log(`[in-app:fixture-E] stopReason=${report.stats.stopReason} chains=${report.results.length} maxDepth=${report.stats.maxDepthReached} structured=${report.stats.completionDiagnostics?.structurallyCompleteChainsFound ?? 0} scoringValid=${report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0}`);
 }
