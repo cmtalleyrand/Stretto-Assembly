@@ -1,8 +1,9 @@
-import { useCallback, Dispatch, SetStateAction } from 'react';
-import { AppState, ConversionOptions, TrackInfo, MidiEventCounts, MidiEventType, TrackAnalysisData } from '../types';
+import { useCallback, Dispatch } from 'react';
+import { AppState, ConversionOptions, MidiEventType, TrackInfo } from '../types';
 import { parseMidiFromFile, generateGeminiScore, createPreviewMidi, getTransformedTrackDataForPianoRoll, analyzeTrack, playTrack, stopPlayback } from '../components/services/midiService';
 import { Midi } from '@tonejs/midi';
 import { resolveMidiTimeSignatureAtTick } from '../components/services/midiTimeSignature';
+import { MidiControllerAction } from './midiControllerState';
 
 interface UseMidiActionsProps {
     midiData: Midi | null;
@@ -10,210 +11,167 @@ interface UseMidiActionsProps {
     trackInfo: TrackInfo[];
     playingTrackId: number | null;
     eventsToDelete: Set<MidiEventType>;
-    setAppState: (state: AppState) => void;
-    setErrorMessage: (msg: string) => void;
-    setSuccessMessage: (msg: string) => void;
-    setMidiData: (midi: Midi | null) => void;
-    setTrackInfo: (tracks: TrackInfo[]) => void;
-    setEventCounts: (counts: MidiEventCounts | null) => void;
-    setFileName: (name: string) => void;
-    setSelectedTracks: Dispatch<SetStateAction<Set<number>>>;
-    setPlayingTrackId: (id: number | null) => void;
-    setEventsToDelete: Dispatch<SetStateAction<Set<MidiEventType>>>;
-    setGeneratedScore: (score: string) => void;
-    setAuditLog: (log: string) => void;
-    setAnalyzedTrackData: (data: TrackAnalysisData | null) => void;
-    setIsAnalysisModalOpen: (val: boolean) => void;
-    setPianoRollTrackData: (data: any | null) => void;
-    setIsPianoRollVisible: (val: boolean) => void;
-    setOriginalTempo: (val: number | null) => void;
-    setNewTempo: (val: string) => void;
-    setOriginalTimeSignature: (val: any) => void;
-    setNewTimeSignature: (val: any) => void;
-    setOriginalDuration: (val: number | null) => void;
-    setNewDuration: (val: number | null) => void;
-    handleReset: (full: boolean) => void;
+    dispatch: Dispatch<MidiControllerAction>;
     getConversionOptions: () => ConversionOptions | null;
 }
 
 export const useMidiActions = ({
-    midiData, selectedTracks, trackInfo, playingTrackId, eventsToDelete,
-    setAppState, setErrorMessage, setSuccessMessage, setMidiData, setTrackInfo, setEventCounts, setFileName, setSelectedTracks, setPlayingTrackId, setEventsToDelete,
-    setGeneratedScore, setAuditLog, setAnalyzedTrackData, setIsAnalysisModalOpen, setPianoRollTrackData, setIsPianoRollVisible,
-    setOriginalTempo, setNewTempo, setOriginalTimeSignature, setNewTimeSignature, setOriginalDuration, setNewDuration,
-    handleReset, getConversionOptions
+    midiData, selectedTracks, trackInfo, playingTrackId, eventsToDelete, dispatch, getConversionOptions
 }: UseMidiActionsProps) => {
 
     const handleFileUpload = useCallback(async (file: File) => {
-        setAppState(AppState.LOADING);
-        setErrorMessage('');
-        setSuccessMessage('');
-        setSelectedTracks(new Set());
-        setMidiData(null);
-        setTrackInfo([]);
-        setFileName(file.name);
+        dispatch({ type: 'MIDI_SESSION_PATCH', payload: { appState: AppState.LOADING, fileName: file.name, selectedTracks: new Set(), midiData: null, trackInfo: [], playingTrackId: null, eventCounts: null, eventsToDelete: new Set() } });
+        dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: '', successMessage: '' } });
         stopPlayback();
-        setPlayingTrackId(null);
-        setEventCounts(null);
-        setEventsToDelete(new Set());
-        handleReset(false); // Partial reset
+        dispatch({ type: 'PARTIAL_RESET' });
 
         try {
             const { midi, tracks, eventCounts } = await parseMidiFromFile(file);
-            setMidiData(midi);
-            setTrackInfo(tracks);
-            setEventCounts(eventCounts);
-            setFileName(file.name);
-
             const tempo = midi.header.tempos[0]?.bpm || 120;
             const tsData = resolveMidiTimeSignatureAtTick(midi.header.timeSignatures, 0);
             const ts = { numerator: tsData[0], denominator: tsData[1] };
 
-            setOriginalTempo(tempo);
-            setNewTempo(String(Math.round(tempo)));
-            setOriginalTimeSignature(ts);
-            setNewTimeSignature({ numerator: String(ts.numerator), denominator: String(ts.denominator) });
-            setOriginalDuration(midi.duration);
-            setNewDuration(midi.duration);
-
-            setAppState(AppState.LOADED);
+            dispatch({
+                type: 'MIDI_SESSION_PATCH',
+                payload: {
+                    midiData: midi,
+                    trackInfo: tracks,
+                    eventCounts,
+                    fileName: file.name,
+                    appState: AppState.LOADED
+                }
+            });
+            dispatch({
+                type: 'CONVERSION_SETTINGS_PATCH',
+                payload: {
+                    originalTempo: tempo,
+                    newTempo: String(Math.round(tempo)),
+                    originalTimeSignature: ts,
+                    newTimeSignature: { numerator: String(ts.numerator), denominator: String(ts.denominator) },
+                    originalDuration: midi.duration,
+                    newDuration: midi.duration
+                }
+            });
         } catch (error) {
-            console.error("MIDI Parsing Error:", error);
-            setErrorMessage("Failed to parse MIDI file. Please ensure it's a valid .mid file.");
-            setAppState(AppState.ERROR);
+            console.error('MIDI Parsing Error:', error);
+            dispatch({
+                type: 'ANALYSIS_UI_PATCH',
+                payload: { errorMessage: "Failed to parse MIDI file. Please ensure it's a valid .mid file." }
+            });
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { appState: AppState.ERROR } });
         }
-    }, [setAppState, setErrorMessage, setSuccessMessage, setSelectedTracks, setMidiData, setTrackInfo, setFileName, setPlayingTrackId, setEventCounts, setEventsToDelete, handleReset, setOriginalTempo, setNewTempo, setOriginalTimeSignature, setNewTimeSignature, setOriginalDuration, setNewDuration]);
+    }, [dispatch]);
 
     const handleGenerateScore = useCallback(async (contextText: string) => {
         if (!midiData || selectedTracks.size < 1) return;
         stopPlayback();
-        setPlayingTrackId(null);
-        setAppState(AppState.GENERATING);
-        setErrorMessage('');
-        setSuccessMessage('');
-        setGeneratedScore('');
-        setAuditLog('');
+        dispatch({ type: 'MIDI_SESSION_PATCH', payload: { playingTrackId: null, appState: AppState.GENERATING } });
+        dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: '', successMessage: '', generatedScore: '', auditLog: '' } });
 
         const conversionOptions = getConversionOptions();
         if (!conversionOptions) {
-             setErrorMessage("Invalid options.");
-             setAppState(AppState.ERROR);
-             return;
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Invalid options.' } });
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { appState: AppState.ERROR } });
+            return;
         }
         
         try {
             await new Promise(resolve => setTimeout(resolve, 100));
-            
             const sortedTracks = Array.from(selectedTracks).map(id => Number(id)).sort((a, b) => a - b);
-
-            const { report, auditLog } = generateGeminiScore(
-                midiData, 
-                sortedTracks, 
-                conversionOptions, 
-                contextText
-            );
-            
-            setGeneratedScore(report);
-            setAuditLog(auditLog || '');
-            setSuccessMessage('Analysis Report & Score Generated!');
-            setAppState(AppState.SUCCESS);
-        } catch(e) {
-            console.error("Error generating score:", e);
-            setErrorMessage("An unexpected error occurred while generating the score.");
-            setAppState(AppState.ERROR);
+            const { report, auditLog } = generateGeminiScore(midiData, sortedTracks, conversionOptions, contextText);
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { generatedScore: report, auditLog: auditLog || '', successMessage: 'Analysis Report & Score Generated!' } });
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { appState: AppState.SUCCESS } });
+        } catch (e) {
+            console.error('Error generating score:', e);
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'An unexpected error occurred while generating the score.' } });
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { appState: AppState.ERROR } });
         }
-    }, [midiData, selectedTracks, getConversionOptions, setAppState, setErrorMessage, setSuccessMessage, setGeneratedScore, setAuditLog, setPlayingTrackId]);
+    }, [midiData, selectedTracks, getConversionOptions, dispatch]);
 
     const handlePreviewTrack = useCallback(async (trackId: number) => {
         if (!midiData) return;
         if (playingTrackId === trackId) {
             stopPlayback();
-            setPlayingTrackId(null);
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { playingTrackId: null } });
         } else {
             stopPlayback();
-            setPlayingTrackId(null);
-            setErrorMessage('');
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { playingTrackId: null } });
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: '' } });
             const conversionOptions = getConversionOptions();
             if (!conversionOptions) {
-              setErrorMessage("Cannot preview: Invalid conversion options.");
-              return;
-            };
+                dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Cannot preview: Invalid conversion options.' } });
+                return;
+            }
             try {
                 const previewMidi = createPreviewMidi(midiData, trackId, eventsToDelete, conversionOptions);
-                playTrack(previewMidi, () => setPlayingTrackId(null));
-                setPlayingTrackId(trackId);
+                playTrack(previewMidi, () => dispatch({ type: 'MIDI_SESSION_PATCH', payload: { playingTrackId: null } }));
+                dispatch({ type: 'MIDI_SESSION_PATCH', payload: { playingTrackId: trackId } });
             } catch (error) {
-                console.error("Error creating preview MIDI:", error);
-                setErrorMessage("Could not generate track preview.");
+                console.error('Error creating preview MIDI:', error);
+                dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Could not generate track preview.' } });
             }
         }
-    }, [midiData, playingTrackId, getConversionOptions, eventsToDelete, setPlayingTrackId, setErrorMessage]);
+    }, [midiData, playingTrackId, getConversionOptions, eventsToDelete, dispatch]);
 
     const handleShowPianoRoll = useCallback((trackId: number) => {
         if (!midiData) return;
-        setErrorMessage('');
+        dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: '' } });
         const conversionOptions = getConversionOptions();
         if (!conversionOptions) {
-          setErrorMessage("Cannot show piano roll: Invalid conversion options.");
-          return;
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Cannot show piano roll: Invalid conversion options.' } });
+            return;
         }
         try {
-          const trackData = getTransformedTrackDataForPianoRoll(midiData, trackId, conversionOptions);
-          setPianoRollTrackData(trackData);
-          setIsPianoRollVisible(true);
+            const trackData = getTransformedTrackDataForPianoRoll(midiData, trackId, conversionOptions);
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { pianoRollTrackData: trackData, isPianoRollVisible: true } });
         } catch (error) {
-           console.error("Error generating piano roll data:", error);
-           setErrorMessage("Could not generate data for the piano roll.");
+            console.error('Error generating piano roll data:', error);
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Could not generate data for the piano roll.' } });
         }
-    }, [midiData, getConversionOptions, setPianoRollTrackData, setIsPianoRollVisible, setErrorMessage]);
+    }, [midiData, getConversionOptions, dispatch]);
 
     const handleAnalyzeTrack = useCallback((trackId: number) => {
         if (!midiData) return;
-        setErrorMessage('');
+        dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: '' } });
         const conversionOptions = getConversionOptions();
         if (!conversionOptions) {
-            setErrorMessage("Analysis failed: Invalid settings configuration. Check Tempo/Time Signature.");
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Analysis failed: Invalid settings configuration. Check Tempo/Time Signature.' } });
             return;
         }
         
         try {
             console.log(`Analyzing Track ID: ${trackId}`);
             const data = analyzeTrack(midiData, trackId, conversionOptions);
-            if(!data) throw new Error("Analysis returned no data.");
-            setAnalyzedTrackData(data);
-            setIsAnalysisModalOpen(true);
+            if (!data) throw new Error('Analysis returned no data.');
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { analyzedTrackData: data, isAnalysisModalOpen: true } });
         } catch (error) {
-            console.error("Analysis Error:", error);
-            setErrorMessage("Failed to analyze track. Ensure the track contains note data.");
+            console.error('Analysis Error:', error);
+            dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: 'Failed to analyze track. Ensure the track contains note data.' } });
         }
-    }, [midiData, getConversionOptions, setAnalyzedTrackData, setIsAnalysisModalOpen, setErrorMessage]);
+    }, [midiData, getConversionOptions, dispatch]);
 
     const handleTrackSelect = useCallback((trackId: number) => {
-        setSelectedTracks(prevSelected => {
-          const newSelected = new Set(prevSelected);
-          if (newSelected.has(trackId)) newSelected.delete(trackId);
-          else newSelected.add(trackId);
-          return newSelected;
-        });
-    }, [setSelectedTracks]);
+        const newSelected = new Set(selectedTracks);
+        if (newSelected.has(trackId)) newSelected.delete(trackId);
+        else newSelected.add(trackId);
+        dispatch({ type: 'MIDI_SESSION_PATCH', payload: { selectedTracks: newSelected } });
+    }, [selectedTracks, dispatch]);
       
     const handleSelectAllTracks = useCallback(() => {
         if (trackInfo.length > 0 && selectedTracks.size === trackInfo.length) {
-            setSelectedTracks(new Set());
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { selectedTracks: new Set() } });
         } else {
             const allTrackIds = trackInfo.map(track => track.id);
-            setSelectedTracks(new Set(allTrackIds));
+            dispatch({ type: 'MIDI_SESSION_PATCH', payload: { selectedTracks: new Set(allTrackIds) } });
         }
-    }, [trackInfo, selectedTracks, setSelectedTracks]);
+    }, [trackInfo, selectedTracks, dispatch]);
 
     const handleEventFilterToggle = useCallback((eventType: MidiEventType) => {
-        setEventsToDelete(prev => {
-            const newSet = new Set(prev);
-            if (newSet.has(eventType)) newSet.delete(eventType);
-            else newSet.add(eventType);
-            return newSet;
-        });
-    }, [setEventsToDelete]);
+        const newSet = new Set(eventsToDelete);
+        if (newSet.has(eventType)) newSet.delete(eventType);
+        else newSet.add(eventType);
+        dispatch({ type: 'MIDI_SESSION_PATCH', payload: { eventsToDelete: newSet } });
+    }, [eventsToDelete, dispatch]);
 
     const handleDownloadScore = useCallback((score: string, fileName: string) => {
         if (!score) return;
@@ -240,6 +198,10 @@ export const useMidiActions = ({
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
     }, []);
+
+    const handleReset = useCallback((full = true) => {
+      dispatch({ type: full ? 'FULL_RESET' : 'PARTIAL_RESET' });
+    }, [dispatch]);
 
     return {
         handleFileUpload,
