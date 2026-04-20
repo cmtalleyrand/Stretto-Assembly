@@ -5,6 +5,7 @@ import Header from './components/Header';
 import Notification from './components/Notification';
 import StrettoView from './components/StrettoView';
 import { resolveMidiTimeSignatureAtTick } from './components/services/midiTimeSignature';
+import { defaultAssemblyGateway, defaultPlaybackGateway, defaultSearchGateway, defaultSubjectRepository } from './components/services/gateways/defaultGateways';
 
 export default function App() {
   const { state, settings, setters, actions } = useMidiController();
@@ -76,6 +77,12 @@ export default function App() {
 
         <div className="w-full animate-fade-in pb-12">
           <StrettoView
+            gateways={{
+              search: defaultSearchGateway,
+              playback: defaultPlaybackGateway,
+              subjects: defaultSubjectRepository,
+              assembly: defaultAssemblyGateway,
+            }}
             notes={getStrettoNotes()}
             ppq={ppq}
             ts={{ num: ts[0], den: ts[1] }}
