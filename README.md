@@ -31,11 +31,9 @@ Counterpoint rules (including the P4/P5/P8 policy) are defined in `STRETTO_RULES
 
 ## Architecture: Bottom-Up Triplet Assembly
 
-The algorithm must be implemented as a **staged bottom-up precomputation pipeline**, not a depth-first recursive search. Each stage filters candidates using the cheapest applicable rules first, so expensive checks are only applied to survivors.
+The implementation in `components/services/strettoGenerator.ts` is structured as a staged precompute-and-assembly pipeline. Correctness is defined by **invariants** over stage boundaries and frontier state, not by the presence or absence of any specific function name.
 
-### Conceptual model
-
-Canonical entry representation (normative):
+### Canonical entry representation (normative, retained by design)
 
 \[
 e_i = (d_i,\ t_i,\ v_i,\ inv_i,\ trunc_i)
@@ -43,129 +41,86 @@ e_i = (d_i,\ t_i,\ v_i,\ inv_i,\ trunc_i)
 
 where:
 
-- `d_i`: entry-local incremental delay parameter (beat-grid scalar) for `i>=1`; `d_0` is not applicable because `e_0` has no predecessor
-- `t_i`: transposition interval in semitones
-- `v_i`: assigned voice index
-- `inv_i`: inversion flag
-- `trunc_i`: truncation extent (zero means full-length)
+- `d_i`: entry-local incremental delay parameter (beat-grid scalar) for `i>=1`; `d_0` is not applicable because `e_0` has no predecessor.
+- `t_i`: transposition interval in semitones.
+- `v_i`: assigned voice index.
+- `inv_i`: inversion flag.
+- `trunc_i`: truncation extent (zero means full-length).
 
-Important normalization identity:
+Normalization identity:
 
-- Define derived absolute start offsets by `s_0 = 0` and `s_i = Σ_{k=1..i} d_k` for `i>=1`; `s_i` is distance-from-origin, while `d_i` remains the local incremental delay parameter. For legacy absolute-start imports, recover `d_i` by `d_i = s_i - s_{i-1}` for `i>=1`.
+- Define derived absolute starts by `s_0 = 0` and `s_i = Σ_{k=1..i} d_k` for `i>=1`.
+- For legacy absolute-start inputs, recover incremental delays via `d_i = s_i - s_{i-1}`.
 
-See `docs/stretto-entry-model.md` for formal domains, constraints, and legacy-field mappings.
+The formal domain and compatibility mappings are documented in `docs/stretto-entry-model.md`.
 
-The pipeline produces a set of **valid triplets** (consecutive groups of 3 entries), then assembles longer chains by chaining triplets that share their overlapping pair.
+### Rule reference snapshot (authoritative source remains `STRETTO_RULES.md`)
 
----
+The canonical rule source is `STRETTO_RULES.md`. The condensed rule matrix below is intentionally retained in README so architecture constraints are visible at the implementation entry point.
 
-## Pipeline Stages
-
-### Stage 1 — Valid Delay Triplets (cheapest filter)
-
-Enumerate all combinations of three consecutive delays `(d₁, d₂, d₃)` that satisfy the delay rules from `STRETTO_RULES.md` simultaneously and as a unit, given the subject length `Sb`:
+#### Delay-rule set (A-series)
 
 | Rule | Condition |
-|------|-----------|
-| **A.1 Global Uniqueness (deferred enforcement target)** | All delays `> Sb/3` must be distinct across the **entire chain**. Stage 1 does not prove this globally; it only emits triplets that remain admissible for incremental uniqueness enforcement in Stage 5. |
-| **A.2 Half-length trigger (OR form)** | If `d_{n-1} >= Sb/2` **or** `d_n >= Sb/2`, then `d_n < d_{n-1}` |
-| **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5` |
-| **A.4 Post-truncation** | After a truncated entry, next delay contracts by ≥ 1 beat (unless `d_{n-1} < Sb/3`) |
-| **A.5 Maximum contraction bound** | `d_{n-1} - d_n <= 0.25 * Sb` |
-| **A.6 Universal max** | `d_n ≤ 2/3 × Sb` for all entries |
+|---|---|
+| **A.1 Global Uniqueness** | All delays `> Sb/3` are unique across the chain (enforced incrementally during frontier expansion). |
+| **A.2 Half-length trigger (OR)** | If `d_{n-1} >= Sb/2` **or** `d_n >= Sb/2`, then `d_n < d_{n-1}`. |
+| **A.3 Expansion recoil** | If `d_{n-1} > d_{n-2}` and `d_{n-1} > Sb/3`, then `d_n < d_{n-2} − 0.5`. |
+| **A.4 Post-truncation contraction** | After a truncated entry, next delay contracts by at least one beat unless `d_{n-1} < Sb/3`. |
+| **A.5 Maximum contraction bound** | `d_{n-1} - d_n <= 0.25 * Sb`. |
+| **A.6 Universal max delay** | `d_n ≤ 2/3 × Sb` for all entries. |
 
-**Start entries** (index 0) are valid if their delay is within the universal max.
-**End entries** have relaxed rules: any delay `< Sb/3` is acceptable regardless of contraction direction.
-
-The output of this stage is `validDelayTriplets: Set<(d₁, d₂, d₃)>`.
-
----
-
-### Stage 2 — Valid Transposition Triplets
-
-For each delay triplet from Stage 1, enumerate all combinations of three transposition intervals `(t₁, t₂, t₃)` that satisfy voice separation rules (applied to all temporal pairs, not only simultaneous ones):
+#### Transposition/voice-separation core constraints
 
 | Rule | Voice pair | Minimum separation |
-|------|-----------|-------------------|
-| 2A | Adjacent non-bass (e.g. soprano–alto, alto–tenor) | T(higher) ≥ T(lower) |
-| 2B | Tenor–bass (lowest adjacent pair) | T(tenor) ≥ T(bass) + 7 semitones |
-| 3A | Dist-2 non-bass (e.g. soprano–tenor) | T(higher) ≥ T(lower) + 7 semitones |
-| 3B | Alto–bass (lowest dist-2 pair) | T(alto) ≥ T(bass) + 12 semitones |
-| — | Any pair 3+ voice-steps apart | T(higher) ≥ T(lower) + 12 semitones |
+|---|---|---|
+| 2A | Adjacent non-bass pair | `T(higher) ≥ T(lower)` |
+| 2B | Tenor–bass adjacent pair | `T(tenor) ≥ T(bass) + 7` semitones |
+| 3A | Distance-2 non-bass pair | `T(higher) ≥ T(lower) + 7` semitones |
+| 3B | Alto–bass distance-2 pair | `T(alto) ≥ T(bass) + 12` semitones |
+| — | Pair distance ≥3 voices | `T(higher) ≥ T(lower) + 12` semitones |
 
-- **No consecutive same transposition** (Gatekeeper B: `t_n ≠ t_{n-1}`)
+Gatekeeper constraint:
 
-The output is `validTranspositionTriplets: Set<(d₁,d₂,d₃, t₁,t₂,t₃)>` with provisional voice assignments.
+- No consecutive identical transpositions (`t_n ≠ t_{n-1}`).
 
----
+### Control-flow primitives (actual implementation)
 
-### Stage 3 — Pairwise Harmonic Check
+1. **Staged precompute**
+   - Build fast lookup structures before traversal (transposition rule tables, compatibility matrix, and voice/transposition admissibility index).
+   - Execute structural admissibility traversal before harmonic triplet indexing so later phases can use O(1) matrix lookups instead of repeated recomputation.
 
-For each (delay, transposition) triplet, check every **overlapping pair** of entries for harmonic admissibility using the precomputed `compatTable`. A pair fails if the notes that sound simultaneously produce a combination absent from the compat table.
+2. **Triplet filtering**
+   - Enumerate adjacent pair combinations and derive candidate triplet shapes.
+   - Apply triplet-level predicates as staged gates (delay-shape legality, pairwise compatibility presence, adjacency-separation checks, lower-bound dissonance constraints, parallel-perfect filters, voice-role admissibility, P4-bass-role constraints, and delay-context reachability).
+   - Persist only accepted triplet shapes/records for downstream assembly.
 
-This is the same compatibility table already built by the existing code — it just needs to be applied at the pair level during precomputation, not inline during DFS.
+3. **DAG assembly**
+   - Assemble longer chains by extending from prevalidated triplet boundaries.
+   - Use frontier-based expansion with key-based state merging in the bounded-depth phase, then depth-first continuation over surviving frontier states for deeper targets.
+   - Reuse precomputed transition buckets keyed by boundary structure so expansion is linear in reachable edges from each frontier state.
 
----
+4. **Auxiliary admissibility traversals**
+   - Run dedicated admissibility traversals (`full` or `delay-variant-only`) that compute reachable structural states and populate admissible pair indices / delay-transition indices.
+   - These traversals are auxiliary to the main DAG expansion but constrain the candidate space early, reducing downstream branching factor.
 
-### Stage 4 — Triplet-Level Harmonic Check
+### Invariant-based architecture criteria
 
-For surviving pairs, check the **full triplet overlap** (all three entries sounding simultaneously where their time windows intersect). Apply dissonance and voice-leading rules to the three-voice texture.
+The architecture is considered correct when all of the following hold:
 
-The output is `validTriplets: Map<tripletKey, TripletData>`.
+- **Stage-localized constraints:** each rule class is enforced in one designated stage (precompute, triplet filtering, or DAG expansion) instead of being redundantly scattered.
+- **Incremental global enforcement:** frontier state carries sufficient summary information to reject globally-invalid extensions at edge evaluation time (monotone pruning), rather than deferring to an end-of-chain global filter.
+- **Boundary-consistent assembly:** every extension is justified by precomputed boundary compatibility records; no extension bypasses the staged triplet admissibility gates.
+- **Reportable progress semantics:** the worker/report path emits ordered stage progress labels (`pairwise`, `triplet`, `dag`) that correspond to the three execution bands above.
 
----
+### Why this architecture is operationally stable
 
-### Stage 5 — Chain Assembly
-
-Assemble chains of length `N` by joining valid triplets that share their overlapping boundary pair:
-
-```
-Triplet A covers entries [i, i+1, i+2]
-Triplet B covers entries [i+1, i+2, i+3]
-A and B are compatible if their shared pair (i+1, i+2) matches exactly.
-```
-
-This is graph traversal on a DAG of triplets — it is exhaustive and guaranteed correct because every constraint was enforced in the precomputation stages.
-
-Global constraints (especially A.1 delay uniqueness) are enforced here as an **incremental invariant**, not an ex-post validation pass.
-
-**Voice assignment** (`v_i`) is deferred to a post-search CSP step: after a chain reaches target length, a backtracking CSP assigns voice indices to all entries, enforcing Rules 2A/2B/3A/3B across all temporal pairs, §C re-entry, and P4 bass-role constraints. Chains for which no valid voice assignment exists are discarded. The DAG key does not include voice state, enabling node merging across different voice configurations of the same harmonic content.
-
-### Stage 5A — Incremental global uniqueness state
-
-During DAG traversal, every frontier state carries an explicit uniqueness accumulator for delays `> Sb/3`:
-
-\[
-\text{state} = (\text{boundaryPairKey},\ i,\ U)
-\]
-
-where `U` is the set (or bitset over quantized delay bins) of already-used high delays.
-
-When appending a candidate successor triplet that contributes new delay `d_new`:
-
-- if `d_new <= Sb/3`: extension is uniqueness-neutral,
-- if `d_new > Sb/3` and `d_new ∉ U`: extend and update `U ← U ∪ {d_new}`,
-- if `d_new > Sb/3` and `d_new ∈ U`: reject immediately.
-
-This makes uniqueness checking `O(1)` average-time per extension with hash-set membership (or worst-case `O(1)` deterministic with fixed-grid bitset indexing), and avoids generating invalid full chains before rejection.
-
-### Stage 5B — Dominance pruning on equivalent boundaries
-
-For fixed `(boundaryPairKey, i)`, if two frontier states have uniqueness sets `U1` and `U2` with `U1 ⊆ U2`, then state `(boundaryPairKey, i, U2)` is dominated and can be pruned because any continuation valid from `U2` is also valid from `U1`.
-
-This converts global uniqueness from a late filter into a low-cost, monotone feasibility constraint during assembly.
-
----
-
-## Why This Architecture Is Correct
-
-| Property | DFS-with-pruning (old) | Triplet assembly (correct) |
-|----------|----------------------|--------------------------|
-| Exhaustive | No — pruning can cut valid branches | Yes — all valid triplets are enumerated first |
-| Global Uniqueness (A.1) | Broken — only checks adjacent delay | Enforced incrementally at each Stage-5 extension via stateful membership checks |
-| Constraint isolation | Mixed — rules scattered inline | Clean — each rule applied at exactly one stage |
-| Performance | Unpredictable — search tree varies wildly | Predictable — precomputation cost is bounded |
-| Debuggability | Hard — no intermediate state | Easy — each stage's output can be inspected |
+| Property | Invariant-backed staged pipeline |
+|---|---|
+| Constraint placement | Deterministic: each constraint class has a designated stage. |
+| Global feasibility handling | Incremental at frontier expansion time, enabling early rejection. |
+| Search complexity control | Reduced branching via admissibility precompute and triplet-index filtering. |
+| Observability | Stage counters and telemetry are emitted from pairwise/triplet/DAG execution bands. |
+| Refactor resilience | Validation depends on invariants, not function naming conventions. |
 
 ---
 
@@ -176,11 +131,7 @@ This converts global uniqueness from a late filter into a low-cost, monotone fea
 | `STRETTO_RULES.md` | Authoritative rule definitions — source of truth |
 | `SCORING_MECHANISM.md` | Scoring formula details (penalties, bonuses) |
 | `docs/stretto-entry-model.md` | Canonical entry tuple definition + migration mapping |
-| `strettoGenerator.ts` | Implementation — must follow the pipeline above |
-
-**If `strettoGenerator.ts` contains a depth-first recursive `solve()` function as its primary chain search mechanism, it has been reverted to the wrong architecture.**
-
----
+| `components/services/strettoGenerator.ts` | Implementation of staged precompute, triplet filtering, DAG assembly, and admissibility traversals |
 
 ## Migration status (canonical model rollout)
 
@@ -215,10 +166,10 @@ The test scripts are partitioned by deterministic cost and failure-surface bread
 
 | Script | Purpose | Included checks |
 |---|---|---|
-| `npm run test` | Default lightweight deterministic suite (target `< 2` minutes) for high-frequency local and CI execution. | `components/services/stretto-opt/compatMatrix.test.ts`, `components/stretto/selectionPolicy.test.ts`, `components/stretto/searchProgressModel.test.ts`, `components/services/midiSpelling.test.ts`, `server/assemblyProxyCore.test.ts`, `components/services/strettoScoringRegression.ts` |
-| `npm run test:integration` | Cross-module and parity verification where multiple subsystems interact. | `components/services/strettoIntegrationTest.ts`, `components/services/strettoPairwiseLogicCheck.ts`, `components/services/strettoPrecomputeBackendRegression.test.ts` |
-| `npm run test:heavy` | High-cost traversal and performance regression checks. | `components/services/strettoDagTraversalTest.ts`, `components/services/strettoPerformanceRegression.test.ts` |
-| `npm run test:all` | Strict superset gate for full validation. | `npm run test && npm run test:integration && npm run test:heavy` |
+| `npm run test` | Default deterministic traversal gate used for frequent local/CI execution. | Alias of `npm run test:stretto:dag:heavy` (`components/services/strettoDagTraversal.heavy.test.ts`). |
+| `npm run test:integration` | Cross-module validation where search logic and in-app orchestration are jointly exercised. | `components/services/strettoIntegrationTest.ts`, `components/services/strettoPairwiseLogicCheck.ts`, `components/services/strettoInAppFunctionality.test.ts` |
+| `npm run test:heavy` | Explicit high-cost traversal regression gate. | Alias of `npm run test:stretto:dag:heavy` (`components/services/strettoDagTraversal.heavy.test.ts`). |
+| `npm run test:all` | Superset gate that composes baseline + integration + heavy tiers. | `npm run test && npm run test:integration && npm run test:heavy` |
 
 ### Change-type to test command mapping
 
