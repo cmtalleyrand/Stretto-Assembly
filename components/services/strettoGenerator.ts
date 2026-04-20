@@ -45,12 +45,13 @@ interface PairwiseCompatibilityRecord {
     disallowLowestPair: boolean;
     allowedVoicePairs: Set<string>;
     allowedVoiceMaskRows: bigint[];
-    // Per-bass-role compatibility: precomputed so traversal never re-scans.
-    bassRoleCompatible: { none: boolean; a: boolean; b: boolean };
+    // Compatibility when this pair includes the global bass
+    // (i.e., P4 simultaneities are forced dissonant).
+    compatibleWhenPairIncludesBass: boolean;
     // Per-bass-role dissonance detail for P4-as-bass resolution.
-    bassRoleDissonanceRatio: { none: number; a: number; b: number };
-    bassRoleMaxRunEvents: { none: number; a: number; b: number };
-    bassRoleDissonanceRunSpans: { none: SimultaneitySpan[]; a: SimultaneitySpan[]; b: SimultaneitySpan[] };
+    bassRoleDissonanceRatio: { none: number; strict: number };
+    bassRoleMaxRunEvents: { none: number; strict: number };
+    bassRoleDissonanceRunSpans: { none: SimultaneitySpan[]; strict: SimultaneitySpan[] };
     // Interval class of the transposition (mod 12), precomputed for quota checks.
     intervalClass: number;
     isRestrictedInterval: boolean;
@@ -100,7 +101,7 @@ interface NextTransition {
     isFree?: boolean;
 }
 
-type PairwiseBassRole = 'none' | 'a' | 'b';
+type PairwiseFourthTreatment = 'provisional' | 'dissonant';
 
 interface SortedNote {
     start: number;
@@ -905,7 +906,7 @@ export function checkCounterpointStructure(
     tsDenom: number = 4,
     skipSpans: boolean = false
  ): PairwiseScanResult {
-    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'none', ppqParam, tsNum, tsDenom, skipSpans);
+    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'provisional', ppqParam, tsNum, tsDenom, skipSpans);
 }
 
 export function checkCounterpointStructureWithBassRole(
@@ -914,7 +915,7 @@ export function checkCounterpointStructureWithBassRole(
     delayTicks: number,
     transposition: number,
     maxDissonanceRatio: number,
-    bassRole: PairwiseBassRole,
+    fourthTreatment: PairwiseFourthTreatment,
     ppqParam: number = 480,
     tsNum: number = 4,
     tsDenom: number = 4,
@@ -1034,11 +1035,10 @@ export function checkCounterpointStructureWithBassRole(
         
         let isDiss = INTERVALS.DISSONANT_SIMPLE.has(interval);
 
-        // P4 (5 semitones) becomes dissonant only if its lower note is known to be the bass.
-        // In pairwise-only mode (bassRole='none') it stays provisionally consonant.
-        if (!isDiss && interval === 5 && bassRole !== 'none') {
-            const bassPitch = bassRole === 'a' ? p1 : p2;
-            if (bassPitch === lo) isDiss = true;
+        // P4 is provisionally consonant in pairwise-neutral mode and
+        // dissonant in bass-inclusive mode.
+        if (!isDiss && interval === 5 && fourthTreatment === 'dissonant') {
+            isDiss = true;
         }
         
         if (isDiss) {
@@ -1140,11 +1140,10 @@ export function isVoicePairAllowedForTransposition(
 }
 
 
-export function shouldPruneLowestVoicePair(bassStrictACompatible: boolean, bassStrictBCompatible: boolean): boolean {
-    // A tenor-bass assignment should be pruned only when BOTH bass orientations are
-    // incompatible. If only one orientation fails, the opposite orientation can still
-    // participate in valid triplets where another voice carries the true bass function.
-    return !bassStrictACompatible && !bassStrictBCompatible;
+export function shouldPruneLowestVoicePair(bassStrictCompatible: boolean): boolean {
+    // Under strict bass-role treatment, every P4 in a pair containing the bass is dissonant.
+    // Only one strict compatibility state is therefore required.
+    return !bassStrictCompatible;
 }
 
 export function buildAllowedVoicePairs(
@@ -1184,18 +1183,13 @@ function buildAllowedVoiceMaskRows(
 }
 
 function applyBassRoleCompatibilityMaskRows(record: PairwiseCompatibilityRecord, bassIdx: number): bigint[] {
-    if (!record.hasFourth || (record.bassRoleCompatible.a && record.bassRoleCompatible.b)) {
+    if (!record.hasFourth || record.compatibleWhenPairIncludesBass) {
         return record.allowedVoiceMaskRows;
     }
 
     const bassBit = (1n << BigInt(bassIdx));
     return record.allowedVoiceMaskRows.map((rowMask, sourceVoice) => {
-        if (sourceVoice === bassIdx) {
-            if (record.bassRoleCompatible.a) return rowMask;
-            return rowMask & bassBit;
-        }
-
-        if (record.bassRoleCompatible.b) return rowMask;
+        if (sourceVoice === bassIdx) return 0n;
         return rowMask & ~bassBit;
     });
 }
@@ -2200,9 +2194,9 @@ export async function searchStrettoChains(
                     const timelineA = sortedVariantTimelines[iA];
                     const timelineB = sortedVariantTimelines[iB];
 
-                    const resolvePairwiseScan = (bassRoleMode: PairwiseBassRole, skipSpans: boolean): PairwiseScanResult => {
-                        const exactKey = `${cachePrefix}|${t}|${bassRoleMode}`;
-                        const canonicalKey = `${cachePrefix}|${canonicalT}|${bassRoleMode}`;
+                    const resolvePairwiseScan = (fourthTreatment: PairwiseFourthTreatment, skipSpans: boolean): PairwiseScanResult => {
+                        const exactKey = `${cachePrefix}|${t}|${fourthTreatment}`;
+                        const canonicalKey = `${cachePrefix}|${canonicalT}|${fourthTreatment}`;
                         const canReuseCanonical = shouldReuseCanonicalPairwiseScan(intervalClass, canonicalFlags);
                         const useCanonicalKey = canReuseCanonical || (t === canonicalT);
                         const selectedKey = useCanonicalKey ? canonicalKey : exactKey;
@@ -2218,7 +2212,7 @@ export async function searchStrettoChains(
                             d,
                             scanTransposition,
                             options.maxPairwiseDissonance,
-                            bassRoleMode,
+                            fourthTreatment,
                             ppq,
                             tsNum,
                             tsDenom,
@@ -2231,7 +2225,7 @@ export async function searchStrettoChains(
                     };
 
                     // Neutral scan (P4 treated as provisionally consonant)
-                    const pairScan = resolvePairwiseScan('none', !collectSpans);
+                    const pairScan = resolvePairwiseScan('provisional', !collectSpans);
                     if (!canonicalFlags && t === canonicalT) {
                         canonicalPerfectGuardFlags.set(canonicalFlagKey, {
                             hasFourth: pairScan.hasFourth,
@@ -2260,14 +2254,11 @@ export async function searchStrettoChains(
                     // Without P4 simultaneities, bassRole cannot change dissonance classification,
                     // so neutral scan data is exact for roles a/b as well.
                     const requiresBassRoleRescan = pairScan.hasFourth;
-                    const bassStrictA = requiresBassRoleRescan
-                        ? resolvePairwiseScan('a', true)
-                        : pairScan;
-                    const bassStrictB = requiresBassRoleRescan
-                        ? resolvePairwiseScan('b', true)
+                    const bassStrict = requiresBassRoleRescan
+                        ? resolvePairwiseScan('dissonant', true)
                         : pairScan;
 
-                    const disallowLowestPair = shouldPruneLowestVoicePair(bassStrictA.compatible, bassStrictB.compatible);
+                    const disallowLowestPair = shouldPruneLowestVoicePair(bassStrict.compatible);
                     const allowedVoicePairs = buildAllowedVoicePairs(t, options.ensembleTotal, disallowLowestPair);
                     const allowedVoiceMaskRows = buildAllowedVoiceMaskRows(t, options.ensembleTotal, disallowLowestPair);
                     if (allowedVoicePairs.size === 0) {
@@ -2305,25 +2296,18 @@ export async function searchStrettoChains(
                         disallowLowestPair,
                         allowedVoicePairs,
                         allowedVoiceMaskRows,
-                        bassRoleCompatible: {
-                            none: pairScan.compatible,
-                            a: bassStrictA.compatible,
-                            b: bassStrictB.compatible
-                        },
+                        compatibleWhenPairIncludesBass: bassStrict.compatible,
                         bassRoleDissonanceRatio: {
                             none: pairScan.dissonanceRatio,
-                            a: bassStrictA.dissonanceRatio,
-                            b: bassStrictB.dissonanceRatio
+                            strict: bassStrict.dissonanceRatio
                         },
                         bassRoleMaxRunEvents: {
                             none: pairScan.maxDissonanceRunEvents,
-                            a: bassStrictA.maxDissonanceRunEvents,
-                            b: bassStrictB.maxDissonanceRunEvents
+                            strict: bassStrict.maxDissonanceRunEvents
                         },
                         bassRoleDissonanceRunSpans: {
                             none: pairScan.dissonanceRunSpans,
-                            a: bassStrictA.dissonanceRunSpans,
-                            b: bassStrictB.dissonanceRunSpans
+                            strict: bassStrict.dissonanceRunSpans
                         },
                         intervalClass,
                         isRestrictedInterval,
@@ -2335,7 +2319,7 @@ export async function searchStrettoChains(
                         stageStats.pairwiseWithFourth++;
                         // In pairwise context (only 2 voices), if either bass-role scan
                         // is incompatible due to P4, the P4 acts as dissonant.
-                        if (!bassStrictA.compatible || !bassStrictB.compatible) {
+                        if (!bassStrict.compatible) {
                             stageStats.pairwiseP4TwoVoiceDissonant++;
                         }
                     }
@@ -2873,10 +2857,8 @@ export async function searchStrettoChains(
                     if (rec?.hasFourth) {
                         const eV = kStart <= posStart ? voices[k] : v;
                         const lV = kStart <= posStart ? v : voices[k];
-                        let bassRole: PairwiseBassRole = 'none';
-                        if (eV === bassIdx && lV !== bassIdx) bassRole = 'a';
-                        else if (lV === bassIdx && eV !== bassIdx) bassRole = 'b';
-                        if (bassRole !== 'none' && !rec.bassRoleCompatible[bassRole]) return false;
+                        const pairContainsBass = eV === bassIdx || lV === bassIdx;
+                        if (pairContainsBass && !rec.compatibleWhenPairIncludesBass) return false;
                     }
                 }
             }
