@@ -45,6 +45,24 @@ const perfectSensitiveFixture: SubjectVariant = {
     ]
 };
 
+const pureFourthFixtureA: SubjectVariant = {
+    type: 'N',
+    truncationBeats: 0,
+    lengthTicks: 480,
+    notes: [
+        { relTick: 0, durationTicks: 480, pitch: 60 }
+    ]
+};
+
+const pureFourthFixtureB: SubjectVariant = {
+    type: 'N',
+    truncationBeats: 0,
+    lengthTicks: 480,
+    notes: [
+        { relTick: 0, durationTicks: 480, pitch: 65 }
+    ]
+};
+
 function assertOctaveParityWhenNoPerfectBehavior(subject: SubjectVariant): void {
     let evaluated = 0;
     for (const delay of delays) {
@@ -52,10 +70,10 @@ function assertOctaveParityWhenNoPerfectBehavior(subject: SubjectVariant): void 
             const octaveT = t + 12;
             const intervalClass = ((t % 12) + 12) % 12;
             if (isPerfectBehaviorSensitiveIntervalClass(intervalClass)) continue;
-            const neutral = checkCounterpointStructureWithBassRole(subject, subject, delay, t, maxPairwiseDissonance, 'none');
+            const neutral = checkCounterpointStructureWithBassRole(subject, subject, delay, t, maxPairwiseDissonance, 'provisional');
             if (neutral.hasFourth || neutral.hasParallelPerfect58) continue;
 
-            const neutralOctave = checkCounterpointStructureWithBassRole(subject, subject, delay, octaveT, maxPairwiseDissonance, 'none');
+            const neutralOctave = checkCounterpointStructureWithBassRole(subject, subject, delay, octaveT, maxPairwiseDissonance, 'provisional');
 
             assert(neutral.compatible === neutralOctave.compatible, `neutral compatibility mismatch at d=${delay}, t=${t}`);
             assert(neutral.maxDissonanceRunEvents === neutralOctave.maxDissonanceRunEvents, `neutral run mismatch at d=${delay}, t=${t}`);
@@ -70,7 +88,7 @@ function assertPerfectGuardPolicy(subject: SubjectVariant): void {
     let guardCases = 0;
     for (const delay of delays) {
         for (const t of canonicalTranspositions) {
-            const neutral = checkCounterpointStructureWithBassRole(subject, subject, delay, t, maxPairwiseDissonance, 'none');
+            const neutral = checkCounterpointStructureWithBassRole(subject, subject, delay, t, maxPairwiseDissonance, 'provisional');
             const intervalClass = ((t % 12) + 12) % 12;
             if (!isPerfectBehaviorSensitiveIntervalClass(intervalClass)) continue;
             if (!neutral.hasFourth && !neutral.hasParallelPerfect58) continue;
@@ -95,7 +113,31 @@ function assertPerfectGuardPolicy(subject: SubjectVariant): void {
     assert(guardCases > 0, 'No perfect-sensitive guard cases were observed in the fixture.');
 }
 
+function assertBassInclusiveModeMakesFourthDissonant(): void {
+    const maxDissonance = 0;
+    const neutral = checkCounterpointStructureWithBassRole(
+        pureFourthFixtureA,
+        pureFourthFixtureB,
+        0,
+        0,
+        maxDissonance,
+        'provisional'
+    );
+    const dissonant = checkCounterpointStructureWithBassRole(
+        pureFourthFixtureA,
+        pureFourthFixtureB,
+        0,
+        0,
+        maxDissonance,
+        'dissonant'
+    );
+    assert(neutral.hasFourth, 'Neutral fixture must contain a fourth.');
+    assert(neutral.compatible, 'Neutral mode must treat isolated P4 as provisionally consonant.');
+    assert(!dissonant.compatible, 'Dissonant mode must treat isolated P4 as dissonant.');
+}
+
 assertOctaveParityWhenNoPerfectBehavior(consonantFixture);
 assertPerfectGuardPolicy(perfectSensitiveFixture);
+assertBassInclusiveModeMakesFourthDissonant();
 
-console.log('Pairwise logic check passed for octave-equivalence parity and perfect-interval guard behavior.');
+console.log('Pairwise logic check passed for octave-equivalence parity, perfect-interval guard behavior, and provisional/dissonant P4 handling.');
