@@ -246,8 +246,8 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
 
 
 // E) UI-parity fixture (4 voices, target=8, disallow exceptions, max pairwise dissonance 50%).
-// Strict finalization must never surface timeout fallback chains; only fully validated
-// results are returned after timeout-aware finalization grace.
+// On timeout, finalization must surface scoring-valid chains; if full-length valid chains are absent,
+// shorter scoring-valid chains must be returned (never invalid fallback chains).
 {
   const options: StrettoSearchOptions = {
     ensembleTotal: 4,
@@ -278,21 +278,14 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
     report.stats.maxDepthReached >= Math.min(4, options.targetChainLength),
     `fixture-E: expected traversal depth to reach at least 4 levels, got ${report.stats.maxDepthReached}.`
   );
-  if (report.results.length === 0) {
+  assert.ok(report.results.length > 0, 'fixture-E: timeout path must surface scoring-valid chains, including shorter chains when needed.');
+  for (const chain of report.results) {
     assert.equal(
-      report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0,
-      0,
-      'fixture-E: empty result set is only valid when no scoring-valid chains were finalized.'
+      chain.warnings.some((warning) => warning.startsWith('Timeout fallback:')),
+      false,
+      'fixture-E: timeout path must not emit invalid fallback warning chains.'
     );
-  } else {
-    for (const chain of report.results) {
-      assert.equal(
-        chain.warnings.some((warning) => warning.startsWith('Timeout fallback:')),
-        false,
-        'fixture-E: strict finalization must not emit timeout fallback warnings.'
-      );
-      assert.equal(chain.isValid, true, 'fixture-E: strict finalization must only emit scoring-valid chains.');
-    }
+    assert.equal(chain.isValid, true, 'fixture-E: timeout path must only emit scoring-valid chains.');
   }
   if (report.stats.maxDepthReached >= options.targetChainLength) {
     assert.ok(

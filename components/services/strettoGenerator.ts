@@ -13,6 +13,7 @@ const DEFAULT_TIME_LIMIT_MS = 30000;
 const NEAR_COMPLETION_TIMEOUT_EXTENSION_MS = 10000;
 const FINALIZATION_TIMEOUT_GRACE_MS = 10000;
 const MIN_TIMEOUT_FINALIZATION_CANDIDATES = 256;
+const TIMEOUT_VALID_RESULT_RECOVERY_BUDGET_MS = 5000;
 const MAX_RESULTS = 50;
 const EVENT_LOOP_YIELD_INTERVAL = 1024;
 // Removed EARLY_WINDOW_OPTIMIZATION_MAX_ENTRY — no longer needed with active-tail DAG keys.
@@ -4013,17 +4014,22 @@ export async function searchStrettoChains(
     sourceUnscored.sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
 
     const scoredResults: StrettoChainResult[] = [];
+    let scoringValidChainsFoundCount = 0;
     const finalizationDeadlineMs = terminationReason === 'Timeout'
         ? activeTimeLimitMs + FINALIZATION_TIMEOUT_GRACE_MS
         : activeTimeLimitMs;
     let timeoutFinalizationCandidatesRemaining = terminationReason === 'Timeout'
         ? MIN_TIMEOUT_FINALIZATION_CANDIDATES
         : 0;
-    for (const uc of sourceUnscored) {
+    let finalizedCandidateCount = 0;
+    let nextCandidateIndex = 0;
+    for (; nextCandidateIndex < sourceUnscored.length; nextCandidateIndex++) {
+        const uc = sourceUnscored[nextCandidateIndex];
         const elapsedMs = Date.now() - startTime;
         const timeoutGraceExhausted = elapsedMs >= finalizationDeadlineMs;
         if (timeoutGraceExhausted && timeoutFinalizationCandidatesRemaining <= 0) break;
         if (timeoutFinalizationCandidatesRemaining > 0) timeoutFinalizationCandidatesRemaining--;
+        finalizedCandidateCount++;
         // Auto-truncation: when enabled, attempt to resolve voice-capacity conflicts by
         // shortening the oldest still-active entry before re-trying voice assignment.
         let workEntries = [...uc.entries];
@@ -4045,6 +4051,7 @@ export async function searchStrettoChains(
         const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
         if (scored.isValid) {
             scoredResults.push(scored);
+            scoringValidChainsFoundCount++;
         } else {
             finalizationRejectedScoringInvalid++;
             const runEvents = scored.maxDissonanceRunEvents ?? 0;
@@ -4052,7 +4059,84 @@ export async function searchStrettoChains(
             maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
         }
     }
+
+    // Timeout recovery pass:
+    // If structurally complete candidates exist but no scoring-valid chain has been surfaced yet,
+    // scan additional remaining complete candidates for a short fixed budget to avoid
+    // false-empty UI outcomes caused by sparse valid chains.
+    if (
+        terminationReason === 'Timeout'
+        && scoredResults.length === 0
+        && sourceUnscored.length > finalizedCandidateCount
+    ) {
+        const recoveryDeadlineMs = Date.now() + TIMEOUT_VALID_RESULT_RECOVERY_BUDGET_MS;
+        for (; nextCandidateIndex < sourceUnscored.length; nextCandidateIndex++) {
+            if (Date.now() >= recoveryDeadlineMs) break;
+            const uc = sourceUnscored[nextCandidateIndex];
+            let workEntries = [...uc.entries];
+            let autoTruncBeats = 0;
+            if (options.useAutoTruncation) {
+                const resolved = resolveAutoTruncations(workEntries, uc.variantIndices);
+                if (resolved.autoTruncBeats > 0) {
+                    workEntries = resolved.chain;
+                    autoTruncBeats = resolved.autoTruncBeats;
+                }
+            }
+
+            const assigned = assignVoices(workEntries, [...uc.variantIndices]);
+            if (assigned === null) {
+                finalizationRejectedVoiceAssignment++;
+                continue;
+            }
+            finalizationScoredCount++;
+            const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
+            if (scored.isValid) {
+                scoredResults.push(scored);
+                scoringValidChainsFoundCount++;
+                break;
+            }
+            finalizationRejectedScoringInvalid++;
+            const runEvents = scored.maxDissonanceRunEvents ?? 0;
+            const histKey = String(runEvents);
+            maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
+        }
+    }
     fullChainsFound = structurallyCompleteChainsFound;
+
+    if (terminationReason === 'Timeout' && scoredResults.length === 0 && deferredPartials.length > 0) {
+        const partialCandidates = deferredPartials
+            .map((dp) => ({ entries: dp.chain, variantIndices: dp.variantIndices }))
+            .sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
+        const partialRecoveryDeadlineMs = Date.now() + TIMEOUT_VALID_RESULT_RECOVERY_BUDGET_MS;
+        for (const uc of partialCandidates) {
+            if (Date.now() >= partialRecoveryDeadlineMs) break;
+            let workEntries = [...uc.entries];
+            let autoTruncBeats = 0;
+            if (options.useAutoTruncation) {
+                const resolved = resolveAutoTruncations(workEntries, uc.variantIndices);
+                if (resolved.autoTruncBeats > 0) {
+                    workEntries = resolved.chain;
+                    autoTruncBeats = resolved.autoTruncBeats;
+                }
+            }
+            const assigned = assignVoices(workEntries, [...uc.variantIndices]);
+            if (assigned === null) {
+                finalizationRejectedVoiceAssignment++;
+                continue;
+            }
+            finalizationScoredCount++;
+            const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
+            if (!scored.isValid) {
+                finalizationRejectedScoringInvalid++;
+                const runEvents = scored.maxDissonanceRunEvents ?? 0;
+                const histKey = String(runEvents);
+                maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
+                continue;
+            }
+            scoredResults.push(scored);
+            scoringValidChainsFoundCount++;
+        }
+    }
 
     const finalizedResults: StrettoChainResult[] = scoredResults;
 
@@ -4122,7 +4206,7 @@ export async function searchStrettoChains(
             completionDiagnostics: {
                 structurallyCompleteChainsFound,
                 prefixAdmissibleCompleteChainsFound,
-                scoringValidChainsFound: scoredResults.length,
+                scoringValidChainsFound: scoringValidChainsFoundCount,
                 finalizationRejectedVoiceAssignment,
                 finalizationRejectedScoringInvalid,
                 maxDissonanceRunEventsHistogram: Object.keys(maxDissonanceRunEventsHistogram).length > 0
