@@ -345,6 +345,8 @@ export async function runCanonSearch(
     onProgress?: (pct: number, msg: string) => void
 ): Promise<CanonSearchReport> {
     const startTime = Date.now();
+    onProgress?.(0, 'Preparing search space…');
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
 
     if (subjectNotes.length === 0) {
         return { results: [], totalEvaluated: 0, timeMs: 0 };
