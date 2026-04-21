@@ -3,6 +3,7 @@ import { RawNote, StrettoCandidate, StrettoError, StrettoGrade, HarmonicRegion, 
 import { getFormattedTime } from './midiHarmony';
 import { getStrictPitchName, getIntervalLabel, getPitchName } from './midiSpelling';
 import { CHORD_SHAPES, CONSONANT_QUALITIES, SCALE_INTERVALS } from './strettoConstants';
+import { isStrongBeat } from './metric/beatStrength';
 
 const DISSONANT_INTERVALS = [1, 2, 6, 10, 11]; // m2, M2, TT, m7, M7
 const PERFECT_CONSONANCES = [0, 7]; // P1, P5
@@ -446,14 +447,6 @@ export function generatePolyphonicHarmonicRegions(notes: RawNote[], keyRoot: num
     }
 
     return regions;
-}
-
-function isStrongBeat(tick: number, ppq: number, tsNum: number, tsDenom: number): boolean {
-    const ticksPerMeasure = ppq * tsNum * (4 / tsDenom);
-    const pos = tick % ticksPerMeasure;
-    if (pos === 0) return true; 
-    if (tsNum === 4 && tsDenom === 4 && pos === (ticksPerMeasure / 2)) return true;
-    return false; 
 }
 
 export function analyzeStrettoCandidate(
