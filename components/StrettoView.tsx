@@ -1,18 +1,11 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { RawNote, StrettoCandidate, StrettoSearchOptions, StrettoChainResult, HarmonicRegion, StrettoSearchReport, StrettoGrade, StrettoListFilterContext, CanonSearchOptions, CanonChainResult, CanonSearchReport } from '../types';
-import { parseSimpleAbc, extractKeyFromAbc, extractMeterFromAbc } from './services/abcBridge';
-import { analyzeStrettoCandidate, analyzeStrettoTripletCandidate, generatePolyphonicHarmonicRegions } from './services/strettoCore';
-import { getStrictPitchName } from './services/midiSpelling';
-import { downloadStrettoCandidate, downloadStrettoSelection } from './services/strettoExport';
 import { Spinner, DocumentTextIcon } from './Icons';
 import FileUpload from './FileUpload';
 import { useStrettoAssembly } from '../hooks/useStrettoAssembly';
-import { deriveInitialPivotSettings } from './services/stretto/pivotInitialization';
-import { computeMaxDelayAutoBeats } from './services/stretto/delayUtils';
 
 import StrettoConfig, { SearchResolution } from './stretto/StrettoConfig';
-import { computeSubjectPivotCandidates, rankPivotCandidates, PivotSearchMetric, PivotCandidateObservation } from './services/pairwisePivotSearch';
 import StrettoList from './stretto/StrettoList';
 import StrettoInspector from './stretto/StrettoInspector';
 import StrettoFooter from './stretto/StrettoFooter';
@@ -21,8 +14,7 @@ import { isCandidateAllowedByHardPairwisePolicy, pruneCheckedIdsByHardPairwisePo
 import CanonSearchPanel from './stretto/CanonSearchPanel';
 import CanonResultsList from './stretto/CanonResultsList';
 import PianoRoll from './PianoRoll';
-import { computeSecondDelayStart, computeSecondDelayEnd, enumerateTripletInversionPairs, TripletDelayOrderingMode } from './services/tripletDiscoveryOptions';
-import type { AssemblyGateway, PlaybackGateway, SearchGateway, StrettoSearchProgressState, SubjectRepository } from './services/contracts/gateways';
+import type { AssemblyGateway, OrchestrationGateway, PlaybackGateway, PivotCandidateObservation, PivotSearchMetric, SearchGateway, StrettoSearchProgressState, SubjectRepository, TripletDelayOrderingMode } from './services/contracts/gateways';
 
 export interface StrettoViewProps {
     notes: RawNote[]; 
@@ -40,6 +32,7 @@ export interface StrettoViewProps {
         playback?: PlaybackGateway;
         subjects?: SubjectRepository;
         assembly?: AssemblyGateway;
+        orchestration?: OrchestrationGateway;
     };
 }
 
@@ -66,6 +59,7 @@ export default function StrettoView({
     const playbackGateway = gateways?.playback;
     const subjectRepository = gateways?.subjects;
     const assemblyGateway = gateways?.assembly;
+    const orchestrationGateway = gateways?.orchestration;
     const [mode, setMode] = useState<'midi' | 'abc'>('abc');
     const [abcInput, setAbcInput] = useState<string>("M:4/4\nL:1/4\nQ:120\nK:C\nc2 G c d e f g3 a b c'2");
     const [viewMode, setViewMode] = useState<'pairwise' | 'chain' | 'canon'>('chain');
@@ -166,16 +160,17 @@ export default function StrettoView({
     }, [mode, abcInput]);
 
     const subjectNotes = useMemo(() => {
-        if (mode === 'abc') return parseSimpleAbc(abcInput, ppq || 480);
-        return initialNotes;
-    }, [mode, abcInput, initialNotes, ppq]);
+        if (!orchestrationGateway) return [];
+        return orchestrationGateway.parseSubject(mode, abcInput, initialNotes, ppq || 480);
+    }, [orchestrationGateway, mode, abcInput, initialNotes, ppq]);
 
 
     const pivotOptions = useMemo(() => {
-        const candidates = computeSubjectPivotCandidates(subjectNotes);
+        if (!orchestrationGateway) return [searchOptions.pivotMidi];
+        const candidates = orchestrationGateway.computeSubjectPivotCandidates(subjectNotes);
         if (candidates.length > 0) return candidates;
         return [searchOptions.pivotMidi];
-    }, [subjectNotes, searchOptions.pivotMidi]);
+    }, [orchestrationGateway, subjectNotes, searchOptions.pivotMidi]);
 
     useEffect(() => {
         if (pivotOptions.length === 0) return;
@@ -187,15 +182,16 @@ export default function StrettoView({
     const NOTE_NAMES = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
     const abcKeyLabel = useMemo(() => {
         if (mode !== 'abc') return null;
-        const parsed = extractKeyFromAbc(abcInput);
+        if (!orchestrationGateway) return 'C Major (default – no K: field)';
+        const parsed = orchestrationGateway.parseAbcKey(abcInput);
         if (!parsed) return 'C Major (default – no K: field)';
         return `${NOTE_NAMES[parsed.root]} ${parsed.mode}`;
-    }, [mode, abcInput]);
+    }, [orchestrationGateway, mode, abcInput]);
 
     const parsedAbcMeter = useMemo(() => {
         if (mode !== 'abc') return null;
-        return extractMeterFromAbc(abcInput);
-    }, [mode, abcInput]);
+        return orchestrationGateway?.parseAbcMeter(abcInput) ?? null;
+    }, [orchestrationGateway, mode, abcInput]);
 
     const activeMeter = useMemo(() => {
         if (mode === 'abc' && parsedAbcMeter) return parsedAbcMeter;
@@ -222,7 +218,8 @@ export default function StrettoView({
 
     // Intelligent Pivot Initialization using Key Prediction or ABC Context
     useEffect(() => {
-        const derived = deriveInitialPivotSettings(subjectNotes, mode, abcInput);
+        if (!orchestrationGateway) return;
+        const derived = orchestrationGateway.deriveInitialPivotSettings(subjectNotes, mode, abcInput);
         if (!derived) return;
         setSearchOptions(prev => ({
             ...prev,
@@ -230,7 +227,7 @@ export default function StrettoView({
             scaleRoot: derived.scaleRoot,
             scaleMode: derived.scaleMode
         }));
-    }, [subjectNotes, mode, abcInput]);
+    }, [orchestrationGateway, subjectNotes, mode, abcInput]);
 
     const handleSaveSubject = () => {
         if (!saveName.trim() || !abcInput.trim()) return;
@@ -256,84 +253,30 @@ export default function StrettoView({
 
     /** Auto-computed max delay in beats (2/3 of subject length), shown as placeholder. */
     const maxDelayAutoBeats = useMemo(
-        () => computeMaxDelayAutoBeats(subjectNotes, ppq || 480, activeMeter.den),
-        [subjectNotes, ppq, activeMeter.den]
+        () => orchestrationGateway?.computeMaxDelayAutoBeats(subjectNotes, ppq || 480, activeMeter.den) ?? 0,
+        [orchestrationGateway, subjectNotes, ppq, activeMeter.den]
     );
 
     const runDiscovery = () => {
-        const validNotes = subjectNotes.filter(n => !!n);
-        if (validNotes.length === 0) return;
+        if (!orchestrationGateway) return;
+        if (subjectNotes.filter(n => !!n).length === 0) return;
 
         setIsDiscovering(true);
-        // Yield to React so the loading state renders before the heavy loop
         setTimeout(() => {
-            const candidates: StrettoCandidate[] = [];
-            const durationTicks = Math.max(...validNotes.map(n => n.ticks + n.durationTicks));
-            const currentPpq = ppq || 480;
-            const beatDiv = currentPpq * (4 / activeMeter.den);
-
-            let stepTicks = currentPpq;
-            if (searchRes === 'half') stepTicks = currentPpq / 2;
-            else if (searchRes === 'double') stepTicks = currentPpq * 2;
-
-            // Respect user-specified max delay (capped by the 2/3 Sb rule)
-            const autoMax = durationTicks * (2/3);
-            const userMax = maxDelayBeats !== '' ? parseFloat(maxDelayBeats) * beatDiv : autoMax;
-            const effectiveMaxDelay = Math.min(userMax, autoMax);
-            const effectiveMinDelay = Math.max(stepTicks, Math.round(minDelayBeats * beatDiv));
-
-            let intervalsToCheck = [...configIntervals];
-            if (includeExtensions) {
-                const exts = [3, 4, 8, 9, -3, -4, -8, -9];
-                exts.forEach(e => { if (!intervalsToCheck.includes(e)) intervalsToCheck.push(e); });
-            }
-
-            if (discoveryArity === 'pairwise') {
-                intervalsToCheck.forEach(interval => {
-                    for (let d = effectiveMinDelay; d <= effectiveMaxDelay; d += stepTicks) {
-                        candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, false, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance, searchOptions.scaleMode));
-                        if (includeInversions) {
-                            candidates.push(analyzeStrettoCandidate(validNotes, interval, Math.round(d), currentPpq, activeMeter, true, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance, searchOptions.scaleMode));
-                        }
-                    }
-                });
-            } else {
-                // Triplet-enumeration aliases:
-                // d_te_1 = delay from e0→e1, d_te_2 = relative gap from e1→e2.
-                // e2 absolute position = d_te_1 + d_te_2 (handled inside analyzeStrettoTripletCandidate)
-                const inversionPairs = enumerateTripletInversionPairs(includeInversions);
-                for (let d_te_1 = effectiveMinDelay; d_te_1 <= effectiveMaxDelay; d_te_1 += stepTicks) {
-                    const d_te_2_start = computeSecondDelayStart(d_te_1, stepTicks);
-                    const d_te_2_end = computeSecondDelayEnd(d_te_1, effectiveMaxDelay, stepTicks, tripletDelayOrderingMode);
-                    for (let d_te_2 = d_te_2_start; d_te_2 <= d_te_2_end; d_te_2 += stepTicks) {
-                        for (const i1 of intervalsToCheck) {
-                            for (const i2 of intervalsToCheck) {
-                                for (const inversionPair of inversionPairs) {
-                                    candidates.push(
-                                        analyzeStrettoTripletCandidate(
-                                            validNotes,
-                                            i1,
-                                            i2,
-                                            Math.round(d_te_1),
-                                            Math.round(d_te_2),
-                                            currentPpq,
-                                            activeMeter,
-                                            inversionPair.firstIsInverted,
-                                            inversionPair.secondIsInverted,
-                                            searchOptions.pivotMidi,
-                                            searchOptions.useChromaticInversion,
-                                            searchOptions.scaleRoot,
-                                            searchOptions.maxPairwiseDissonance,
-                                            searchOptions.scaleMode
-                                        )
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            const candidates = orchestrationGateway.runDiscovery({
+                subjectNotes,
+                ppq: ppq || 480,
+                meter: activeMeter,
+                searchResolution: searchRes,
+                discoveryArity,
+                tripletDelayOrderingMode,
+                minDelayBeats,
+                maxDelayBeats,
+                configIntervals,
+                includeExtensions,
+                includeInversions,
+                searchOptions,
+            });
             setPairwiseResults(candidates);
             setIsDiscovering(false);
         }, 10);
@@ -423,148 +366,27 @@ export default function StrettoView({
 
     // Build a StrettoCandidate from the selected canon result for playback/download
     const canonToCandidate = useMemo((): StrettoCandidate | null => {
-        if (!selectedCanonResult) return null;
-        const validSubjectNotes = subjectNotes.filter(n => !!n);
-        const currentPpq = ppq || 480;
-        if (validSubjectNotes.length === 0) return null;
-        const sortedSubj = [...validSubjectNotes].sort((a, b) => a.ticks - b.ticks);
-        const startTick = sortedSubj[0].ticks;
-
-        const invertPitchChromatic = (pitch: number, pivot: number) => pivot - (pitch - pivot);
-        const SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11];
-        const invertPitchDiatonic = (pitch: number, pivot: number) => {
-            const diff = pitch - pivot;
-            const oct = Math.floor(diff / 12);
-            const semi = (diff % 12 + 12) % 12;
-            let degree = -1, minErr = 99;
-            SCALE_STEPS.forEach((s, i) => { if (Math.abs(s - semi) < minErr) { minErr = Math.abs(s - semi); degree = i; } });
-            const absDegree = (oct * 7) + degree;
-            const invAbsDegree = -absDegree;
-            const invOct = Math.floor(invAbsDegree / 7);
-            const invIndex = (invAbsDegree % 7 + 7) % 7;
-            return pivot + (invOct * 12) + SCALE_STEPS[invIndex];
-        };
-
-        let allNotes: RawNote[] = [];
-        selectedCanonResult.entries.forEach((entry) => {
-            const entryStartTick = Math.round(entry.startBeat * currentPpq);
-            // entry.length is in ticks (set by canonSearch.ts from variant.lengthTicks)
-            const entryEndTick = entryStartTick + entry.length;
-
-            const transformed = sortedSubj.map(n => {
-                let pitch = n.midi;
-                if (entry.type === 'I') {
-                    const rawInverted = canonOptions.useChromaticInversion
-                        ? invertPitchChromatic(n.midi, canonOptions.pivotMidi)
-                        : invertPitchDiatonic(n.midi, canonOptions.pivotMidi);
-                    const subjectFirst = sortedSubj[0].midi;
-                    const invertedFirst = canonOptions.useChromaticInversion
-                        ? invertPitchChromatic(subjectFirst, canonOptions.pivotMidi)
-                        : invertPitchDiatonic(subjectFirst, canonOptions.pivotMidi);
-                    const targetStart = subjectFirst + entry.transposition;
-                    pitch = rawInverted + (targetStart - invertedFirst);
-                } else {
-                    pitch += entry.transposition;
-                }
-                return {
-                    ...n,
-                    ticks: (n.ticks - startTick) + entryStartTick,
-                    midi: pitch,
-                    name: getStrictPitchName(pitch),
-                    voiceIndex: entry.voiceIndex,
-                };
-            });
-
-            const clipped = transformed
-                .filter(n => n.ticks < entryEndTick)
-                .map(n => ({ ...n, durationTicks: Math.min(n.durationTicks, entryEndTick - n.ticks) }));
-            allNotes = [...allNotes, ...clipped];
+        if (!orchestrationGateway) return null;
+        return orchestrationGateway.reconstructCanonCandidate({
+            selectedCanonResult,
+            subjectNotes,
+            ppq: ppq || 480,
+            canonOptions,
         });
-
-        const regions = generatePolyphonicHarmonicRegions(allNotes, canonOptions.scaleRoot);
-        return {
-            id: selectedCanonResult.id,
-            intervalLabel: 'Canon',
-            intervalSemis: selectedCanonResult.transpositionSteps[0] ?? 0,
-            delayBeats: selectedCanonResult.delayBeats,
-            delayTicks: Math.round(selectedCanonResult.delayBeats * currentPpq),
-            grade: 'STRONG',
-            errors: [],
-            notes: allNotes,
-            regions,
-            dissonanceRatio: 0,
-            pairDissonanceScore: 0,
-            endsOnDissonance: false,
-        };
-    }, [selectedCanonResult, subjectNotes, ppq, canonOptions]);
+    }, [orchestrationGateway, selectedCanonResult, subjectNotes, ppq, canonOptions]);
 
     const chainToCandidate = useMemo((): StrettoCandidate | null => {
-        if (!selectedChain) return null;
-        let allNotes: RawNote[] = [];
-        const validSubjectNotes = subjectNotes.filter(n => !!n);
-        const currentPpq = ppq || 480;
-        if (validSubjectNotes.length === 0) return null;
-        const sortedSubj = [...validSubjectNotes].sort((a,b)=>a.ticks-b.ticks);
-        const startTick = sortedSubj[0].ticks;
-        
-        const SCALE_STEPS = [0, 2, 4, 5, 7, 9, 11];
-        const invertPitchDiatonic = (pitch: number, pivot: number) => {
-            const diff = pitch - pivot;
-            const oct = Math.floor(diff / 12);
-            const semi = (diff % 12 + 12) % 12;
-            let degree = -1;
-            let minErr = 99;
-            SCALE_STEPS.forEach((s, i) => {
-                if (Math.abs(s - semi) < minErr) { minErr = Math.abs(s - semi); degree = i; }
-            });
-            const absDegree = (oct * 7) + degree;
-            const invAbsDegree = -absDegree;
-            const invOct = Math.floor(invAbsDegree / 7);
-            const invIndex = (invAbsDegree % 7 + 7) % 7;
-            return pivot + (invOct * 12) + SCALE_STEPS[invIndex];
-        };
-
-        const invertPitchChromatic = (pitch: number, pivot: number) => {
-            return pivot - (pitch - pivot);
-        }
-
-        selectedChain.entries.forEach((entry) => {
-            const entryStartTick = Math.round(entry.startBeat * currentPpq);
-            const transformed = sortedSubj.map(n => {
-                let pitch = n.midi;
-                
-                if (entry.type === 'I') {
-                    const rawInverted = searchOptions.useChromaticInversion 
-                        ? invertPitchChromatic(n.midi, searchOptions.pivotMidi)
-                        : invertPitchDiatonic(n.midi, searchOptions.pivotMidi);
-                    
-                    const subjectFirst = sortedSubj[0].midi;
-                    const invertedFirst = searchOptions.useChromaticInversion 
-                        ? invertPitchChromatic(subjectFirst, searchOptions.pivotMidi)
-                        : invertPitchDiatonic(subjectFirst, searchOptions.pivotMidi);
-                    
-                    const targetStart = subjectFirst + entry.transposition;
-                    const shift = targetStart - invertedFirst;
-                    pitch = rawInverted + shift;
-
-                } else {
-                    pitch += entry.transposition;
-                }
-                
-                pitch += masterTransposition;
-
-                return { ...n, ticks: (n.ticks - startTick) + entryStartTick, midi: pitch, name: getStrictPitchName(pitch), voiceIndex: entry.voiceIndex };
-            });
-            const entryEnd = entryStartTick + (entry.length * (currentPpq/4));
-            const clipped = transformed.filter(n => n.ticks < entryEnd).map(n => ({ ...n, durationTicks: Math.min(n.durationTicks, entryEnd - n.ticks) }));
-            allNotes = [...allNotes, ...clipped];
+        if (!orchestrationGateway) return null;
+        return orchestrationGateway.reconstructChainCandidate({
+            selectedChain,
+            subjectNotes,
+            ppq: ppq || 480,
+            pivotMidi: searchOptions.pivotMidi,
+            useChromaticInversion: searchOptions.useChromaticInversion,
+            scaleRoot: searchOptions.scaleRoot,
+            masterTransposition,
         });
-
-        // Pass pivotMidi (or scaleRoot) as keyRoot for visualization
-        const chainRegions = generatePolyphonicHarmonicRegions(allNotes, searchOptions.scaleRoot);
-
-        return { id: selectedChain.id, intervalLabel: "Chain", intervalSemis: 0, delayBeats: 0, delayTicks: 0, grade: 'STRONG', errors: [], notes: allNotes, regions: chainRegions, dissonanceRatio: 0, pairDissonanceScore: 0, endsOnDissonance: false };
-    }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.maxPairwiseDissonance]);
+    }, [orchestrationGateway, selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, searchOptions.scaleRoot, masterTransposition]);
 
     const handlePlay = (notes: RawNote[]) => {
         if (isPlaying) { playbackGateway?.stop(); setIsPlaying(false); return; }
@@ -581,7 +403,7 @@ export default function StrettoView({
 
 
     const runOptimalPivotSearch = () => {
-        if (!includeInversions || subjectNotes.length === 0 || pivotOptions.length === 0) {
+        if (!orchestrationGateway || !includeInversions || subjectNotes.length === 0 || pivotOptions.length === 0) {
             setPivotSearchResults([]);
             return;
         }
@@ -605,32 +427,37 @@ export default function StrettoView({
             exts.forEach((e) => { if (!intervalsToCheck.includes(e)) intervalsToCheck.push(e); });
         }
 
-        const ranked = rankPivotCandidates({
+        const ranked = orchestrationGateway.rankPivotCandidates({
             pivots: pivotOptions,
             referencePivot: searchOptions.pivotMidi,
             evaluatePivot: (pivotMidi) => {
                 const observations: PivotCandidateObservation[] = [];
-                intervalsToCheck.forEach((interval) => {
-                    for (let d = stepTicks; d <= maxDelay; d += stepTicks) {
-                        const candidate = analyzeStrettoCandidate(
-                            validNotes,
-                            interval,
-                            Math.round(d),
-                            currentPpq,
-                            ts,
-                            true,
-                            pivotMidi,
-                            searchOptions.useChromaticInversion,
-                            searchOptions.scaleRoot,
-                            searchOptions.maxPairwiseDissonance,
-                            searchOptions.scaleMode
-                        );
-                        observations.push({
-                            delayTicks: candidate.delayTicks,
-                            dissonanceRatio: candidate.dissonanceRatio,
-                            isViable: candidate.grade !== 'INVALID'
-                        });
-                    }
+                const candidates = orchestrationGateway.runDiscovery({
+                    subjectNotes: validNotes,
+                    ppq: currentPpq,
+                    meter: ts,
+                    searchResolution: searchRes,
+                    discoveryArity: 'pairwise',
+                    tripletDelayOrderingMode: 'unconstrained',
+                    minDelayBeats: stepTicks / currentPpq,
+                    maxDelayBeats: String(maxDelay / currentPpq),
+                    configIntervals: intervalsToCheck,
+                    includeExtensions: false,
+                    includeInversions: true,
+                    searchOptions: {
+                        pivotMidi,
+                        useChromaticInversion: searchOptions.useChromaticInversion,
+                        scaleRoot: searchOptions.scaleRoot,
+                        maxPairwiseDissonance: searchOptions.maxPairwiseDissonance,
+                        scaleMode: searchOptions.scaleMode
+                    },
+                });
+                candidates.forEach((candidate) => {
+                    observations.push({
+                        delayTicks: candidate.delayTicks,
+                        dissonanceRatio: candidate.dissonanceRatio,
+                        isViable: candidate.grade !== 'INVALID'
+                    });
                 });
                 return observations;
             }
@@ -889,7 +716,7 @@ export default function StrettoView({
                             if (canonToCandidate) handlePlay(canonToCandidate.notes);
                         }}
                         onDownload={(_res) => {
-                            if (canonToCandidate) downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den });
+                            if (canonToCandidate) orchestrationGateway?.exportCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den });
                         }}
                     />
                     {canonToCandidate && (
@@ -902,7 +729,7 @@ export default function StrettoView({
                             assemblyResult=""
                             assemblyLog={[]}
                             onClearAssembly={() => {}}
-                            onDownloadChain={() => downloadStrettoCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })}
+                            onDownloadChain={() => canonToCandidate && orchestrationGateway?.exportCandidate(canonToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })}
                         />
                     )}
                 </div>
@@ -938,9 +765,9 @@ export default function StrettoView({
                             isTriplet={discoveryArity === 'triplet'}
                             showNct={discoveryArity === 'triplet'}
                         />
-                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={activeMeter} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && downloadStrettoCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} />
+                        <StrettoInspector candidate={selectedCandidate} ppq={ppq || 480} ts={activeMeter} isPlaying={isPlaying} onPlay={handlePlay} assemblyResult={assemblyResult} assemblyLog={assemblyLog} onClearAssembly={() => setAssemblyResult('')} onDownloadChain={() => selectedCandidate && orchestrationGateway?.exportCandidate(selectedCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} />
                     </div>
-                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => downloadStrettoSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
+                    <StrettoFooter selectedCandidates={getSelectedCandidates()} onDownloadMidi={() => orchestrationGateway?.exportSelection(getSelectedCandidates(), ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} onAssemble={() => runAssembly(checkedIds.size > 0 ? getSelectedCandidates() : (selectedCandidate ? [selectedCandidate] : []), abcInput, { filterContext: discoveryFilterContext })} isAssembling={isAssembling} onRemoveCandidate={toggleCheck} />
                 </>
             ) : (
                 <StrettoChainView 
@@ -959,7 +786,7 @@ export default function StrettoView({
                     ts={activeMeter} 
                     isPlaying={isPlaying} 
                     onPlay={handlePlay} 
-                    onDownloadChain={() => chainToCandidate && downloadStrettoCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} 
+                    onDownloadChain={() => chainToCandidate && orchestrationGateway?.exportCandidate(chainToCandidate, ppq || 480, voiceNames, subjectTitle, { numerator: activeMeter.num, denominator: activeMeter.den })} 
                     searchReport={searchReport}
                     masterTransposition={masterTransposition}
                     setMasterTransposition={setMasterTransposition}

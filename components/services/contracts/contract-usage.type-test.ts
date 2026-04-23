@@ -2,6 +2,7 @@ import type { StrettoViewProps } from '../../StrettoView';
 import type { UseStrettoAssemblyProps } from '../../../hooks/useStrettoAssembly';
 import type {
   AssemblyGateway,
+  OrchestrationGateway,
   PlaybackGateway,
   SearchGateway,
   SubjectRepository,
@@ -24,6 +25,9 @@ type _StrettoViewSubjectRepositoryContract = Assert<
 >;
 type _StrettoViewAssemblyGatewayContract = Assert<
   IsAssignable<AssemblyGateway | undefined, StrettoViewGatewayShape['assembly']>
+>;
+type _StrettoViewOrchestrationGatewayContract = Assert<
+  IsAssignable<OrchestrationGateway | undefined, StrettoViewGatewayShape['orchestration']>
 >;
 
 // Hook contract check: orchestration hook consumes AssemblyGateway abstraction.

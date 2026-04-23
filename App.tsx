@@ -5,7 +5,13 @@ import Header from './components/Header';
 import Notification from './components/Notification';
 import StrettoView from './components/StrettoView';
 import { resolveMidiTimeSignatureAtTick } from './components/services/midiTimeSignature';
-import { defaultAssemblyGateway, defaultPlaybackGateway, defaultSearchGateway, defaultSubjectRepository } from './components/services/gateways/defaultGateways';
+import {
+  defaultAssemblyGateway,
+  defaultOrchestrationGateway,
+  defaultPlaybackGateway,
+  defaultSearchGateway,
+  defaultSubjectRepository,
+} from './components/services/gateways/defaultGateways';
 
 export default function App() {
   const { state, settings, setters, actions } = useMidiController();
@@ -82,6 +88,7 @@ export default function App() {
               playback: defaultPlaybackGateway,
               subjects: defaultSubjectRepository,
               assembly: defaultAssemblyGateway,
+              orchestration: defaultOrchestrationGateway,
             }}
             notes={getStrettoNotes()}
             ppq={ppq}
