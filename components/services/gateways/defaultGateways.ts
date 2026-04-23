@@ -2,12 +2,14 @@ import { runCanonSearch } from '../canonSearch';
 import { playSequence, stopPlayback } from '../../midiPlaybackService';
 import type {
   AssemblyGateway,
+  OrchestrationGateway,
   PlaybackGateway,
   SearchGateway,
   StrettoSearchProgressState,
   SubjectRepository,
 } from '../contracts/gateways';
 import type { StrettoSearchReport } from '../../../types';
+import { strettoOrchestrationUsecase } from '../usecases/strettoOrchestration';
 
 interface StrettoSearchWorkerProgress {
   ok: true;
@@ -133,3 +135,5 @@ export const defaultPlaybackGateway: PlaybackGateway = {
     stopPlayback();
   },
 };
+
+export const defaultOrchestrationGateway: OrchestrationGateway = strettoOrchestrationUsecase;
