@@ -10,6 +10,7 @@ import {
     SearchProgressAccumulator
 } from './searchProgressModel';
 import { metricHelpText } from './telemetryGlossary';
+import { resolvePivotSelectOptions } from './pivotSelection';
 
 interface StrettoSearchPanelProps {
     options: StrettoSearchOptions;
@@ -97,6 +98,10 @@ export default function StrettoSearchPanel({
 
     const availableAbove = options.subjectVoiceIndex;
     const availableBelow = (options.ensembleTotal - 1) - options.subjectVoiceIndex;
+    const pivotSelectOptions = useMemo(
+        () => resolvePivotSelectOptions(options.pivotMidi, subjectNotes),
+        [options.pivotMidi, subjectNotes]
+    );
 
     // Local string state for inline canon delay inputs (avoid snap-back on clear)
     const [canonMinStr, setCanonMinStr] = useState(String(options.canonDelayMinBeats ?? 1));
@@ -441,8 +446,7 @@ export default function StrettoSearchPanel({
                                 onChange={(e) => handleChange('pivotMidi', parseInt(e.target.value))}
                                 className="bg-gray-900 border border-gray-600 text-[10px] rounded px-1 py-0.5 text-gray-300 flex-grow"
                             >
-                                {Array.from({length: 12}).map((_, i) => {
-                                    const midi = 60 + i;
+                                {pivotSelectOptions.map((midi) => {
                                     return <option key={midi} value={String(midi)}>{getStrictPitchName(midi)}</option>
                                 })}
                             </select>

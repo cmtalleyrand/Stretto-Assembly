@@ -12,10 +12,10 @@ export interface CompatCell {
 export interface CompatMatrix {
     readonly dimensions: CompatMatrixDimensions;
     readonly cellCount: number;
-    flattenIndex(vi: number, vj: number, di: number, ti: number): number;
-    unflattenIndex(index: number): { vi: number; vj: number; di: number; ti: number };
-    set(vi: number, vj: number, di: number, ti: number, cell: CompatCell): void;
-    get(vi: number, vj: number, di: number, ti: number): CompatCell;
+    flattenIndex(vi: number, vj: number, d_idx: number, ti: number): number;
+    unflattenIndex(index: number): { vi: number; vj: number; d_idx: number; ti: number };
+    set(vi: number, vj: number, d_idx: number, ti: number, cell: CompatCell): void;
+    get(vi: number, vj: number, d_idx: number, ti: number): CompatCell;
 }
 
 export interface CompatMatrixOptions {
@@ -86,17 +86,17 @@ class DenseCompatMatrix implements CompatMatrix {
         this.packed = new Uint8Array(this.cellCount);
     }
 
-    public flattenIndex(vi: number, vj: number, di: number, ti: number): number {
+    public flattenIndex(vi: number, vj: number, d_idx: number, ti: number): number {
         if (DEV_MODE) {
             assertRange('vi', vi, this.dimensions.V);
             assertRange('vj', vj, this.dimensions.V);
-            assertRange('di', di, this.dimensions.D);
+            assertRange('d_idx', d_idx, this.dimensions.D);
             assertRange('ti', ti, this.dimensions.T);
         }
-        return (((vi * this.dimensions.V + vj) * this.dimensions.D + di) * this.dimensions.T + ti);
+        return (((vi * this.dimensions.V + vj) * this.dimensions.D + d_idx) * this.dimensions.T + ti);
     }
 
-    public unflattenIndex(index: number): { vi: number; vj: number; di: number; ti: number } {
+    public unflattenIndex(index: number): { vi: number; vj: number; d_idx: number; ti: number } {
         if (DEV_MODE) {
             assertRange('index', index, this.cellCount);
         }
@@ -105,25 +105,25 @@ class DenseCompatMatrix implements CompatMatrix {
         const ti = remainder % this.dimensions.T;
         remainder = (remainder - ti) / this.dimensions.T;
 
-        const di = remainder % this.dimensions.D;
-        remainder = (remainder - di) / this.dimensions.D;
+        const d_idx = remainder % this.dimensions.D;
+        remainder = (remainder - d_idx) / this.dimensions.D;
 
         const vj = remainder % this.dimensions.V;
         const vi = (remainder - vj) / this.dimensions.V;
 
-        return { vi, vj, di, ti };
+        return { vi, vj, d_idx, ti };
     }
 
-    public set(vi: number, vj: number, di: number, ti: number, cell: CompatCell): void {
+    public set(vi: number, vj: number, d_idx: number, ti: number, cell: CompatCell): void {
         if (DEV_MODE) {
             assertCell(cell);
         }
-        const index = this.flattenIndex(vi, vj, di, ti);
+        const index = this.flattenIndex(vi, vj, d_idx, ti);
         this.packed[index] = pack(cell);
     }
 
-    public get(vi: number, vj: number, di: number, ti: number): CompatCell {
-        const index = this.flattenIndex(vi, vj, di, ti);
+    public get(vi: number, vj: number, d_idx: number, ti: number): CompatCell {
+        const index = this.flattenIndex(vi, vj, d_idx, ti);
         return unpack(this.packed[index]);
     }
 }
@@ -140,17 +140,17 @@ class SparseCompatMatrixAdapter implements CompatMatrix {
         this.entries = new Map<number, number>();
     }
 
-    public flattenIndex(vi: number, vj: number, di: number, ti: number): number {
+    public flattenIndex(vi: number, vj: number, d_idx: number, ti: number): number {
         if (DEV_MODE) {
             assertRange('vi', vi, this.dimensions.V);
             assertRange('vj', vj, this.dimensions.V);
-            assertRange('di', di, this.dimensions.D);
+            assertRange('d_idx', d_idx, this.dimensions.D);
             assertRange('ti', ti, this.dimensions.T);
         }
-        return (((vi * this.dimensions.V + vj) * this.dimensions.D + di) * this.dimensions.T + ti);
+        return (((vi * this.dimensions.V + vj) * this.dimensions.D + d_idx) * this.dimensions.T + ti);
     }
 
-    public unflattenIndex(index: number): { vi: number; vj: number; di: number; ti: number } {
+    public unflattenIndex(index: number): { vi: number; vj: number; d_idx: number; ti: number } {
         if (DEV_MODE) {
             assertRange('index', index, this.cellCount);
         }
@@ -159,21 +159,21 @@ class SparseCompatMatrixAdapter implements CompatMatrix {
         const ti = remainder % this.dimensions.T;
         remainder = (remainder - ti) / this.dimensions.T;
 
-        const di = remainder % this.dimensions.D;
-        remainder = (remainder - di) / this.dimensions.D;
+        const d_idx = remainder % this.dimensions.D;
+        remainder = (remainder - d_idx) / this.dimensions.D;
 
         const vj = remainder % this.dimensions.V;
         const vi = (remainder - vj) / this.dimensions.V;
 
-        return { vi, vj, di, ti };
+        return { vi, vj, d_idx, ti };
     }
 
-    public set(vi: number, vj: number, di: number, ti: number, cell: CompatCell): void {
+    public set(vi: number, vj: number, d_idx: number, ti: number, cell: CompatCell): void {
         if (DEV_MODE) {
             assertCell(cell);
         }
 
-        const index = this.flattenIndex(vi, vj, di, ti);
+        const index = this.flattenIndex(vi, vj, d_idx, ti);
         const packed = pack(cell);
 
         if (packed === 0) {
@@ -184,8 +184,8 @@ class SparseCompatMatrixAdapter implements CompatMatrix {
         this.entries.set(index, packed);
     }
 
-    public get(vi: number, vj: number, di: number, ti: number): CompatCell {
-        const index = this.flattenIndex(vi, vj, di, ti);
+    public get(vi: number, vj: number, d_idx: number, ti: number): CompatCell {
+        const index = this.flattenIndex(vi, vj, d_idx, ti);
         const packed = this.entries.get(index) ?? 0;
         return unpack(packed);
     }

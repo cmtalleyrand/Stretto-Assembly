@@ -42,6 +42,56 @@ function getPitchFromDegree(octave: number, degree: number, root: number, interv
     return root + (octave + octaveShift) * 12 + semi;
 }
 
+function floorDiv(numerator: number, denominator: number): number {
+    return Math.floor(numerator / denominator);
+}
+
+function getChromaticSemitones(intervals: number[]): number[] {
+    const diatonicSet = new Set(intervals.map(v => ((v % 12) + 12) % 12));
+    const chromatic: number[] = [];
+    for (let semitone = 0; semitone < 12; semitone += 1) {
+        if (!diatonicSet.has(semitone)) chromatic.push(semitone);
+    }
+    return chromatic;
+}
+
+function getChromaticGlobalIndex(pitch: number, root: number, chromaticSemitones: number[]): number | null {
+    const rel = pitch - root;
+    const semitone = ((rel % 12) + 12) % 12;
+    const rank = chromaticSemitones.indexOf(semitone);
+    if (rank < 0) return null;
+    const octave = floorDiv(rel, 12);
+    return octave * chromaticSemitones.length + rank;
+}
+
+function getPitchFromChromaticGlobalIndex(globalIndex: number, root: number, chromaticSemitones: number[]): number {
+    const rankCount = chromaticSemitones.length;
+    const octave = floorDiv(globalIndex, rankCount);
+    const rank = ((globalIndex % rankCount) + rankCount) % rankCount;
+    return root + octave * 12 + chromaticSemitones[rank];
+}
+
+function getChromaticMirrorAxis(pivot: number, root: number, chromaticSemitones: number[]): number {
+    const rel = pivot - root;
+    const pivotSemitone = ((rel % 12) + 12) % 12;
+    const pivotOctave = floorDiv(rel, 12);
+    const exactRank = chromaticSemitones.indexOf(pivotSemitone);
+    if (exactRank >= 0) {
+        return pivotOctave * chromaticSemitones.length + exactRank;
+    }
+
+    const rankCount = chromaticSemitones.length;
+    const upperRank = chromaticSemitones.findIndex(semitone => semitone > pivotSemitone);
+    const normalizedUpperRank = upperRank >= 0 ? upperRank : 0;
+    const upperOctave = upperRank >= 0 ? pivotOctave : pivotOctave + 1;
+    const lowerRank = upperRank >= 0 ? upperRank - 1 : rankCount - 1;
+    const lowerOctave = upperRank >= 0 ? pivotOctave : pivotOctave;
+
+    const lowerGlobal = lowerOctave * rankCount + lowerRank;
+    const upperGlobal = upperOctave * rankCount + normalizedUpperRank;
+    return (lowerGlobal + upperGlobal) / 2;
+}
+
 /**
  * Calculates a strictly inverted pitch based on a pivot, root, and scale mode.
  * Used by both Generator and UI to ensure 1:1 consistency.
@@ -52,6 +102,14 @@ export function getInvertedPitch(pitch: number, pivot: number, scaleRoot: number
     }
 
     const intervals = SCALE_INTERVALS[scaleMode] || SCALE_INTERVALS['Major'];
+    const chromaticSemitones = getChromaticSemitones(intervals);
+
+    const chromaticPitchIndex = getChromaticGlobalIndex(pitch, scaleRoot, chromaticSemitones);
+    if (chromaticPitchIndex !== null) {
+        const chromaticMirrorAxis = getChromaticMirrorAxis(pivot, scaleRoot, chromaticSemitones);
+        const mirroredChromaticIndex = Math.round(2 * chromaticMirrorAxis - chromaticPitchIndex);
+        return getPitchFromChromaticGlobalIndex(mirroredChromaticIndex, scaleRoot, chromaticSemitones);
+    }
     
     // 1. Find where the Pivot sits in the scale
     const pivotInfo = getScaleDegree(pivot, scaleRoot, intervals);

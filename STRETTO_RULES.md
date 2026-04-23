@@ -6,7 +6,7 @@ This document defines the strict set of rules, constraints, and scoring mechanis
 ## ⚠ Critical Delay-Contraction Safeguards (Persistent Failure Prevention)
 These rules explicitly prevent chains where added entries fail to increase stretto compactness.
 
-Notation: $n$ is entry index, $d_n$ is delay between entries $(n-1)\rightarrow n$, $Sb$ is current entry subject length in beats, and $B$ is one beat.
+Notation: $n$ is the **absolute entry index** in the chain, $d_n$ is delay between entries $(n-1)\rightarrow n$, $Sb$ is current entry subject length in beats, and $B$ is one beat.
 
 1. **Half-length contraction trigger (OR form):** if $d_{n-1} \ge Sb/2$ **or** $d_n \ge Sb/2$, then $d_n < d_{n-1}$.
 2. **Expansion recoil trigger:** if $d_{n-1} > d_{n-2}$ and $d_{n-1} > Sb/3$, then $d_n < d_{n-2} - 0.5B$.
@@ -64,6 +64,11 @@ Voice indices are ordered from highest register to lowest (0 = soprano … `ense
 1.  **Re-entry:** Any voice becomes available for re-entry 1 beat (`ppq`) before its current occupant's final note ends.
 2.  **Post-hoc assignment:** Voice indices (`v_i`) are not tracked during BFS. After search, a CSP backtracker assigns voices to all entries in a completed chain, enforcing §B across all temporal pairs and §C re-entry. Chains for which no valid assignment exists are discarded.
 3.  **Active Transposition Uniqueness:** At the entry point of $e_i$, no other currently active entry may share the same transposition ($t_i \ne t_j$ for all $j < i$ where $e_j$ is still sounding at $e_i$'s start). Two entries at the same transposition produce identical pitch content, which defeats the purpose of imitative counterpoint.
+4.  **Voice variety (cooldown):** A voice that has previously appeared may not re-appear until at least $\max(0, N_v - 2)$ distinct other voices have each appeared at least once since its last use (where $N_v$ is the ensemble voice count). For a standard 4-voice ensemble this requires 2 intervening distinct voices. This is a pre-hoc search constraint enforced by the `voiceTranspositionAdmissibility` index.
+5.  **Voice obligation:** When every voice other than $v$ has appeared since $v$ was last used, $v$ becomes *obligated*: it must be the next voice assigned before any non-obligated voice may repeat. Only one voice can be obligated at a time. Enforced by the same pre-hoc index.
+6.  **Terminal coverage:** Every voice in the ensemble must appear at least once within the final $N_v$ entries of the chain (the terminal window starting at position $\max(0, L - N_v)$). Chains whose suffix voice assignments cannot cover all voices — given the remaining slots — are pruned during pre-hoc index construction.
+
+**Implementation note (C.4–C.6):** These three constraints are encoded in the `voiceTranspositionAdmissibilityIndex` (built once per search), which marks each $(i, v_\text{prev}, v_\text{curr})$ transition as admissible or not. The index is used during both Stage 5 DAG traversal (pruning transitions) and the greedy fallback voice assigner. The primary post-hoc CSP backtracker (`assignVoices`) enforces C.1–C.3 and §B independently.
 
 ### D. Optional Consonant Termination
 If `requireConsonantEnd` is enabled, dissonant endpoints invalidate the chain.

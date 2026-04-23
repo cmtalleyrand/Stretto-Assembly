@@ -304,7 +304,7 @@ export interface StrettoCandidate {
     intervalLabel: string;
     delayBeats: number;
     delayTicks: number;
-    /** Triplet only: absolute offset of e2 from e0 in beats (= d1 + d2) */
+    /** Triplet only: absolute offset of e2 from e0 in beats (= d_te_1 + d_te_2) */
     delayBeats2?: number;
     grade: StrettoGrade;
     errors: StrettoError[];
@@ -585,14 +585,15 @@ export interface StrettoChainResult {
     id: string;
     entries: StrettoChainOption[];
     warnings: string[];
-    score: number; 
+    score: number;
     scoreLog?: ScoreLog;
-    variations?: StrettoChainResult[]; 
-    detectedChords?: string[]; 
+    variations?: StrettoChainResult[];
+    detectedChords?: string[];
     dissonanceRatio?: number;
     nctRatio?: number;
     pairDissonanceScore?: number;
     isValid?: boolean;
+    maxDissonanceRunEvents?: number;
 }
 
 export interface StrettoSearchReport {
@@ -614,6 +615,7 @@ export interface StrettoSearchReport {
             scoringValidChainsFound: number;
             finalizationRejectedVoiceAssignment: number;
             finalizationRejectedScoringInvalid: number;
+            maxDissonanceRunEventsHistogram?: Record<string, number>;
         };
         coverage?: {
             nodeBudgetUsedPercent: number | null;
@@ -680,6 +682,8 @@ export interface StrettoSearchReport {
             transitionWindowLookups?: number;
             transitionsReturned?: number;
             candidateTransitionsEnumerated?: number;
+            voiceTransitionProbeCount?: number;
+            voiceTransitionProbeBaselineCount?: number;
             prunedByPrefixAdmissibility?: number;
         };
     };
