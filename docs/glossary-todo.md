@@ -2,9 +2,8 @@
 
 This file tracks deferred tasks requested in review. These items are intentionally logged and not actioned in the current change set.
 
-## TODO-1: Remove dormant `NodeLimit` path
-- Request: "delete nodelimit and all related code".
-- Scope candidates: type unions, status presentation branches, tests, and any compatibility layers.
+## TODO-1: Remove dormant node-budget stop path — **Completed (2026-04-23)**
+- Result: removed from type unions, status presentation branches, tests, and glossary references.
 
 ## TODO-2: Tidy identical/overlapping definitions
 - Request: consolidate duplicated or near-duplicated glossary definitions and telemetry wording.
@@ -14,11 +13,11 @@ This file tracks deferred tasks requested in review. These items are intentional
 - Request: never use `t` to denote delay; use beat/quarter units for delay and semitone units for transposition.
 - Required policy:
   - Delay variables/symbols should use `d` and units (`b` or `q`).
-  - Transposition variables/symbols should use `t` and units (`st`).
+  - Transposition interval variables/symbols should use `tint` and units (`st`).
 
 ## TODO-4: Adopt entry-index notation standard
 - Requested notation for entry `e_i`:
-  - `t_i`: transposition relative to first entry.
+  - `tint_i`: transposition relative to first entry.
   - `d_i`: onset distance relative to previous entry.
   - `Dis_i`: distance from first entry (not "delay").
   - `mod_i`: modification status (`normal`, `inverted`, `truncated`).

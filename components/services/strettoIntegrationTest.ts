@@ -124,7 +124,7 @@ async function assertAdmissibilityPruningParity(
   const report = await searchStrettoChains(subject, options, ppq);
   await assertAdmissibilityPruningParity(subject, options, 'fixture-A');
   assert.ok(
-    ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(report.stats.stopReason),
+    ['Success', 'Exhausted', 'Timeout', 'MaxResults'].includes(report.stats.stopReason),
     'fixture-A: search must terminate with a valid stop reason'
   );
   for (const result of report.results) {
@@ -251,7 +251,7 @@ async function assertAdmissibilityPruningParity(
   const report = await searchStrettoChains(subject, options, ppq);
   await assertAdmissibilityPruningParity(subject, options, 'fixture-D');
   assert.ok(
-    ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(report.stats.stopReason),
+    ['Success', 'Exhausted', 'Timeout', 'MaxResults'].includes(report.stats.stopReason),
     'fixture-D: search must terminate with a valid stop reason'
   );
   for (const result of report.results) {
@@ -364,7 +364,7 @@ console.log('stretto integration tests passed');
   };
   const report = await searchStrettoChains(subject, options, ppq);
   assert.ok(
-    ['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(report.stats.stopReason),
+    ['Success', 'Exhausted', 'Timeout', 'MaxResults'].includes(report.stats.stopReason),
     'fixture-F: canon mode must terminate with a valid stop reason'
   );
   for (const result of report.results) {

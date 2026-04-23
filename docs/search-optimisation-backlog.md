@@ -10,7 +10,7 @@ Tasks arising from admissibility benchmarking (chain=8, wtc1_f08_ebmin, 45s run)
 - Implemented module: `components/services/stretto-opt/voiceTranspositionAdmissibility.ts`.
 - Implemented builder: `buildVoiceTranspositionAdmissibilityIndex(...)`.
 - Implemented dense bitset-backed O(1) index key:
-  `(i, voice_{i-1}, voice_i, t_{i-1}, t_i)`.
+  `(i, voice_{i-1}, voice_i, tint_{i-1}, tint_i)`.
 - Integrated index probes in:
   - triplet enumeration (both `adjacentValidPairsList` traversal sites),
   - DAG expansion candidate generation (`candidateTransitions` construction paths).
@@ -19,8 +19,8 @@ Tasks arising from admissibility benchmarking (chain=8, wtc1_f08_ebmin, 45s run)
 
 **What:** Build a complementary admissibility model that is delay-agnostic but prunes
 on voice assignment and transposition constraints. Enumerate structurally valid quadruples
-`(voice_{i-1}, voice_i, t_{i-1}, t_i)` for each **absolute entry index** `i ∈ {1, …, targetChainLength}`.
-Here `t_j` is the absolute transposition attached to entry `j`, and `i` indexes the current edge
+`(voice_{i-1}, voice_i, tint_{i-1}, tint_i)` for each **absolute entry index** `i ∈ {1, …, targetChainLength}`.
+Here `tint_j` is the absolute transposition attached to entry `j`, and `i` indexes the current edge
 between entries `(i-1, i)`.
 
 **State definition (finite-state machine):**
@@ -47,7 +47,7 @@ between entries `(i-1, i)`.
   duplicates cheaply at precompute time rather than at scoring/deduplication time.
 - **Harmonic-equivalence class (active-window = 4):** two compounds are equivalent when every
   active 4-entry window induces the same ordered overlap topology and the same-sign relative
-  transposition compounds `(t_{k+1}-t_k, t_{k+2}-t_{k+1}, t_{k+3}-t_{k+2})` match classwise.
+  transposition compounds `(tint_{k+1}-tint_k, tint_{k+2}-tint_{k+1}, tint_{k+3}-tint_{k+2})` match classwise.
   Under this relation, pairwise dissonance/parallel structures are invariant up to global
   absolute transposition shift.
 - With `span` information (which voice pairs overlap at what beats), the model can also
@@ -58,7 +58,7 @@ between entries `(i-1, i)`.
 **Implemented approach:**
 - Implemented `buildVoiceTranspositionAdmissibilityIndex` (delay-agnostic).
 - Enumerates reachable FSM states and emits a dense bitset index keyed by
-  `(i, voice_{i-1}, voice_i, t_{i-1}, t_i)` with O(1) membership checks.
+  `(i, voice_{i-1}, voice_i, tint_{i-1}, tint_i)` with O(1) membership checks.
 - Uses the index to reject infeasible voice/transposition edges before pairwise harmonic scans
   and before DAG candidate expansion.
 

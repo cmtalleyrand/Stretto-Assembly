@@ -25,8 +25,8 @@ interface TripletKeyParts {
     variantC: number;
     delayAB: number;
     delayBC: number;
-    transpositionAB: number;
-    transpositionBC: number;
+    tintAB: number;
+    tintBC: number;
 }
 
 interface PairwiseCompatibilityRecord {
@@ -91,7 +91,7 @@ type TransitionByVariantLeft = Map<number, TransitionByVariantRight>;
 interface NextTransition {
     delayTicks: number;
     nextVariantIndex: number;
-    transpositionDelta: number;
+    tintDelta: number;
     // Present for window-indexed transitions used during deep expansion.
     pairRecord?: PairwiseCompatibilityRecord;
     isRestrictedInterval?: boolean;
@@ -127,7 +127,7 @@ interface PairwiseTripletPrecomputeIndex {
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
-        transpositionDelta: number,
+        tintDelta: number,
         transition: NextTransition
     ): void;
     getWindowTransitions(
@@ -135,7 +135,7 @@ interface PairwiseTripletPrecomputeIndex {
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
-        transpositionDelta: number
+        tintDelta: number
     ): TransitionBucketsByDelay | undefined;
     addTripletShapeKey(key: string): void;
     hasTripletShapeKey(key: string): boolean;
@@ -192,15 +192,15 @@ export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targe
 }
 
 export function toCanonicalTripletKey(parts: TripletKeyParts): string {
-    return `${parts.variantA}|${parts.variantB}|${parts.variantC}|${parts.delayAB}|${parts.delayBC}|${parts.transpositionAB}|${parts.transpositionBC}`;
+    return `${parts.variantA}|${parts.variantB}|${parts.variantC}|${parts.delayAB}|${parts.delayBC}|${parts.tintAB}|${parts.tintBC}`;
 }
 
 export function toBoundaryPairKey(left: StrettoChainOption, right: StrettoChainOption, ppq: number): string {
     const leftStart = Math.round(left.startBeat * ppq);
     const rightStart = Math.round(right.startBeat * ppq);
     const delayTicks = rightStart - leftStart;
-    const transpositionDelta = right.transposition - left.transposition;
-    return `${left.voiceIndex}:${left.type}->${right.voiceIndex}:${right.type}|d${delayTicks}|t${transpositionDelta}`;
+    const tintDelta = right.transposition - left.transposition;
+    return `${left.voiceIndex}:${left.type}->${right.voiceIndex}:${right.type}|d${delayTicks}|tint${tintDelta}`;
 }
 
 export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: number): string {
@@ -231,7 +231,7 @@ function pairScore(record: PairwiseCompatibilityRecord): number {
     return Math.round(record.dissonanceRatio * 1000);
 }
 
-function transpositionIntervalClass(transposition: number): number {
+function tintIntervalClass(transposition: number): number {
     return ((transposition % 12) + 12) % 12;
 }
 
@@ -277,7 +277,7 @@ function buildDiversifiedPriorityOrder(
     const seenIntervalClassCounts = new Map<number, number>();
     return sorted
         .map((pair, sortedIndex) => {
-            const intervalClass = transpositionIntervalClass(pair.t);
+            const intervalClass = tintIntervalClass(pair.t);
             const delayCount = seenDelayCounts.get(pair.d) ?? 0;
             const intervalCount = seenIntervalClassCounts.get(intervalClass) ?? 0;
             seenDelayCounts.set(pair.d, delayCount + 1);
@@ -400,7 +400,7 @@ interface StructuralState {
     prevEntryLengthTicks: number;
     prevDelayTicks: number | null;
     prevPrevDelayTicks: number | null;
-    prevTransposition: number;
+    prevTint: number;
     nInv: number;
     nTrunc: number;
 }
@@ -518,7 +518,7 @@ function runStructuralScanGuard<T>(
 async function buildEntryStateAdmissibilityModel(
     variants: SubjectVariant[],
     allowedAbsoluteTranspositions: number[],
-    relativeTranspositionDeltas: number[],
+    relativeTintDeltas: number[],
     delayStep: number,
     targetChainLength: number,
     options: StrettoSearchOptions
@@ -551,7 +551,7 @@ async function buildEntryStateAdmissibilityModel(
         prevEntryLengthTicks: variants[0].lengthTicks,
         prevDelayTicks: null,
         prevPrevDelayTicks: null,
-        prevTransposition: 0,
+        prevTint: 0,
         nInv: 0,
         nTrunc: 0
     }];
@@ -606,10 +606,10 @@ async function buildEntryStateAdmissibilityModel(
                 if (!isCanonDelaySearch && (prevDelayTicks >= halfSubjectTicks || delayTicks >= halfSubjectTicks) && delayTicks >= prevDelayTicks) continue;
             }
 
-            for (const relTransposition of relativeTranspositionDeltas) {
-                if (relTransposition === 0) continue;
-                if (Math.abs(relTransposition) < 5) continue;
-                const nextPrevTransposition = state.prevTransposition + relTransposition;
+            for (const relTint of relativeTintDeltas) {
+                if (relTint === 0) continue;
+                if (Math.abs(relTint) < 5) continue;
+                const nextPrevTransposition = state.prevTint + relTint;
                 if (!allowedAbsoluteTranspositionSet.has(nextPrevTransposition)) continue;
 
                 for (let nextVariantIndex = 0; nextVariantIndex < variants.length; nextVariantIndex++) {
@@ -625,7 +625,7 @@ async function buildEntryStateAdmissibilityModel(
                     if (isInv && !checkQuota(options.inversionMode, state.nInv)) continue;
                     if (isTrunc && !checkQuota(options.truncationMode, state.nTrunc)) continue;
 
-                    addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks, relTransposition);
+                    addAdmissiblePair(state.prevVariantIndex, nextVariantIndex, delayTicks, relTint);
 
                     const nextInv = state.nInv + (isInv ? 1 : 0);
                     const nextTrunc = state.nTrunc + (isTrunc ? 1 : 0);
@@ -647,7 +647,7 @@ async function buildEntryStateAdmissibilityModel(
                         prevEntryLengthTicks: nextVariant.lengthTicks,
                         prevDelayTicks: delayTicks,
                         prevPrevDelayTicks: state.prevDelayTicks,
-                        prevTransposition: nextPrevTransposition,
+                        prevTint: nextPrevTransposition,
                         nInv: nextInv,
                         nTrunc: nextTrunc
                     });
@@ -1094,14 +1094,14 @@ export function checkCounterpointStructureWithBassRole(
 export function isVoicePairAllowedForTransposition(
     voiceA: number,
     voiceB: number,
-    transpositionAB: number,
+    tintAB: number,
     ensembleTotal: number,
     disallowLowestPair: boolean
 ): boolean {
     const highVoiceIdx = Math.min(voiceA, voiceB);
     const lowVoiceIdx = Math.max(voiceA, voiceB);
-    const highTrans = voiceA === highVoiceIdx ? 0 : transpositionAB;
-    const lowTrans = voiceA === lowVoiceIdx ? 0 : transpositionAB;
+    const highTrans = voiceA === highVoiceIdx ? 0 : tintAB;
+    const lowTrans = voiceA === lowVoiceIdx ? 0 : tintAB;
     const dist = lowVoiceIdx - highVoiceIdx;
     const bassIdx = ensembleTotal - 1;
     const altoIdx = bassIdx - 2;
@@ -1126,7 +1126,7 @@ export function shouldPruneLowestVoicePair(bassStrictCompatible: boolean): boole
 }
 
 export function buildAllowedVoicePairs(
-    transpositionAB: number,
+    tintAB: number,
     ensembleTotal: number,
     disallowLowestPair: boolean
 ): Set<string> {
@@ -1134,7 +1134,7 @@ export function buildAllowedVoicePairs(
     for (let voiceA = 0; voiceA < ensembleTotal; voiceA++) {
         for (let voiceB = 0; voiceB < ensembleTotal; voiceB++) {
             if (voiceA === voiceB) continue;
-            if (isVoicePairAllowedForTransposition(voiceA, voiceB, transpositionAB, ensembleTotal, disallowLowestPair)) {
+            if (isVoicePairAllowedForTransposition(voiceA, voiceB, tintAB, ensembleTotal, disallowLowestPair)) {
                 allowed.add(`${voiceA}->${voiceB}`);
             }
         }
@@ -1143,7 +1143,7 @@ export function buildAllowedVoicePairs(
 }
 
 function buildAllowedVoiceMaskRows(
-    transpositionAB: number,
+    tintAB: number,
     ensembleTotal: number,
     disallowLowestPair: boolean
 ): bigint[] {
@@ -1152,7 +1152,7 @@ function buildAllowedVoiceMaskRows(
         let rowMask = 0n;
         for (let voiceB = 0; voiceB < ensembleTotal; voiceB++) {
             if (voiceA === voiceB) continue;
-            if (isVoicePairAllowedForTransposition(voiceA, voiceB, transpositionAB, ensembleTotal, disallowLowestPair)) {
+            if (isVoicePairAllowedForTransposition(voiceA, voiceB, tintAB, ensembleTotal, disallowLowestPair)) {
                 rowMask |= (1n << BigInt(voiceB));
             }
         }
@@ -1468,7 +1468,7 @@ class MapPrecomputeIndex implements PairwiseTripletPrecomputeIndex {
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
-        transpositionDelta: number,
+        tintDelta: number,
         transition: NextTransition
     ): void {
         let byVariantRight = this.transitionsByWindow.get(variantLeft);
@@ -1491,10 +1491,10 @@ class MapPrecomputeIndex implements PairwiseTripletPrecomputeIndex {
             byTranspositionDelta = new Map();
             byDelayAB.set(delayABTicks, byTranspositionDelta);
         }
-        let transitionsAtDelay = byTranspositionDelta.get(transpositionDelta);
+        let transitionsAtDelay = byTranspositionDelta.get(tintDelta);
         if (!transitionsAtDelay) {
             transitionsAtDelay = new Map();
-            byTranspositionDelta.set(transpositionDelta, transitionsAtDelay);
+            byTranspositionDelta.set(tintDelta, transitionsAtDelay);
         }
         const bucket = transitionsAtDelay.get(transition.delayTicks);
         if (bucket) bucket.push(transition);
@@ -1506,9 +1506,9 @@ class MapPrecomputeIndex implements PairwiseTripletPrecomputeIndex {
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
-        transpositionDelta: number
+        tintDelta: number
     ): TransitionBucketsByDelay | undefined {
-        return this.transitionsByWindow.get(variantLeft)?.get(variantRight)?.get(delayATicks)?.get(delayABTicks)?.get(transpositionDelta);
+        return this.transitionsByWindow.get(variantLeft)?.get(variantRight)?.get(delayATicks)?.get(delayABTicks)?.get(tintDelta);
     }
 
     addTripletShapeKey(key: string): void {
@@ -1554,8 +1554,8 @@ class DensePrecomputeIndex implements PairwiseTripletPrecomputeIndex {
         return ((((vA * this.variantCount) + vB) * this.delayCount) + delayIdx) * this.transpositionCount + transpositionIdx;
     }
 
-    private toWindowKey(variantLeft: number, variantRight: number, delayATicks: number, delayABTicks: number, transpositionDelta: number): string {
-        return `${variantLeft}|${variantRight}|${delayATicks}|${delayABTicks}|${transpositionDelta}`;
+    private toWindowKey(variantLeft: number, variantRight: number, delayATicks: number, delayABTicks: number, tintDelta: number): string {
+        return `${variantLeft}|${variantRight}|${delayATicks}|${delayABTicks}|${tintDelta}`;
     }
 
     setPairRecord(vA: number, vB: number, d: number, t: number, record: PairwiseCompatibilityRecord): void {
@@ -1594,10 +1594,10 @@ class DensePrecomputeIndex implements PairwiseTripletPrecomputeIndex {
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
-        transpositionDelta: number,
+        tintDelta: number,
         transition: NextTransition
     ): void {
-        const key = this.toWindowKey(variantLeft, variantRight, delayATicks, delayABTicks, transpositionDelta);
+        const key = this.toWindowKey(variantLeft, variantRight, delayATicks, delayABTicks, tintDelta);
         let transitionBuckets = this.transitionsByWindow.get(key);
         if (!transitionBuckets) {
             transitionBuckets = new Map();
@@ -1613,9 +1613,9 @@ class DensePrecomputeIndex implements PairwiseTripletPrecomputeIndex {
         variantRight: number,
         delayATicks: number,
         delayABTicks: number,
-        transpositionDelta: number
+        tintDelta: number
     ): TransitionBucketsByDelay | undefined {
-        return this.transitionsByWindow.get(this.toWindowKey(variantLeft, variantRight, delayATicks, delayABTicks, transpositionDelta));
+        return this.transitionsByWindow.get(this.toWindowKey(variantLeft, variantRight, delayATicks, delayABTicks, tintDelta));
     }
 
     addTripletShapeKey(key: string): void {
@@ -1889,7 +1889,7 @@ export async function searchStrettoChains(
     if (options.thirdSixthMode !== 'None') {
         INTERVALS.THIRD_SIXTH_TRANSPOSITIONS.forEach(t => transpositions.push(t));
     }
-    const absoluteTranspositionToIndex = new Map(transpositions.map((t, idx) => [t, idx]));
+    const absoluteTintToIndex = new Map(transpositions.map((t, idx) => [t, idx]));
     const voiceTranspositionAdmissibilityIndex = buildVoiceTranspositionAdmissibilityIndex({
         targetChainLength: options.targetChainLength,
         voiceCount: options.ensembleTotal,
@@ -1936,12 +1936,12 @@ export async function searchStrettoChains(
         )
     );
     const allowedTranspositions = new Set(transpositions);
-    const relativeTranspositionDeltas = Array.from(new Set(
+    const relativeTintDeltas = Array.from(new Set(
         transpositions.flatMap((left) => transpositions.map((right) => right - left))
     ));
     // Precomputed rule table: O(1) typed-array lookups replace repeated inline interval
     // class tests inside the pairwise loop (isRestricted, isFree, adjacentSeparation).
-    const transpositionRuleTable = buildTranspositionRuleTables(relativeTranspositionDeltas);
+    const transpositionRuleTable = buildTranspositionRuleTables(relativeTintDeltas);
     const precomputeBackend = resolvePrecomputeBackend(internalConfig);
 
 
@@ -2027,7 +2027,7 @@ export async function searchStrettoChains(
     };
 
     const precomputeIndex: PairwiseTripletPrecomputeIndex = precomputeBackend === 'dense'
-        ? new DensePrecomputeIndex(variants.length, validPairwiseDelays, relativeTranspositionDeltas)
+        ? new DensePrecomputeIndex(variants.length, validPairwiseDelays, relativeTintDeltas)
         : new MapPrecomputeIndex();
 
     const collectSpans = options.collectDiagnosticSpans === true;
@@ -2048,7 +2048,7 @@ export async function searchStrettoChains(
             : await buildEntryStateAdmissibilityModel(
                 variants,
                 transpositions,
-                relativeTranspositionDeltas,
+                relativeTintDeltas,
                 delayStep,
                 options.targetChainLength,
                 options
@@ -2071,14 +2071,14 @@ export async function searchStrettoChains(
             return interior;
         })()
         : null;
-    const transpToIdx = new Map(relativeTranspositionDeltas.map((t, i) => [t, i]));
+    const transpToIdx = new Map(relativeTintDeltas.map((t, i) => [t, i]));
     const adjDelayToIdx = (d: number) => Math.round(d / delayStep) - 1;
     const admissibilityMatrix = admissiblePairKeys
         ? (() => {
             const m = createCompatMatrix({
                 V: variants.length,
                 D: validAdjacentDelays.length,
-                T: relativeTranspositionDeltas.length
+                T: relativeTintDeltas.length
             });
             for (const [vA, byB] of admissiblePairKeys) {
                 for (const [vB, byD] of byB) {
@@ -2087,7 +2087,7 @@ export async function searchStrettoChains(
                         if (d_idx < 0 || d_idx >= validAdjacentDelays.length) continue;
                         if (admissibilityMode === 'delay-variant-only') {
                             // Mark ALL transpositions admissible for this (vA, vB, d)
-                            for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
+                            for (let tIdx = 0; tIdx < relativeTintDeltas.length; tIdx++) {
                                 m.set(vA, vB, d_idx, tIdx, { status: 1, constraintClass: 0 });
                             }
                         } else {
@@ -2112,7 +2112,7 @@ export async function searchStrettoChains(
                 const d = validPairwiseDelays[dIdx];
                 if (d >= vA.lengthTicks) break;
                 const isAdjDelay = dIdx < validAdjacentDelays.length;
-                for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
+                for (let tIdx = 0; tIdx < relativeTintDeltas.length; tIdx++) {
                     if (admissibilityMatrix && isAdjDelay
                         && admissibilityMatrix.get(iA, iB, dIdx, tIdx).status === 0) {
                         continue;
@@ -2143,8 +2143,8 @@ export async function searchStrettoChains(
                 if (d >= maxDelayForVA) break; // No overlap possible beyond variant A's length
                 // Adjacent delays: dIdx maps directly to the compat matrix delay index.
                 const isAdjDelay = dIdx < validAdjacentDelays.length;
-                for (let tIdx = 0; tIdx < relativeTranspositionDeltas.length; tIdx++) {
-                    const t = relativeTranspositionDeltas[tIdx];
+                for (let tIdx = 0; tIdx < relativeTintDeltas.length; tIdx++) {
+                    const t = relativeTintDeltas[tIdx];
                     // Admissibility model only covers adjacent delays (≤ 2/3 Sb).
                     // Extended delays (> 2/3 Sb) are for long-range lookups only — precompute unconditionally.
                     // Matrix byte lookup replaces 4-level Map chain for hot-path filtering.
@@ -2247,7 +2247,7 @@ export async function searchStrettoChains(
 
                     // Rule table lookups replace inline interval class tests.
                     // tIdx aligns with the rule table index because both use the same
-                    // deduplicated relativeTranspositionDeltas as their source array.
+                    // deduplicated relativeTintDeltas as their source array.
                     const tRule = tIdx as RuleTranspositionIndex;
                     const isRestrictedInterval = transpositionRuleTable.isRestrictedAt(tRule);
                     const isFreeInterval = transpositionRuleTable.isFreeAt(tRule);
@@ -2383,14 +2383,14 @@ export async function searchStrettoChains(
     const validTripletDelayAs = [0, ...validAdjacentDelays];
     const maxTripletTransitionAbsIndex = Math.max(1, options.targetChainLength - 1);
     const tripletVoiceContextReachability = new Map<string, { start: boolean; interior: boolean }>();
-    for (const transpositionAB of relativeTranspositionDeltas) {
-        for (const transpositionBC of relativeTranspositionDeltas) {
+    for (const tintAB of relativeTintDeltas) {
+        for (const tintBC of relativeTintDeltas) {
             let start = false;
             let interior = false;
-            for (const transpositionBase of transpositions) {
-                const tPrevIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB);
+            for (const tintBase of transpositions) {
+                const tPrevIdx = absoluteTintToIndex.get(tintBase + tintAB);
                 if (tPrevIdx === undefined) continue;
-                const tCurrIdx = absoluteTranspositionToIndex.get(transpositionBase + transpositionAB + transpositionBC);
+                const tCurrIdx = absoluteTintToIndex.get(tintBase + tintAB + tintBC);
                 if (tCurrIdx === undefined) continue;
                 if (!start && maxTripletTransitionAbsIndex >= 2 && startEdgeReachable[tPrevIdx][tCurrIdx]) {
                     start = true;
@@ -2403,7 +2403,7 @@ export async function searchStrettoChains(
                 if (start && interior && maxTripletTransitionAbsIndex <= 3) break;
             }
             tripletVoiceContextReachability.set(
-                `${transpositionAB}|${transpositionBC}`,
+                `${tintAB}|${tintBC}`,
                 { start, interior }
             );
         }
@@ -2413,12 +2413,12 @@ export async function searchStrettoChains(
     // ensembleTotal entries must cover all voices) while avoiding false negatives from
     // variant indices being mistakenly used as voice labels.
     const getTripletVoiceTranspositionContext = (
-        transpositionAB: number,
-        transpositionBC: number,
+        tintAB: number,
+        tintBC: number,
         startReachable: boolean,
         interiorReachable: boolean
     ): { start: boolean; interior: boolean } | null => {
-        const ctx = tripletVoiceContextReachability.get(`${transpositionAB}|${transpositionBC}`);
+        const ctx = tripletVoiceContextReachability.get(`${tintAB}|${tintBC}`);
         if (!ctx) return null;
         return {
             start: startReachable && ctx.start,
@@ -2642,7 +2642,7 @@ export async function searchStrettoChains(
                 const nextTransition: NextTransition = {
                     nextVariantIndex: vC,
                     delayTicks: d_te_2,
-                    transpositionDelta: p2.t,
+                    tintDelta: p2.t,
                     pairRecord: pairBC,
                     isRestrictedInterval: pairBC.isRestrictedInterval,
                     isFreeInterval: pairBC.isFreeInterval
@@ -2847,8 +2847,8 @@ export async function searchStrettoChains(
                     const posStart = Math.round(chain[pos].startBeat * ppq);
                     const [eIdx, lIdx] = kStart <= posStart ? [k, pos] : [pos, k];
                     const relDelay = Math.round(chain[lIdx].startBeat * ppq) - Math.round(chain[eIdx].startBeat * ppq);
-                    const relTrans = chain[lIdx].transposition - chain[eIdx].transposition;
-                    const rec = precomputeIndex.getPairRecord(vIndices[eIdx], vIndices[lIdx], relDelay, relTrans);
+                    const relTint = chain[lIdx].transposition - chain[eIdx].transposition;
+                    const rec = precomputeIndex.getPairRecord(vIndices[eIdx], vIndices[lIdx], relDelay, relTint);
                     if (rec?.hasFourth) {
                         const eV = kStart <= posStart ? voices[k] : v;
                         const lV = kStart <= posStart ? v : voices[k];
@@ -3032,14 +3032,14 @@ export async function searchStrettoChains(
                 ? Math.round(chain[depth - 2].startBeat * ppq) - Math.round(chain[depth - 3].startBeat * ppq)
                 : 0;
             const windowDelayTicks = Math.round(chain[depth - 1].startBeat * ppq) - Math.round(chain[depth - 2].startBeat * ppq);
-            const windowTranspositionDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
+            const windowTintDelta = chain[depth - 1].transposition - chain[depth - 2].transposition;
             stageStats.transitionWindowLookups++;
             const windowMap = precomputeIndex.getWindowTransitions(
                 variantIndices[depth - 2],
                 variantIndices[depth - 1],
                 windowDelayA,
                 windowDelayTicks,
-                windowTranspositionDelta
+                windowTintDelta
             );
             if (windowMap) {
                 stageStats.transitionsReturned += windowMap.size;
@@ -3077,7 +3077,7 @@ export async function searchStrettoChains(
             const absStartTicks = Math.round(prevEntry.startBeat * ppq) + delayTicks;
             const absStartBeat = absStartTicks / ppq;
 
-            const prevTransposition = chain[chain.length - 1].transposition;
+            const prevTint = chain[chain.length - 1].transposition;
             const candidateTransitions: { varIdx: number; t: number; immPair: PairwiseCompatibilityRecord; isRestricted: boolean; isFree: boolean }[] = [];
 
             if (depth >= 2) {
@@ -3086,14 +3086,14 @@ export async function searchStrettoChains(
                     continue;
                 }
                 for (const transition of indexedTransitions) {
-                    const t = prevTransposition + transition.transpositionDelta;
-                    if (t === prevTransposition) continue;
+                    const t = prevTint + transition.tintDelta;
+                    if (t === prevTint) continue;
                     // Keep absolute entry transpositions in the configured admissible set.
                     // Without this guard, summing adjacent legal deltas can drift to values
                     // (e.g. 14) outside the historical transposition vocabulary.
                     if (!allowedTranspositions.has(t)) continue;
-                    const tPrevIdx = absoluteTranspositionToIndex.get(prevTransposition);
-                    const tCurrIdx = absoluteTranspositionToIndex.get(t);
+                    const tPrevIdx = absoluteTintToIndex.get(prevTint);
+                    const tCurrIdx = absoluteTintToIndex.get(t);
                     if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
                     if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
                     // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
@@ -3111,12 +3111,12 @@ export async function searchStrettoChains(
                 const fresh: number[] = [];
                 const deferred: number[] = [];
                 for (const t of transpositions) {
-                    const tClass = ((t - prevTransposition) % 12 + 12) % 12;
+                    const tClass = ((t - prevTint) % 12 + 12) % 12;
                     if (seenClasses.has(tClass)) {
                         deferred.push(t);
                         continue;
                     }
-                    if (t === prevTransposition) {
+                    if (t === prevTint) {
                         fresh.push(t);
                         continue;
                     }
@@ -3125,7 +3125,7 @@ export async function searchStrettoChains(
                 }
                 const orderedTranspositions = [...fresh, ...deferred];
                 for (const t of orderedTranspositions) {
-                    if (t === prevTransposition) continue;
+                    if (t === prevTint) continue;
                     if (!allowedTranspositions.has(t)) continue;
                     for (let varIdx = 0; varIdx < variants.length; varIdx++) {
                         // A.9: e1 must not be inverted
@@ -3133,12 +3133,12 @@ export async function searchStrettoChains(
                         // A.10: no truncated entries at delay >= 0.5*Sb (disabled in canon-delay mode)
                         if (!isCanonDelaySearch && delayTicks >= subjectLengthTicks / 2 && variants[varIdx].truncationBeats > 0) continue;
                         const immPrevVarIdx = variantIndices[depth - 1];
-                        const immRelTrans = t - chain[depth - 1].transposition;
-                        const immPair = precomputeIndex.getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTrans);
+                        const immRelTint = t - chain[depth - 1].transposition;
+                        const immPair = precomputeIndex.getPairRecord(immPrevVarIdx, varIdx, delayTicks, immRelTint);
                         if (!immPair) continue;
                         if (!immPair.meetsAdjacentTranspositionSeparation) continue;
-                        const tPrevIdx = absoluteTranspositionToIndex.get(chain[depth - 1].transposition);
-                        const tCurrIdx = absoluteTranspositionToIndex.get(t);
+                        const tPrevIdx = absoluteTintToIndex.get(chain[depth - 1].transposition);
+                        const tCurrIdx = absoluteTintToIndex.get(t);
                         if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
                         if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
                         stageStats.candidateTransitionsEnumerated++;
@@ -3173,16 +3173,16 @@ export async function searchStrettoChains(
 
                     // C.3: No duplicate transpositions among active entries at this entry point.
                     // An entry is "active" if its notes are still sounding when the new entry begins.
-                    let transpositionDuplicate = false;
+                    let tintDuplicate = false;
                     for (let k = chain.length - 1; k >= 0; k--) {
                         const kEntry = chain[k];
                         const kStartTicks = Math.round(kEntry.startBeat * ppq);
                         if (kStartTicks + subjectLengthTicks <= absStartTicks) break;
                         const kEndTicks = kStartTicks + variants[variantIndices[k]].lengthTicks;
                         if (absStartTicks >= kEndTicks) continue;
-                        if (kEntry.transposition === t) { transpositionDuplicate = true; break; }
+                        if (kEntry.transposition === t) { tintDuplicate = true; break; }
                     }
-                    if (transpositionDuplicate) continue;
+                    if (tintDuplicate) continue;
 
                     // Collect overlapping pairwise records for this candidate.
                     // Iterate backward: entries are chronologically ordered, so once an
@@ -3199,8 +3199,8 @@ export async function searchStrettoChains(
                         if (absStartTicks >= prevEndTicks) continue;
 
                         const relDelay = absStartTicks - prevStartTicks;
-                        const relTrans = t - prevE.transposition;
-                        const pairRecord = precomputeIndex.getPairRecord(prevVarIdx, varIdx, relDelay, relTrans);
+                        const relTint = t - prevE.transposition;
+                        const pairRecord = precomputeIndex.getPairRecord(prevVarIdx, varIdx, relDelay, relTint);
                         if (!pairRecord) {
                             harmonicFail = true;
                             break;
@@ -3521,7 +3521,7 @@ export async function searchStrettoChains(
                 const prevTrans = state.transpositions[depth - 1];
 
                 for (const transition of indexedTransitions) {
-                    const t = prevTrans + transition.transpositionDelta;
+                    const t = prevTrans + transition.tintDelta;
                     if (t === prevTrans) continue;
                     if (!allowedTranspositions.has(t)) continue;
                     // A.7, A.8, A.10, A.2 within-triplet: guaranteed by triplet precomp
@@ -3545,16 +3545,16 @@ export async function searchStrettoChains(
                     if ((allowedVoicesForTrans.get(t)?.length ?? 0) === 0) continue;
 
                     // C.3: No duplicate transpositions among active entries
-                    let transpositionDuplicate = false;
+                    let tintDuplicate = false;
                     for (let k = depth - 1; k >= 0; k--) {
                         const kEntry = state.chain[k];
                         const kStartTicks = Math.round(kEntry.startBeat * ppq);
                         if (kStartTicks + subjectLengthTicks <= absStartTicks) break;
                         const kEndTicks = kStartTicks + variants[state.variantIndices[k]].lengthTicks;
                         if (absStartTicks >= kEndTicks) continue;
-                        if (kEntry.transposition === t) { transpositionDuplicate = true; break; }
+                        if (kEntry.transposition === t) { tintDuplicate = true; break; }
                     }
-                    if (transpositionDuplicate) continue;
+                    if (tintDuplicate) continue;
 
                     // Long-range pairwise checks: verify all overlapping pairs not covered by triplet windows
                     let harmonicFail = false;
@@ -3574,8 +3574,8 @@ export async function searchStrettoChains(
                         if (absStartTicks >= kEnd) continue;
 
                         const relDelay = absStartTicks - kStart;
-                        const relTrans = t - kEntry.transposition;
-                        const pr = precomputeIndex.getPairRecord(kVarIdx, varIdx, relDelay, relTrans);
+                        const relTint = t - kEntry.transposition;
+                        const pr = precomputeIndex.getPairRecord(kVarIdx, varIdx, relDelay, relTint);
                         if (!pr) { harmonicFail = true; break; }
                         for (const s of rebaseRunSpansToAbsolute(pr.bassRoleDissonanceRunSpans.none, kStart)) allRunSpans.push(s);
                     }
@@ -3664,8 +3664,8 @@ export async function searchStrettoChains(
                     if (!allowedTranspositions.has(tE1)) continue;
                     if ((allowedVoicesForTrans.get(tE1)?.length ?? 0) === 0) continue;
                     if (!e0e1Pair.meetsAdjacentTranspositionSeparation) continue;
-                    const tE0Idx = absoluteTranspositionToIndex.get(0);
-                    const tE1Idx = absoluteTranspositionToIndex.get(tE1);
+                    const tE0Idx = absoluteTintToIndex.get(0);
+                    const tE1Idx = absoluteTintToIndex.get(tE1);
                     if (tE0Idx === undefined || tE1Idx === undefined) continue;
                     if (!probeVoiceTransitionReachability(1, tE0Idx, tE1Idx)) continue;
                     const firstWindowTransitions = precomputeIndex.getWindowTransitions(e0VarIdx, vA, 0, firstDelay, tE1);
@@ -3682,12 +3682,12 @@ export async function searchStrettoChains(
                             if (checkLimits()) break;
 
                             const vB = transitionAB.nextVariantIndex;
-                            const tAB = transitionAB.transpositionDelta;
+                            const tAB = transitionAB.tintDelta;
                             const pairAB = transitionAB.pairRecord!;
                             const tE2 = tE1 + tAB;
                             if (!allowedTranspositions.has(tE2)) continue;
                             if ((allowedVoicesForTrans.get(tE2)?.length ?? 0) === 0) continue;
-                            const tE2Idx = absoluteTranspositionToIndex.get(tE2);
+                            const tE2Idx = absoluteTintToIndex.get(tE2);
                             if (tE2Idx === undefined) continue;
                             if (!probeVoiceTransitionReachability(2, tE1Idx, tE2Idx)) continue;
 
@@ -3713,12 +3713,12 @@ export async function searchStrettoChains(
                                     if (firstDelay === delayBC) continue;
 
                                     const vC = transitionBC.nextVariantIndex;
-                                    const tBC = transitionBC.transpositionDelta;
+                                    const tBC = transitionBC.tintDelta;
                                     const pairBC = transitionBC.pairRecord!;
                                     const tE3 = tE2 + tBC;
                                     if (!allowedTranspositions.has(tE3)) continue;
                                     if ((allowedVoicesForTrans.get(tE3)?.length ?? 0) === 0) continue;
-                                    const tE3Idx = absoluteTranspositionToIndex.get(tE3);
+                                    const tE3Idx = absoluteTintToIndex.get(tE3);
                                     if (tE3Idx === undefined) continue;
                                     if (!probeVoiceTransitionReachability(3, tE2Idx, tE3Idx)) continue;
 

@@ -5,7 +5,7 @@ This glossary maps implementation symbols to musical semantics and algorithm rol
 ## Notation and Units
 
 - Delay/onset distance between entries: `d` with units in beats (`b`) or quarter-note units (`q`).
-- Pitch displacement/transposition: `p` with units in semitones (`st`).
+- Pitch displacement/transposition interval: `tint` with units in semitones (`st`).
 - Tick-domain values are explicitly marked as ticks.
 
 Cross-reference: pending normalization tasks are tracked in `docs/glossary-todo.md`.
@@ -44,14 +44,13 @@ This file is a static reference; interpretation notes are discussed in code revi
 
 ## 5) `StrettoSearchReport.stats.stopReason`
 **State meaning:** terminal cause classification for the run.  
-**Defined in:** `types.ts` union (`'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted'`).  
+**Defined in:** `types.ts` union (`'Success' | 'Timeout' | 'Exhausted'`).  
 **Used in:** `components/services/strettoGenerator.ts` finalization and `components/stretto/searchStatus.ts` status projection.
 
-## 6) `NodeLimit` and `Exhausted` (formal distinction)
-- `NodeLimit`: node-budget boundary reached (budget-constrained stop).
+## 6) `Exhausted` (formal meaning)
 - `Exhausted`: frontier fixed point reached under constraints (space-constrained stop).
 
-**Implementation note:** current search path is time-gated (`checkLimits`) and sets timeout/exhaustion outcomes; node-budget utilization is reported as null in coverage.
+**Implementation note:** current search path is time-gated (`checkLimits`) and sets timeout/exhaustion outcomes.
 
 ## 7) `PairwiseCompatibilityRecord.allowedVoiceMaskRows`
 **Meaning:** for each source voice index, a bitset of destination voice indices allowed under pairwise voice/transposition constraints.  
@@ -89,13 +88,13 @@ This file is a static reference; interpretation notes are discussed in code revi
 These fields are related but represent distinct data layers: existence, localization, and role-conditioned validity.
 
 ## 11) `toCanonicalTripletKey(parts)`
-**Current key fields:** `(variantA, variantB, variantC, delayAB, delayBC, transpositionAB, transpositionBC)`.  
+**Current key fields:** `(variantA, variantB, variantC, delayAB, delayBC, tintAB, tintBC)`.  
 **Meaning:** canonicalization of adjacent-transition composition state for triplet-window deduplication/retrieval.
 
 ### First-principles rationale
 For any local triplet window over consecutive entries `(e_k, e_{k+1}, e_{k+2})`, the index state is defined by adjacent-edge quantities:
 - onset distances: `d_{k,k+1}`, `d_{k+1,k+2}`
-- pitch displacements: `p_{k,k+1}`, `p_{k+1,k+2}`
+- pitch displacements: `tint_{k,k+1}`, `tint_{k+1,k+2}`
 - selected realization identities for the three entries.
 
 Transition-window indexes consume these adjacent-edge quantities. Therefore canonical equality for this index is equality over those local edge quantities plus realization identities. The same rule is applied for each local triplet window encountered during extension.

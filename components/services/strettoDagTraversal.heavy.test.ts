@@ -35,7 +35,7 @@ for (const result of reportA.results) {
   }
 }
 
-assert.ok(['Success', 'Exhausted', 'Timeout', 'NodeLimit', 'MaxResults'].includes(reportA.stats.stopReason));
+assert.ok(['Success', 'Exhausted', 'Timeout', 'MaxResults'].includes(reportA.stats.stopReason));
 assert.ok(reportA.stats.maxDepthReached >= 1);
 assert.notEqual(timeoutNearCompletionReport.stats.maxDepthReached >= baseOptions.targetChainLength && timeoutNearCompletionReport.results.length === 0, true);
 

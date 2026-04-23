@@ -120,15 +120,6 @@ export function deriveSearchStatusPresentation(
     };
   }
 
-  if (report.stats.stopReason === 'NodeLimit') {
-    return {
-      heading: 'Search Node Budget Reached',
-      detail: `Depth ${maxDepth}/${safeTarget} (${progressPercent}%). Node budget reached.`,
-      toneClass: 'bg-yellow-900/30 border-yellow-800 text-yellow-200',
-      progressPercent
-    };
-  }
-
   if (maxDepth > 0) {
     return {
       heading: 'Search Exhausted with Partial Depth',

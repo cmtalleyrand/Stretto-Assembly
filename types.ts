@@ -602,7 +602,7 @@ export interface StrettoSearchReport {
         nodesVisited: number;
         edgesTraversed?: number;
         timeMs: number;
-        stopReason: 'Success' | 'Timeout' | 'NodeLimit' | 'Exhausted';
+        stopReason: 'Success' | 'Timeout' | 'Exhausted';
         maxDepthReached: number;
         metricOffsetTicks?: number;
         timeoutExtensionAppliedMs?: number;
