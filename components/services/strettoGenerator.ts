@@ -4079,9 +4079,8 @@ export async function searchStrettoChains(
             maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
         }
     }
-    fullChainsFound = structurallyCompleteChainsFound;
 
-    if (terminationReason === 'Timeout' && scoredResults.length === 0 && deferredPartials.length > 0) {
+    if (scoredResults.length === 0 && deferredPartials.length > 0) {
         const partialCandidates = deferredPartials
             .map((dp) => ({ entries: dp.chain, variantIndices: dp.variantIndices }))
             .sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
@@ -4113,10 +4112,11 @@ export async function searchStrettoChains(
             }
             scoredResults.push(scored);
             scoringValidChainsFoundCount++;
+            if (scoredResults.length >= MAX_RESULTS) break;
         }
     }
-
     const finalizedResults: StrettoChainResult[] = scoredResults;
+    fullChainsFound = scoringValidChainsFoundCount;
 
     // Group by delay pattern + type sequence to avoid similar chains clogging display
     function getGroupKey(entries: StrettoChainOption[]): string {
