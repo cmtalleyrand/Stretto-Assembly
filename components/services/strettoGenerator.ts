@@ -68,6 +68,12 @@ interface PairTuple {
     d: number;
     t: number;
 }
+type TripletPositionClass = 'start' | 'interior';
+interface JointTripletSuccessor {
+    vC: number;
+    d2: number;
+    tBC: number;
+}
 
 type StrettoPrecomputeBackend = 'map' | 'dense';
 export type StrettoAdmissibilityMode = 'full' | 'delay-variant-only' | 'disabled';
@@ -200,6 +206,14 @@ export function shouldExtendTimeoutNearCompletion(maxDepthReached: number, targe
 
 export function toCanonicalTripletKey(parts: TripletKeyParts): string {
     return `${parts.variantA}|${parts.variantB}|${parts.variantC}|${parts.delayAB}|${parts.delayBC}|${parts.transpositionAB}|${parts.transpositionBC}`;
+}
+
+function toJointTransitionKey(vA: number, vB: number, d1: number, tAB: number, posClass: TripletPositionClass): string {
+    return `${vA}|${vB}|${d1}|${tAB}|${posClass}`;
+}
+
+function toJointTransitionSignature(transition: JointTripletSuccessor): string {
+    return `${transition.vC}|${transition.d2}|${transition.tBC}`;
 }
 
 export function toBoundaryPairKey(left: StrettoChainOption, right: StrettoChainOption, ppq: number): string {
@@ -2456,6 +2470,69 @@ export async function searchStrettoChains(
         };
     };
 
+    const isMainPathDelayShapeAdmissible = (variantB: number, d1: number, d2: number, variantC: number): boolean => {
+        if (isCanonDelaySearch) return d2 === d1;
+        const vBVariant = variants[variantB];
+        const vCVariant = variants[variantC];
+        if (d1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) return false;
+        if (d2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) return false;
+        return satisfiesHalfLengthTrigger(d1, d2)
+            && satisfiesMaximumContractionBound(d1, d2)
+            && satisfiesPostTruncationContraction(variantB, d1, d2);
+    };
+
+    const jointTripletSuccessorIndex = new Map<string, JointTripletSuccessor[]>();
+    for (const p1 of adjacentValidPairsList) {
+        const pairAB = precomputeIndex.getPairRecord(p1.vA, p1.vB, p1.d, p1.t);
+        if (!pairAB || !pairAB.meetsAdjacentTranspositionSeparation) continue;
+        const successors = adjacentNextPairsByVariant.get(p1.vB) ?? [];
+        for (const p2 of successors) {
+            if (Math.abs(p2.t) < 5) continue;
+            if (!isMainPathDelayShapeAdmissible(p1.vB, p1.d, p2.d, p2.vB)) continue;
+            const startReachable = validDelayTransitionsByAbsPos !== null
+                ? Boolean(validDelayTransitionsStartPos?.has(`${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`))
+                : true;
+            const interiorReachable = validDelayTransitionsByAbsPos !== null
+                ? Boolean(validDelayTransitionsInteriorPos?.has(`${p1.vB}:${p2.vB}:${p1.d}:${p2.d}`))
+                : true;
+            if (!startReachable && !interiorReachable) continue;
+            const voiceContext = getTripletVoiceTranspositionContext(p1.t, p2.t, startReachable, interiorReachable);
+            if (!voiceContext) continue;
+            const transition: JointTripletSuccessor = { vC: p2.vB, d2: p2.d, tBC: p2.t };
+            if (voiceContext.start) {
+                const key = toJointTransitionKey(p1.vA, p1.vB, p1.d, p1.t, 'start');
+                let list = jointTripletSuccessorIndex.get(key);
+                if (!list) { list = []; jointTripletSuccessorIndex.set(key, list); }
+                list.push(transition);
+            }
+            if (voiceContext.interior) {
+                const key = toJointTransitionKey(p1.vA, p1.vB, p1.d, p1.t, 'interior');
+                let list = jointTripletSuccessorIndex.get(key);
+                if (!list) { list = []; jointTripletSuccessorIndex.set(key, list); }
+                list.push(transition);
+            }
+        }
+    }
+    tripletEnumerationTotalUnits = 0;
+    for (const p1 of adjacentValidPairsList) {
+        const startTransitions = jointTripletSuccessorIndex.get(toJointTransitionKey(p1.vA, p1.vB, p1.d, p1.t, 'start')) ?? [];
+        const interiorTransitions = jointTripletSuccessorIndex.get(toJointTransitionKey(p1.vA, p1.vB, p1.d, p1.t, 'interior')) ?? [];
+        const contextsBySignature = new Map<string, { transition: JointTripletSuccessor; start: boolean; interior: boolean }>();
+        for (const transition of startTransitions) {
+            const sig = toJointTransitionSignature(transition);
+            const current = contextsBySignature.get(sig);
+            if (current) current.start = true;
+            else contextsBySignature.set(sig, { transition, start: true, interior: false });
+        }
+        for (const transition of interiorTransitions) {
+            const sig = toJointTransitionSignature(transition);
+            const current = contextsBySignature.get(sig);
+            if (current) current.interior = true;
+            else contextsBySignature.set(sig, { transition, start: false, interior: true });
+        }
+        tripletEnumerationTotalUnits += contextsBySignature.size;
+    }
+
     // Captures each valid (A,B,C) triplet with its pairwise records for cross-triplet
     // dissonance union checks during seed extension (targetChainLength >= 7).
     interface TripletRecord {
@@ -2480,11 +2557,23 @@ export async function searchStrettoChains(
         const d_te_1 = p1.d;
         const vA = p1.vA;
         const vB = p1.vB;
-        const vAVariant = variants[vA];
-        const vBVariant = variants[vB];
 
-        const nextPairs = adjacentNextPairsByVariant.get(p1.vB) ?? [];
-        for (const p2 of nextPairs) {
+        const startTransitions = jointTripletSuccessorIndex.get(toJointTransitionKey(vA, vB, d_te_1, p1.t, 'start')) ?? [];
+        const interiorTransitions = jointTripletSuccessorIndex.get(toJointTransitionKey(vA, vB, d_te_1, p1.t, 'interior')) ?? [];
+        const contextsBySignature = new Map<string, { transition: JointTripletSuccessor; start: boolean; interior: boolean }>();
+        for (const transition of startTransitions) {
+            const sig = toJointTransitionSignature(transition);
+            const current = contextsBySignature.get(sig);
+            if (current) current.start = true;
+            else contextsBySignature.set(sig, { transition, start: true, interior: false });
+        }
+        for (const transition of interiorTransitions) {
+            const sig = toJointTransitionSignature(transition);
+            const current = contextsBySignature.get(sig);
+            if (current) current.interior = true;
+            else contextsBySignature.set(sig, { transition, start: false, interior: true });
+        }
+        for (const { transition: p2Transition, start: startContextReachable, interior: interiorContextReachable } of contextsBySignature.values()) {
             if (Date.now() >= tripletDeadlineMs) {
                 tripletEnumerationTruncated = true;
                 break;
@@ -2509,56 +2598,11 @@ export async function searchStrettoChains(
             }
 
             // All cheap checks before the pairBC index lookup:
-            const d_te_2 = p2.d;
-            const vC = p2.vB;
-            const vCVariant = variants[vC];
-            let rejectReason: TripletRejectReason | null = null;
-
-            if (validDelayTransitionsByAbsPos !== null) {
-                // Single O(1) probe: key is "${vPrev}:${vNext}:${dPrev}:${dNext}" where
-                // vPrev=vB, vNext=vC, dPrev=d_te_1 (delay into B), dNext=d_te_2 (delay into C).
-                // Replaces A.10, A.8, bounded expansion, A.2, A.5, A.4.
-                const transitionKey = `${vB}:${vC}:${d_te_1}:${d_te_2}`;
-                // A candidate can survive only if this transition is reachable in at least
-                // one admissible triplet context: chain-start (absolute position p=2) or interior (p>=3).
-                const startReachable = Boolean(validDelayTransitionsStartPos?.has(transitionKey));
-                const interiorReachable = Boolean(validDelayTransitionsInteriorPos?.has(transitionKey));
-                if (!startReachable && !interiorReachable) {
-                    rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                } else if (!getTripletVoiceTranspositionContext(p1.t, p2.t, startReachable, interiorReachable)) {
-                    rejectReason = TRIPLET_REJECT_REASON.VOICE;
-                }
-            } else {
-                // Fallback for disabled/full-admissibility modes (no transition index available).
-                // Inner arrays are sorted by .d ascending; once d_te_2 exceeds the bounded-expansion
-                // limit all subsequent pairs also exceed it, so break the inner loop immediately.
-                if (!isCanonDelaySearch && d_te_2 > d_te_1 + delayStep) break;
-                if (!isCanonDelaySearch) {
-                    if (d_te_1 >= halfSubjectTicks && vBVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
-                    else if (d_te_2 >= halfSubjectTicks && vCVariant.truncationBeats > 0) rejectReason = TRIPLET_REJECT_REASON.A10;
-                }
-                const aTransformed = vAVariant.type === 'I' || vAVariant.truncationBeats > 0;
-                const bTransformed = vBVariant.type === 'I' || vBVariant.truncationBeats > 0;
-                const cTransformed = vCVariant.type === 'I' || vCVariant.truncationBeats > 0;
-                if (!rejectReason && (aTransformed && bTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
-                if (!rejectReason && (bTransformed && cTransformed)) rejectReason = TRIPLET_REJECT_REASON.A8;
-                if (!rejectReason && isCanonDelaySearch && d_te_2 !== d_te_1) {
-                    rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                }
-                if (!isCanonDelaySearch) {
-                    if (!rejectReason && !satisfiesHalfLengthTrigger(d_te_1, d_te_2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                    if (!rejectReason && !satisfiesMaximumContractionBound(d_te_1, d_te_2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                    if (!rejectReason && !satisfiesPostTruncationContraction(vB, d_te_1, d_te_2)) rejectReason = TRIPLET_REJECT_REASON.DELAY_SHAPE;
-                }
-            }
-
-            if (rejectReason) {
-                incrementTripletRejectCounter(stageStats, rejectReason);
-                continue;
-            }
+            const d_te_2 = p2Transition.d2;
+            const vC = p2Transition.vC;
 
             // Fetch pairBC only after all cheap checks have passed
-            const pairBC = precomputeIndex.getPairRecord(p2.vA, p2.vB, p2.d, p2.t);
+            const pairBC = precomputeIndex.getPairRecord(vB, vC, d_te_2, p2Transition.tBC);
             if (!pairBC) {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PAIR_BC_MISSING);
                 continue;
@@ -2572,7 +2616,7 @@ export async function searchStrettoChains(
 
             // Rule: Pair A->C compatibility (if overlapping)
             const dAC = d_te_1 + d_te_2;
-            const tAC = p1.t + p2.t;
+            const tAC = p1.t + p2Transition.tBC;
             const lenA = variants[vA].lengthTicks;
             const pairAC = dAC < lenA ? precomputeIndex.getPairRecord(vA, vC, dAC, tAC) ?? null : null;
             if (dAC < lenA) {
@@ -2593,7 +2637,7 @@ export async function searchStrettoChains(
             }
 
             // Rule: Voice Spacing for the Triple
-            const trans = [0, p1.t, p1.t + p2.t].sort((a,b) => a - b);
+            const trans = [0, p1.t, p1.t + p2Transition.tBC].sort((a,b) => a - b);
             if (trans[2] - trans[0] < 7) {
                 passesGlobalLineageStage(stageStats, false);
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.PARALLEL);
@@ -2630,9 +2674,9 @@ export async function searchStrettoChains(
 
             const voiceTripletContext = getTripletVoiceTranspositionContext(
                 p1.t,
-                p2.t,
-                Boolean(validDelayTransitionsStartPos),
-                Boolean(validDelayTransitionsInteriorPos)
+                p2Transition.tBC,
+                startContextReachable,
+                interiorContextReachable
             );
             if (!voiceTripletContext) {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.VOICE);
@@ -2672,7 +2716,7 @@ export async function searchStrettoChains(
                 const nextTransition: NextTransition = {
                     nextVariantIndex: vC,
                     delayTicks: d_te_2,
-                    transpositionDelta: p2.t,
+                    transpositionDelta: p2Transition.tBC,
                     pairRecord: pairBC,
                     isRestrictedInterval: pairBC.isRestrictedInterval,
                     isFreeInterval: pairBC.isFreeInterval
@@ -2681,9 +2725,9 @@ export async function searchStrettoChains(
             }
 
             if (tripletHasValidDelayContext) {
-                precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d_te_1}|${d_te_2}|${p1.t}|${p2.t}`);
+                precomputeIndex.addTripletShapeKey(`${vA}|${vB}|${vC}|${d_te_1}|${d_te_2}|${p1.t}|${p2Transition.tBC}`);
                 if (!enableLegacyTripletRecordIndexPass) {
-                    allTripletRecords.push({ vA, vB, vC, d_te_1, d_te_2, tAB: p1.t, tBC: p2.t, pairAB, pairBC, pairAC });
+                    allTripletRecords.push({ vA, vB, vC, d_te_1, d_te_2, tAB: p1.t, tBC: p2Transition.tBC, pairAB, pairBC, pairAC });
                 }
             } else {
                 incrementTripletRejectCounter(stageStats, TRIPLET_REJECT_REASON.NO_DELAY_CONTEXT);
