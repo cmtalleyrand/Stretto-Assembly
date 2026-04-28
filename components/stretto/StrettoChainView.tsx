@@ -216,24 +216,27 @@ export default function StrettoChainView({
     const diagnostics = React.useMemo(() => {
         if (!searchReport || !(searchReport.stats as any).stageStats) return null;
         const stats = searchReport.stats as any;
+        const tripletRejectTerms = [
+            { key: 'tripletRejectA10', label: 'A10', value: stats.stageStats.tripletRejectA10 ?? 0 },
+            { key: 'tripletRejectA8', label: 'A8', value: stats.stageStats.tripletRejectA8 ?? 0 },
+            { key: 'tripletRejectDelayShape', label: 'Delay shape', value: stats.stageStats.tripletRejectDelayShape ?? 0 },
+            { key: 'tripletRejectPairBCMissing', label: 'Pair BC missing', value: stats.stageStats.tripletRejectPairBCMissing ?? 0 },
+            { key: 'tripletRejectAdjSepBC', label: 'Adjacent separation BC', value: stats.stageStats.tripletRejectAdjSepBC ?? 0 },
+            { key: 'tripletRejectPairACMissing', label: 'Pair AC missing', value: stats.stageStats.tripletRejectPairACMissing ?? 0 },
+            { key: 'tripletRejectLowerBound', label: 'Lower bound', value: stats.stageStats.tripletRejectLowerBound ?? 0 },
+            { key: 'tripletRejectParallel', label: 'Parallel', value: stats.stageStats.tripletRejectParallel ?? 0 },
+            { key: 'tripletRejectVoice', label: 'Voice', value: stats.stageStats.tripletRejectVoice ?? 0 },
+            { key: 'tripletRejectP4Bass', label: 'P4 bass', value: stats.stageStats.tripletRejectP4Bass ?? 0 },
+            { key: 'tripletRejectNoDelayContext', label: 'No delay context', value: stats.stageStats.tripletRejectNoDelayContext ?? 0 }
+        ] as const;
+        const tripletRejectTermsSum = tripletRejectTerms.reduce((sum, term) => sum + term.value, 0);
         const transitionRowsReturned = stats.stageStats.transitionsReturned ?? 0;
         const transitionCandidatesEnumerated = stats.stageStats.candidateTransitionsEnumerated ?? 0;
-        const tripletRejectedTotal = stats.stageStats.tripletRejectedTotal ?? (
-            (stats.stageStats.tripletRejectA10 ?? 0)
-            + (stats.stageStats.tripletRejectA8 ?? 0)
-            + (stats.stageStats.tripletRejectDelayShape ?? 0)
-            + (stats.stageStats.tripletRejectPairBCMissing ?? 0)
-            + (stats.stageStats.tripletRejectAdjSepBC ?? 0)
-            + (stats.stageStats.tripletRejectPairACMissing ?? 0)
-            + (stats.stageStats.tripletRejectLowerBound ?? stats.stageStats.tripleLowerBoundRejected ?? 0)
-            + (stats.stageStats.tripletRejectParallel ?? stats.stageStats.tripleParallelRejected ?? 0)
-            + (stats.stageStats.tripletRejectVoice ?? stats.stageStats.tripleVoiceRejected ?? 0)
-            + (stats.stageStats.tripletRejectP4Bass ?? stats.stageStats.tripleP4BassRejected ?? 0)
-            + (stats.stageStats.tripletRejectNoDelayContext ?? 0)
-        );
+        const tripletRejectedTotal = stats.stageStats.tripletRejectedTotal ?? tripletRejectTermsSum;
         const tripletAcceptedCandidates = stats.stageStats.tripletCandidatesAccepted ?? stats.stageStats.tripletAcceptedTotal ?? (stats.stageStats.tripleCandidates - tripletRejectedTotal);
         const tripletDistinctShapesAccepted = stats.stageStats.tripletDistinctShapesAccepted ?? stats.stageStats.harmonicallyValidTriples ?? 0;
         const tripletAccountingHolds = stats.stageStats.tripleCandidates === (tripletRejectedTotal + tripletAcceptedCandidates);
+        const tripletRejectDecompositionHolds = tripletRejectedTotal === tripletRejectTermsSum;
         return {
             stage: stats.stageStats,
             coverage: stats.coverage ?? null,
@@ -243,6 +246,9 @@ export default function StrettoChainView({
             transitionCandidatesEnumerated,
             transitionAccountingHolds: transitionRowsReturned >= transitionCandidatesEnumerated,
             tripletRejectedTotal,
+            tripletRejectTerms,
+            tripletRejectTermsSum,
+            tripletRejectDecompositionHolds,
             tripletAcceptedCandidates,
             tripletDistinctShapesAccepted,
             tripletAccountingHolds
@@ -384,7 +390,22 @@ export default function StrettoChainView({
                             <div className="font-semibold text-gray-200 mb-1">Search diagnostics</div>
                             <div>Edges traversed: {diagnostics.edgesTraversed.toLocaleString()} · Structural scans: {diagnostics.stage.structuralScanInvocations.toLocaleString()}<MetricHelp metricKey="structuralScanInvocations" /></div>
                             <div>Pair rejects: {diagnostics.stage.pairStageRejected.toLocaleString()}<MetricHelp metricKey="pairStageRejected" /> · Triplet rejects: {diagnostics.stage.tripletStageRejected.toLocaleString()}<MetricHelp metricKey="tripletStageRejected" /> · Global rejects: {diagnostics.stage.globalLineageStageRejected.toLocaleString()}<MetricHelp metricKey="globalLineageStageRejected" /></div>
-                            <div>Triplet fail breakdown → pairwise: {diagnostics.stage.triplePairwiseRejected.toLocaleString()}, lower-bound: {diagnostics.stage.tripleLowerBoundRejected.toLocaleString()}, voice: {diagnostics.stage.tripleVoiceRejected.toLocaleString()}, P4-bass: {diagnostics.stage.tripleP4BassRejected.toLocaleString()}, parallel: {diagnostics.stage.tripleParallelRejected.toLocaleString()}</div>
+                            <details>
+                                <summary className="cursor-pointer">Triplet reject decomposition terms</summary>
+                                <div className="mt-1 pl-2 space-y-0.5">
+                                    {diagnostics.tripletRejectTerms.map((term) => (
+                                        <div key={term.key}>{term.label}: {term.value.toLocaleString()}</div>
+                                    ))}
+                                </div>
+                            </details>
+                            <div>Triplet rejected total: {diagnostics.tripletRejectedTotal.toLocaleString()}</div>
+                            <div>Triplet reject term sum: {diagnostics.tripletRejectTermsSum.toLocaleString()}</div>
+                            <div>
+                                Triplet reject decomposition check → tripletRejectedTotal = Σ(reject terms) → {diagnostics.tripletRejectedTotal.toLocaleString()} = {diagnostics.tripletRejectTermsSum.toLocaleString()} · invariant:
+                                <span className={diagnostics.tripletRejectDecompositionHolds ? 'text-emerald-300 font-semibold' : 'text-red-300 font-semibold'}>
+                                    {diagnostics.tripletRejectDecompositionHolds ? 'holds' : 'violated'}
+                                </span>
+                            </div>
                             <div>Triplet accepted candidates: {diagnostics.tripletAcceptedCandidates.toLocaleString()}</div>
                             <div>Triplet distinct shapes: {diagnostics.tripletDistinctShapesAccepted.toLocaleString()}</div>
                             <div>
