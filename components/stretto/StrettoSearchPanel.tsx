@@ -36,6 +36,9 @@ interface StrettoSearchPanelProps {
             dagExploredWorkItems: number;
             dagLiveFrontierWorkItems: number;
             dagHeuristicCompletionRatio?: number;
+            dagDepthHistogram?: Record<string, number>;
+            dagAverageBranchesByDepth?: Record<string, number>;
+            dagValidChainsRatioByDepth?: Record<string, number>;
         };
         heartbeat: boolean;
     } | null;
@@ -66,6 +69,27 @@ export default function StrettoSearchPanel({
             progressAccumulatorRef.current = nextSearchProgressAccumulator(searchProgress, progressAccumulatorRef.current);
         }
         return computeSearchProgressDisplay(searchProgress ?? null, progressAccumulatorRef.current);
+    }, [searchProgress]);
+    const liveDepthTelemetryRows = useMemo(() => {
+        const histogram = searchProgress?.telemetry.dagDepthHistogram;
+        if (!histogram) return [];
+        const avgBranches = searchProgress.telemetry.dagAverageBranchesByDepth ?? {};
+        const validRatio = searchProgress.telemetry.dagValidChainsRatioByDepth ?? {};
+        return Object.entries(histogram)
+            .map(([depth, explored]) => {
+                const exploredCount = Number(explored);
+                if (!Number.isFinite(exploredCount) || exploredCount <= 0) return null;
+                const avg = Number(avgBranches[depth] ?? 0);
+                const ratio = Number(validRatio[depth] ?? 0);
+                return {
+                    depth: Number(depth),
+                    explored: exploredCount,
+                    avgBranches: Number.isFinite(avg) ? avg : 0,
+                    validRatio: Number.isFinite(ratio) ? ratio : 0,
+                };
+            })
+            .filter((row): row is { depth: number; explored: number; avgBranches: number; validRatio: number } => row !== null)
+            .sort((a, b) => a.depth - b.depth);
     }, [searchProgress]);
 
     const handleChange = (field: keyof StrettoSearchOptions, val: any) => {
@@ -589,6 +613,16 @@ export default function StrettoSearchPanel({
                             <div className="mt-1 text-[9px] text-gray-400 font-mono">
                                 Frontier pressure {(progressDisplay.dagFrontierPressurePercent ?? 0).toFixed(1)}% · explored share {progressDisplay.traversalCompletionPercent ?? 0}%
                             </div>
+                            {liveDepthTelemetryRows.length > 0 && (
+                                <div className="mt-2 text-[9px] text-gray-400 font-mono">
+                                    <div className="text-gray-300 font-semibold">Live per-depth telemetry (post-admissibility)</div>
+                                    {liveDepthTelemetryRows.map((row) => (
+                                        <div key={row.depth}>
+                                            d{row.depth}: explored {row.explored.toLocaleString()} · avg branches {row.avgBranches.toFixed(2)} · valid/explored {(row.validRatio * 100).toFixed(1)}%
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </>
                     )}
                 </div>

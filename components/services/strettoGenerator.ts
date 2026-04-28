@@ -186,6 +186,9 @@ export interface StrettoSearchProgressUpdate {
         dagExploredWorkItems: number;
         dagLiveFrontierWorkItems: number;
         dagHeuristicCompletionRatio?: number;
+        dagDepthHistogram?: Record<string, number>;
+        dagAverageBranchesByDepth?: Record<string, number>;
+        dagValidChainsRatioByDepth?: Record<string, number>;
     };
 }
 
@@ -1671,6 +1674,9 @@ export async function searchStrettoChains(
     let dagExploredWorkItems = 0;
     let dagLiveFrontierWorkItems = 0;
     let dagHeuristicCompletionRatio: number | undefined = undefined;
+    let dagDepthHistogramSnapshot: Record<string, number> | undefined = undefined;
+    let dagAverageBranchesByDepthSnapshot: Record<string, number> | undefined = undefined;
+    let dagValidChainsRatioByDepthSnapshot: Record<string, number> | undefined = undefined;
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
     let fullChainsFound = 0;
@@ -1717,7 +1723,10 @@ export async function searchStrettoChains(
                 dagEdgesEvaluated,
                 dagExploredWorkItems,
                 dagLiveFrontierWorkItems,
-                dagHeuristicCompletionRatio
+                dagHeuristicCompletionRatio,
+                dagDepthHistogram: dagDepthHistogramSnapshot,
+                dagAverageBranchesByDepth: dagAverageBranchesByDepthSnapshot,
+                dagValidChainsRatioByDepth: dagValidChainsRatioByDepthSnapshot
             }
         });
     };
@@ -3309,15 +3318,19 @@ export async function searchStrettoChains(
     dagExploredWorkItems = 0;
     dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
     const dagLiveDepthHistogram: Map<number, number> = new Map([[1, 1]]);
+    const dagGeneratedSuccessorsByDepth: Map<number, number> = new Map();
     const dagMaxSuccessorsByDepth: Map<number, number> = new Map();
+    const dagValidChainsByDepth: Map<number, number> = new Map([[1, 1]]);
     const queueDagWorkItems = (depth: number, count: number): void => {
         if (count <= 0) return;
         dagLiveFrontierWorkItems += count;
         dagLiveDepthHistogram.set(depth, (dagLiveDepthHistogram.get(depth) ?? 0) + count);
+        dagValidChainsByDepth.set(depth, (dagValidChainsByDepth.get(depth) ?? 0) + count);
     };
     const dagDepthHistogram: Map<number, number> = new Map();
     const recordGeneratedSuccessors = (depth: number, count: number): void => {
         if (count <= 0) return;
+        dagGeneratedSuccessorsByDepth.set(depth, (dagGeneratedSuccessorsByDepth.get(depth) ?? 0) + count);
         dagMaxSuccessorsByDepth.set(depth, Math.max(dagMaxSuccessorsByDepth.get(depth) ?? 0, count));
     };
     const startDagWorkItem = (depth: number): void => {
@@ -3370,6 +3383,26 @@ export async function searchStrettoChains(
                 Math.max(dagCompletedUnits, Math.floor(completionRatio * dagTotalUnits))
             );
         dagCompletedUnits = nextCompletedUnits;
+        dagDepthHistogramSnapshot = Array.from(dagDepthHistogram.entries())
+            .sort(([depthA], [depthB]) => depthA - depthB)
+            .reduce<Record<string, number>>((acc, [depth, exploredCount]) => {
+                acc[String(depth)] = exploredCount;
+                return acc;
+            }, {});
+        dagAverageBranchesByDepthSnapshot = Array.from(dagDepthHistogram.entries())
+            .sort(([depthA], [depthB]) => depthA - depthB)
+            .reduce<Record<string, number>>((acc, [depth, exploredCount]) => {
+                const generated = dagGeneratedSuccessorsByDepth.get(depth) ?? 0;
+                acc[String(depth)] = exploredCount > 0 ? generated / exploredCount : 0;
+                return acc;
+            }, {});
+        dagValidChainsRatioByDepthSnapshot = Array.from(dagDepthHistogram.entries())
+            .sort(([depthA], [depthB]) => depthA - depthB)
+            .reduce<Record<string, number>>((acc, [depth, exploredCount]) => {
+                const validChains = dagValidChainsByDepth.get(depth) ?? 0;
+                acc[String(depth)] = exploredCount > 0 ? validChains / exploredCount : 0;
+                return acc;
+            }, {});
         emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force, terminal);
     };
     emitDagProgress(true);
@@ -4219,6 +4252,20 @@ export async function searchStrettoChains(
             acc[String(depth)] = count;
             return acc;
         }, {});
+    const averageBranchesByDepth = Array.from(dagDepthHistogram.entries())
+        .sort(([depthA], [depthB]) => depthA - depthB)
+        .reduce<Record<string, number>>((acc, [depth, exploredCount]) => {
+            const generated = dagGeneratedSuccessorsByDepth.get(depth) ?? 0;
+            acc[String(depth)] = exploredCount > 0 ? generated / exploredCount : 0;
+            return acc;
+        }, {});
+    const validChainsRatioByDepth = Array.from(dagDepthHistogram.entries())
+        .sort(([depthA], [depthB]) => depthA - depthB)
+        .reduce<Record<string, number>>((acc, [depth, exploredCount]) => {
+            const validChains = dagValidChainsByDepth.get(depth) ?? 0;
+            acc[String(depth)] = exploredCount > 0 ? validChains / exploredCount : 0;
+            return acc;
+        }, {});
     const completionRatioLowerBound = completionLowerBound == null ? null : Math.round(completionLowerBound * 100);
 
     return {
@@ -4257,6 +4304,8 @@ export async function searchStrettoChains(
                 maxFrontierSize,
                 maxFrontierClassCount,
                 depthHistogram,
+                averageBranchesByDepth,
+                validChainsRatioByDepth,
                 completionLowerBound,
                 completionLowerBoundIsHeuristic,
                 completionLowerBoundAssumptions,
