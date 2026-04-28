@@ -3304,6 +3304,7 @@ export async function searchStrettoChains(
     dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
     const dagLiveDepthHistogram: Map<number, number> = new Map([[1, 1]]);
     const dagGeneratedSuccessorsByDepth: Map<number, number> = new Map();
+    const dagMaxSuccessorsByDepth: Map<number, number> = new Map();
     const dagValidChainsByDepth: Map<number, number> = new Map([[1, 1]]);
     const queueDagWorkItems = (depth: number, count: number): void => {
         if (count <= 0) return;
@@ -3315,6 +3316,7 @@ export async function searchStrettoChains(
     const recordGeneratedSuccessors = (depth: number, count: number): void => {
         if (count <= 0) return;
         dagGeneratedSuccessorsByDepth.set(depth, (dagGeneratedSuccessorsByDepth.get(depth) ?? 0) + count);
+        dagMaxSuccessorsByDepth.set(depth, Math.max(dagMaxSuccessorsByDepth.get(depth) ?? 0, count));
     };
     const startDagWorkItem = (depth: number): void => {
         dagExploredWorkItems++;
