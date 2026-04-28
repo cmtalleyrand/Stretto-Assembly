@@ -178,7 +178,7 @@ export function computeSearchProgressDisplay(
             : 0;
     const dagCompletionLowerBoundPercent = Math.round(lowerBoundRatio * 100);
     const countersLabel = progress.stage === 'dag'
-        ? `DAG explored ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · live ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · edges/node ${(dagEdgesPerExpandedNode ?? 0).toFixed(2)} · frontier pressure ${(dagFrontierPressurePercent ?? 0).toFixed(1)}% · completion lower bound ${dagCompletionLowerBoundPercent}% · maxDepth ${progress.telemetry.maxDepthReached.toLocaleString()}`
+        ? `DAG explored ${progress.telemetry.dagExploredWorkItems.toLocaleString()} · live ${progress.telemetry.dagLiveFrontierWorkItems.toLocaleString()} · edges/node ${(dagEdgesPerExpandedNode ?? 0).toFixed(2)} · frontier pressure ${(dagFrontierPressurePercent ?? 0).toFixed(1)}% · search-space completion estimate ${dagCompletionLowerBoundPercent}% · maxDepth ${progress.telemetry.maxDepthReached.toLocaleString()}`
         : progress.stage === 'triplet'
             ? `Triplet operations ${progress.telemetry.tripletOperationsProcessed.toLocaleString()} · valid triplets ${progress.telemetry.validTriplets.toLocaleString()} · valid pairs ${progress.telemetry.validPairs.toLocaleString()}`
             : `Pairwise operations ${progress.telemetry.pairwiseOperationsProcessed.toLocaleString()} · valid pairs ${progress.telemetry.validPairs.toLocaleString()}`;

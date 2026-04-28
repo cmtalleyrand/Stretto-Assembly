@@ -540,7 +540,7 @@ export default function StrettoSearchPanel({
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">
                         {searchProgress.stage === 'dag'
-                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · queue coverage lower bound ${progressDisplay.dagCompletionLowerBoundPercent ?? 0}% · edges/node ${(progressDisplay.dagEdgesPerExpandedNode ?? 0).toFixed(2)}`
+                            ? `Depth reached ${searchProgress.telemetry.maxDepthReached} / ${searchProgress.telemetry.targetChainLength} · search-space completion estimate ${progressDisplay.dagCompletionLowerBoundPercent ?? 0}% · edges/node ${(progressDisplay.dagEdgesPerExpandedNode ?? 0).toFixed(2)}`
                             : `Stage progress: ${progressDisplay.stageEstimatePercent}% · units ${progressDisplay.unitLabel}`}
                     </div>
                     <div className="mt-1 text-[9px] text-gray-400 font-mono">

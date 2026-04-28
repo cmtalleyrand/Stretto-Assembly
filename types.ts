@@ -628,6 +628,8 @@ export interface StrettoSearchReport {
             completionLowerBoundIsHeuristic?: boolean;
             completionLowerBoundAssumptions?: {
                 monotoneQueuedWorkItems: boolean;
+                branchingFactorStationarity?: boolean;
+                conservativeBranchUpperEnvelope?: boolean;
             };
             edgesTraversed: number;
             frontierSizeAtTermination: number;

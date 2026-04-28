@@ -3293,28 +3293,66 @@ export async function searchStrettoChains(
     let dagCompletedUnits = 0;
     dagExploredWorkItems = 0;
     dagLiveFrontierWorkItems = 1; // Root node starts as the initial live work item.
-    const queueDagWorkItems = (count: number): void => {
+    const dagLiveDepthHistogram: Map<number, number> = new Map([[1, 1]]);
+    const dagMaxSuccessorsByDepth: Map<number, number> = new Map();
+    const queueDagWorkItems = (depth: number, count: number): void => {
         if (count <= 0) return;
         dagLiveFrontierWorkItems += count;
+        dagLiveDepthHistogram.set(depth, (dagLiveDepthHistogram.get(depth) ?? 0) + count);
     };
     const dagDepthHistogram: Map<number, number> = new Map();
+    const recordGeneratedSuccessors = (depth: number, count: number): void => {
+        if (count <= 0) return;
+        dagMaxSuccessorsByDepth.set(depth, Math.max(dagMaxSuccessorsByDepth.get(depth) ?? 0, count));
+    };
     const startDagWorkItem = (depth: number): void => {
         dagExploredWorkItems++;
         dagLiveFrontierWorkItems = Math.max(0, dagLiveFrontierWorkItems - 1);
+        const liveDepthCount = dagLiveDepthHistogram.get(depth) ?? 0;
+        if (liveDepthCount <= 1) dagLiveDepthHistogram.delete(depth);
+        else dagLiveDepthHistogram.set(depth, liveDepthCount - 1);
         dagDepthHistogram.set(depth, (dagDepthHistogram.get(depth) ?? 0) + 1);
     };
+    const estimateRemainingWorkItems = (): number => {
+        if (dagLiveFrontierWorkItems <= 0) return 0;
+        const observedGlobalMaxBranching = Math.max(0, ...Array.from(dagMaxSuccessorsByDepth.values()));
+        const delayChoiceCap = Math.max(1, Math.floor((subjectLengthTicks * (2 / 3)) / Math.max(1, delayStep)));
+        const transpositionChoiceCap = Math.max(1, allowedTranspositions.size - 1);
+        const variantChoiceCap = Math.max(1, variants.length - 1);
+        const staticBranchingCap = delayChoiceCap * transpositionChoiceCap * variantChoiceCap;
+        const globalBranchingCap = Math.max(observedGlobalMaxBranching, staticBranchingCap);
+        let estimatedRemaining = 0;
+        for (const [depth, liveCount] of dagLiveDepthHistogram.entries()) {
+            if (liveCount <= 0) continue;
+            let subtreeEstimate = 1;
+            let cascadeFactor = 1;
+            for (let currentDepth = depth; currentDepth < options.targetChainLength; currentDepth++) {
+                const depthBranchingCap = dagMaxSuccessorsByDepth.get(currentDepth) ?? globalBranchingCap;
+                if (depthBranchingCap <= 0) break;
+                cascadeFactor *= depthBranchingCap;
+                subtreeEstimate += cascadeFactor;
+                if (subtreeEstimate > 1_000_000_000_000) {
+                    subtreeEstimate = 1_000_000_000_000;
+                    break;
+                }
+            }
+            estimatedRemaining += liveCount * subtreeEstimate;
+        }
+        return estimatedRemaining;
+    };
     const emitDagProgress = (force: boolean = false, terminal: boolean = false): void => {
-        // Monotone heuristic completion: explored / (explored + live frontier).
-        // The ratio is traversal-state based and does not rely on chain-depth upper bounds.
-        const denom = Math.max(1, dagExploredWorkItems + dagLiveFrontierWorkItems);
-        const heuristicRatio = dagExploredWorkItems / denom;
-        dagHeuristicCompletionRatio = heuristicRatio;
+        // Heuristic completion estimator: explored / (explored + estimated remaining).
+        // Remaining work extrapolates from live frontier depth profile and observed branching.
+        const estimatedRemainingWorkItems = estimateRemainingWorkItems();
+        const denom = Math.max(1, dagExploredWorkItems + estimatedRemainingWorkItems);
+        const completionRatio = dagExploredWorkItems / denom;
+        dagHeuristicCompletionRatio = completionRatio;
         const boundedNonTerminalCeiling = Math.max(0, dagTotalUnits - 1);
         const nextCompletedUnits = terminal
             ? dagTotalUnits
             : Math.min(
                 boundedNonTerminalCeiling,
-                Math.max(dagCompletedUnits, Math.floor(heuristicRatio * dagTotalUnits))
+                Math.max(dagCompletedUnits, Math.floor(completionRatio * dagTotalUnits))
             );
         dagCompletedUnits = nextCompletedUnits;
         emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force, terminal);
@@ -3413,7 +3451,8 @@ export async function searchStrettoChains(
         if (checkLimits()) return;
 
         const successors = expandNode(node);
-        queueDagWorkItems(successors.length);
+        recordGeneratedSuccessors(node.chain.length, successors.length);
+        queueDagWorkItems(node.chain.length + 1, successors.length);
         for (const successor of successors) {
             await dfsExtend(successor);
             if (terminationReason) return;
@@ -3828,7 +3867,7 @@ export async function searchStrettoChains(
                                     // Breadth-oriented scheduling avoids fully exhausting one start
                                     // pattern before exploring siblings, improving search diversity.
                                     const extensionQueue: TripletJoinState[] = [seedState];
-                                    queueDagWorkItems(1);
+                                    queueDagWorkItems(seedState.chain.length, 1);
                                     let queueIndex = 0;
                                     while (queueIndex < extensionQueue.length) {
                                         if (terminationReason) break;
@@ -3860,7 +3899,7 @@ export async function searchStrettoChains(
                                                 recordCompletedChain(dagNode.chain, dagNode.variantIndices, dagNode.prefixAdmissible);
                                             } else {
                                                 recordDeferredPartial(dagNode.chain, dagNode.variantIndices);
-                                                queueDagWorkItems(1);
+                                                queueDagWorkItems(currentDepth, 1);
                                                 await dfsExtend(dagNode);
                                             }
                                             maxDepth = Math.max(maxDepth, currentDepth);
@@ -3869,6 +3908,7 @@ export async function searchStrettoChains(
                                         }
 
                                         const successors = tripletJoinExtend(current);
+                                        recordGeneratedSuccessors(currentDepth, successors.length);
                                         for (const succ of successors) {
                                             nodesVisited++;
                                             dagNodesExpanded++;
@@ -3885,7 +3925,7 @@ export async function searchStrettoChains(
                                                 recordDeferredPartial(succ.chain, succ.variantIndices);
                                             }
                                             extensionQueue.push(succ);
-                                            queueDagWorkItems(1);
+                                            queueDagWorkItems(succ.chain.length, 1);
                                         }
                                     }
                                 }
@@ -3938,7 +3978,8 @@ export async function searchStrettoChains(
                     }
                     // Launch DFS from this node
                     const successors = expandNode(node);
-                    queueDagWorkItems(successors.length);
+                    recordGeneratedSuccessors(node.chain.length, successors.length);
+                    queueDagWorkItems(node.chain.length + 1, successors.length);
                     for (const successor of successors) {
                         await dfsExtend(successor);
                         if (terminationReason) {
@@ -3956,6 +3997,7 @@ export async function searchStrettoChains(
                 }
 
                 const successors = expandNode(node);
+                recordGeneratedSuccessors(node.chain.length, successors.length);
                 for (const successor of successors) {
                     const nodeKey = getDagNodeKey(successor);
                     if (nextLayer.has(nodeKey)) {
@@ -3963,7 +4005,7 @@ export async function searchStrettoChains(
                         continue;
                     }
                     nextLayer.set(nodeKey, successor);
-                    queueDagWorkItems(1);
+                    queueDagWorkItems(successor.chain.length, 1);
                 }
             }
 
@@ -4146,12 +4188,14 @@ export async function searchStrettoChains(
     });
 
     emitDagProgress(true, true);
-    const totalKnownWorkItems = dagExploredWorkItems + dagLiveFrontierWorkItems;
-    const completionLowerBound = totalKnownWorkItems > 0
-        ? (dagExploredWorkItems / totalKnownWorkItems)
+    const estimatedRemainingWorkItems = estimateRemainingWorkItems();
+    const totalEstimatedWorkItems = dagExploredWorkItems + estimatedRemainingWorkItems;
+    const completionLowerBound = totalEstimatedWorkItems > 0
+        ? (dagExploredWorkItems / totalEstimatedWorkItems)
         : null;
     const completionLowerBoundAssumptions = {
-        monotoneQueuedWorkItems: true
+        monotoneQueuedWorkItems: true,
+        conservativeBranchUpperEnvelope: true
     };
     const completionLowerBoundIsHeuristic = true;
     const depthHistogram = Array.from(dagDepthHistogram.entries())
