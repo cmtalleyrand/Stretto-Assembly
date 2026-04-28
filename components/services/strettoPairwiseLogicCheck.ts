@@ -63,6 +63,28 @@ const pureFourthFixtureB: SubjectVariant = {
     ]
 };
 
+const p4ExtendedRunFixtureA: SubjectVariant = {
+    type: 'N',
+    truncationBeats: 0,
+    lengthTicks: 360,
+    notes: [
+        { relTick: 0, durationTicks: 120, pitch: 60 },
+        { relTick: 120, durationTicks: 120, pitch: 60 },
+        { relTick: 240, durationTicks: 120, pitch: 60 }
+    ]
+};
+
+const p4ExtendedRunFixtureB: SubjectVariant = {
+    type: 'N',
+    truncationBeats: 0,
+    lengthTicks: 360,
+    notes: [
+        { relTick: 0, durationTicks: 120, pitch: 61 },
+        { relTick: 120, durationTicks: 120, pitch: 65 },
+        { relTick: 240, durationTicks: 120, pitch: 61 }
+    ]
+};
+
 function assertOctaveParityWhenNoPerfectBehavior(subject: SubjectVariant): void {
     let evaluated = 0;
     for (const delay of delays) {
@@ -138,8 +160,37 @@ function assertBassInclusiveModeMakesFourthDissonant(): void {
     assert(Math.abs(dissonant.dissonanceRatio - 1) < 1e-9, 'Dissonant mode should classify isolated P4 as dissonant (ratio 1).');
 }
 
+function assertP4RunExtensionPolicy(): void {
+    const withoutExtension = checkCounterpointStructureWithBassRole(
+        p4ExtendedRunFixtureA,
+        p4ExtendedRunFixtureB,
+        0,
+        0,
+        1,
+        'dissonant'
+    );
+    const withExtension = checkCounterpointStructureWithBassRole(
+        p4ExtendedRunFixtureA,
+        p4ExtendedRunFixtureB,
+        0,
+        0,
+        1,
+        'dissonant',
+        480,
+        4,
+        4,
+        true
+    );
+
+    assert(withoutExtension.compatible === false, 'Three-event dissonance run must fail by default.');
+    assert(withExtension.compatible === true, 'Three-event dissonance run with one P4 must pass when extension is enabled.');
+    assert(withExtension.maxDissonanceRunEvents === 3, 'Extended policy fixture must produce a run of exactly three events.');
+    assert(withExtension.maxDissonanceRunIncludesP4Dissonance === true, 'Extended run must report that the max run contains a P4 dissonance.');
+}
+
 assertOctaveParityWhenNoPerfectBehavior(consonantFixture);
 assertPerfectGuardPolicy(perfectSensitiveFixture);
 assertBassInclusiveModeMakesFourthDissonant();
+assertP4RunExtensionPolicy();
 
-console.log('Pairwise logic check passed for octave-equivalence parity, perfect-interval guard behavior, and provisional/dissonant P4 handling.');
+console.log('Pairwise logic check passed for octave-equivalence parity, perfect-interval guard behavior, provisional/dissonant P4 handling, and optional P4 run-length extension.');

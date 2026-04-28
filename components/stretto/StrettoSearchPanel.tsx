@@ -496,8 +496,17 @@ export default function StrettoSearchPanel({
                                 className="w-full h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-red-500"
                             />
                             <p className="mt-1 text-[9px] text-gray-400 leading-tight">
-                                Hard pairwise policy: dissonance ratio ≤ cap, maximum consecutive dissonance run length ≤ 2 events, and continuous dissonance duration ≤ 1 beat.
+                                Hard pairwise policy: dissonance ratio ≤ cap, maximum consecutive dissonance run length ≤ 2 events (or 3 when enabled and at least one run dissonance is P4), and continuous dissonance duration ≤ 1 beat.
                             </p>
+                            <label className="mt-2 flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={options.allowP4RunLengthExtension ?? false}
+                                    onChange={(e) => handleChange('allowP4RunLengthExtension', e.target.checked)}
+                                    className="h-3 w-3 rounded bg-gray-900 border-gray-600 text-brand-primary focus:ring-0"
+                                />
+                                <span className="ml-2 text-[9px] font-bold text-gray-300">Allow +1 run event when run includes a P4 dissonance</span>
+                            </label>
                         </div>
 
 

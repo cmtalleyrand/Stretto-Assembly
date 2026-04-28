@@ -35,6 +35,7 @@ interface PairwiseCompatibilityRecord {
     p4SimultaneityCount: number;
     hasVoiceCrossing: boolean;
     maxDissonanceRunEvents: number;
+    maxDissonanceRunIncludesP4Dissonance: boolean;
     maxDissonanceRunTicks?: number;
     maxAllowedContinuousDissonanceTicks?: number;
     hasParallelPerfect58: boolean;
@@ -156,6 +157,7 @@ interface PairwiseScanResult {
     p4SimultaneityCount: number;
     hasVoiceCrossing: boolean;
     maxDissonanceRunEvents: number;
+    maxDissonanceRunIncludesP4Dissonance: boolean;
     maxDissonanceRunTicks: number;
     hasParallelPerfect58: boolean;
     dissonanceSpans: SimultaneitySpan[];
@@ -216,7 +218,8 @@ export function toOrderedBoundarySignature(chain: StrettoChainOption[], ppq: num
 export function violatesPairwiseLowerBound(record: PairwiseCompatibilityRecord, maxPairwiseDissonance: number): boolean {
     const maxAllowedContinuousDissonanceTicks = record.maxAllowedContinuousDissonanceTicks ?? 480;
     const runTicks = record.maxDissonanceRunTicks ?? 0;
-    return record.maxDissonanceRunEvents > 2 || runTicks > maxAllowedContinuousDissonanceTicks || record.dissonanceRatio > maxPairwiseDissonance;
+    const maxAllowedRunEvents = record.maxDissonanceRunIncludesP4Dissonance ? 3 : 2;
+    return record.maxDissonanceRunEvents > maxAllowedRunEvents || runTicks > maxAllowedContinuousDissonanceTicks || record.dissonanceRatio > maxPairwiseDissonance;
 }
 
 export function resolveNextFrontierLayer<T>(nextLayer: Map<string, T>, stopTraversal: boolean): T[] {
@@ -908,7 +911,7 @@ export function checkCounterpointStructure(
     tsDenom: number = 4,
     skipSpans: boolean = false
  ): PairwiseScanResult {
-    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'provisional', ppqParam, tsNum, tsDenom, skipSpans);
+    return checkCounterpointStructureWithBassRole(variantA, variantB, delayTicks, transposition, maxDissonanceRatio, 'provisional', ppqParam, tsNum, tsDenom, false, skipSpans);
 }
 
 export function checkCounterpointStructureWithBassRole(
@@ -921,6 +924,7 @@ export function checkCounterpointStructureWithBassRole(
     ppqParam: number = 480,
     tsNum: number = 4,
     tsDenom: number = 4,
+    allowP4RunLengthExtension: boolean = false,
     skipSpans: boolean = false,
     timelineA?: SortedNoteTimeline,
     timelineB?: SortedNoteTimeline
@@ -956,11 +960,13 @@ export function checkCounterpointStructureWithBassRole(
     const parallelPerfectStartTicks: number[] = skipSpans ? NO_TICKS : [];
     let previousOrderingSign = 0;
     let maxDissonanceRunEvents = 0;
+    let maxDissonanceRunIncludesP4Dissonance = false;
     let maxDissonanceRunTicks = 0;
     const maxAllowedContinuousDissonanceTicks = ppqParam;
     const dissonanceRunSpans: SimultaneitySpan[] = [];
     let runStartTick = 0;
     let runEndTick = 0;
+    let runIncludesP4Dissonance = false;
 
     // Sweep-line pointers
     let ptrA = 0;
@@ -1052,26 +1058,34 @@ export function checkCounterpointStructureWithBassRole(
                 runStartTick = start;
                 dissRunLength = 1;
                 dissRunTicks = dur;
+                runIncludesP4Dissonance = interval === 5;
             } else {
                 dissRunLength++;
                 dissRunTicks += dur;
+                if (interval === 5) runIncludesP4Dissonance = true;
             }
             runEndTick = end;
-            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
+            if (dissRunLength > maxDissonanceRunEvents) {
+                maxDissonanceRunEvents = dissRunLength;
+                maxDissonanceRunIncludesP4Dissonance = runIncludesP4Dissonance;
+            } else if (dissRunLength === maxDissonanceRunEvents && runIncludesP4Dissonance) {
+                maxDissonanceRunIncludesP4Dissonance = true;
+            }
             maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
 
             // Rule C2: Event Limit (r <= 2)
-            if (dissRunLength > 2) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
+            const maxAllowedRunEvents = allowP4RunLengthExtension && runIncludesP4Dissonance ? 3 : 2;
+            if (dissRunLength > maxAllowedRunEvents) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunIncludesP4Dissonance, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 
             // Rule C2b: Continuous dissonance must resolve within one beat.
-            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
+            if (dissRunTicks > maxAllowedContinuousDissonanceTicks) return { compatible: false, dissonanceRatio: 1, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunIncludesP4Dissonance, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 
             lastIsDiss = true;
         } else {
             if (lastIsDiss) dissonanceRunSpans.push({ startTick: runStartTick, endTick: runEndTick });
-            maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
             dissRunLength = 0;
             dissRunTicks = 0;
+            runIncludesP4Dissonance = false;
             lastIsDiss = false;
         }
 
@@ -1083,12 +1097,11 @@ export function checkCounterpointStructureWithBassRole(
     // Strict Dissonance Ratio Filter
     if (overlapTicks > 0) {
         const ratio = dissonantTicks / overlapTicks;
-        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
+        if (ratio > maxDissonanceRatio) return { compatible: false, dissonanceRatio: ratio, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunIncludesP4Dissonance, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
     }
 
-    maxDissonanceRunEvents = Math.max(maxDissonanceRunEvents, dissRunLength);
     maxDissonanceRunTicks = Math.max(maxDissonanceRunTicks, dissRunTicks);
-    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
+    return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunIncludesP4Dissonance, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 }
 
 export function isVoicePairAllowedForTransposition(
@@ -2195,6 +2208,7 @@ export async function searchStrettoChains(
                             ppq,
                             tsNum,
                             tsDenom,
+                            options.allowP4RunLengthExtension === true,
                             skipSpans,
                             timelineA,
                             timelineB
@@ -2266,6 +2280,7 @@ export async function searchStrettoChains(
                         p4SimultaneityCount: pairScan.p4SimultaneityCount,
                         hasVoiceCrossing: pairScan.hasVoiceCrossing,
                         maxDissonanceRunEvents: pairScan.maxDissonanceRunEvents,
+                        maxDissonanceRunIncludesP4Dissonance: pairScan.maxDissonanceRunIncludesP4Dissonance,
                         maxDissonanceRunTicks: pairScan.maxDissonanceRunTicks,
                         maxAllowedContinuousDissonanceTicks: ppq,
                         hasParallelPerfect58: pairScan.hasParallelPerfect58,

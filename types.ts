@@ -709,6 +709,7 @@ export interface StrettoSearchOptions {
     requireConsonantEnd: boolean;
     disallowComplexExceptions: boolean;
     maxPairwiseDissonance: number;
+    allowP4RunLengthExtension?: boolean;
     voiceNames?: Record<number, string>;
     meterNumerator?: number;
     meterDenominator?: number;
