@@ -35,7 +35,7 @@ export function deriveCoverageDisplayMetrics(coverage: CoverageDiagnostics): Cov
         },
         {
             metricKey: 'completionRatioLowerBound',
-            label: 'search-space completion estimate (heuristic)',
+            label: 'completion lower bound (heuristic)',
             value: completionLowerBoundPercent != null ? `${completionLowerBoundPercent}%` : 'n/a',
             show: completionAssumptionsHold
         },

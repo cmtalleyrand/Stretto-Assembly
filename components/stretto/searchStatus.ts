@@ -76,7 +76,7 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
     }
     const completionAssumptionsHold = coverage.completionLowerBoundAssumptions?.monotoneQueuedWorkItems === true;
     if (completionAssumptionsHold && typeof coverage.completionLowerBound === 'number') {
-      coverageTerms.push(`searchSpaceCompletion(heuristic)=${Math.round(coverage.completionLowerBound * 100)}%`);
+      coverageTerms.push(`completionLowerBound(heuristic)=${Math.round(coverage.completionLowerBound * 100)}%`);
     }
     coverageTerms.push(`explored=${coverage.exploredWorkItems.toLocaleString()}`);
     coverageTerms.push(`live=${coverage.liveFrontierWorkItems.toLocaleString()}`);

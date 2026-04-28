@@ -106,7 +106,7 @@ async function runDiagnostics() {
       const completionLowerBound = typeof stats.coverage.completionLowerBound === 'number'
         ? `${Math.round(stats.coverage.completionLowerBound * 100)}%`
         : 'null';
-      console.log(`  coverage(nodeBudget/searchSpaceCompletionHeuristic/explored/live/maxFrontier/classes)=${nodeBudget}/${completionLowerBound}/${stats.coverage.exploredWorkItems}/${stats.coverage.liveFrontierWorkItems}/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
+      console.log(`  coverage(nodeBudget/completionLowerBoundHeuristic/explored/live/maxFrontier/classes)=${nodeBudget}/${completionLowerBound}/${stats.coverage.exploredWorkItems}/${stats.coverage.liveFrontierWorkItems}/${stats.coverage.maxFrontierSize}/${stats.coverage.maxFrontierClassCount}`);
     }
   }
 
