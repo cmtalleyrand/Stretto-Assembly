@@ -53,6 +53,16 @@ for (const event of progressEvents) {
     assert(event.telemetry.tripletOperationsProcessed >= 0, 'tripletOperationsProcessed must be non-negative.');
     assert(event.telemetry.dagNodesExpanded >= 0, 'dagNodesExpanded must be non-negative.');
     assert(event.telemetry.dagEdgesEvaluated >= 0, 'dagEdgesEvaluated must be non-negative.');
+    if (event.stage === 'dag' && event.telemetry.dagDepthHistogram) {
+        const depths = Object.entries(event.telemetry.dagDepthHistogram);
+        for (const [depth, explored] of depths) {
+            const avgBranches = event.telemetry.dagAverageBranchesByDepth?.[depth] ?? 0;
+            const validRatio = event.telemetry.dagValidChainsRatioByDepth?.[depth] ?? 0;
+            assert(Number(explored) >= 0, `DAG depth histogram has negative explored count at depth ${depth}.`);
+            assert(Number(avgBranches) >= 0, `Average branches by depth must be non-negative at depth ${depth}.`);
+            assert(Number(validRatio) >= 0, `Valid/explored ratio must be non-negative at depth ${depth}.`);
+        }
+    }
     if (event.stage === 'dag' && event.completedUnits === event.totalUnits) {
         assert(
             event.terminal,

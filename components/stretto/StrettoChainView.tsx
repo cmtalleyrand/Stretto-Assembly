@@ -252,8 +252,18 @@ export default function StrettoChainView({
     const depthHistogramPresentation = React.useMemo(() => {
         const histogram = diagnostics?.coverage?.depthHistogram;
         if (!histogram) return null;
+        const averageBranchesByDepth = diagnostics?.coverage?.averageBranchesByDepth ?? {};
+        const validChainsRatioByDepth = diagnostics?.coverage?.validChainsRatioByDepth ?? {};
         const sortedBins = Object.entries(histogram)
-            .map(([depth, count]) => ({ depth: Number(depth), count: Number(count) }))
+            .map(([depth, count]) => {
+                const depthNumber = Number(depth);
+                return {
+                    depth: depthNumber,
+                    count: Number(count),
+                    averageBranches: Number(averageBranchesByDepth[depth] ?? 0),
+                    validRatio: Number(validChainsRatioByDepth[depth] ?? 0)
+                };
+            })
             .sort((a, b) => a.depth - b.depth);
         if (sortedBins.length === 0) {
             return {
@@ -281,9 +291,11 @@ export default function StrettoChainView({
                 tailMass += count;
             }
         }
-        const bins = sortedBins.map(({ depth, count }) => ({
+        const bins = sortedBins.map(({ depth, count, averageBranches, validRatio }) => ({
             depth,
             count,
+            averageBranches: Number.isFinite(averageBranches) ? averageBranches : 0,
+            validRatio: Number.isFinite(validRatio) ? validRatio : 0,
             normalizedWidth: maxCount > 0 ? count / maxCount : 0
         }));
         const deepestBin = sortedBins[sortedBins.length - 1];
@@ -302,7 +314,7 @@ export default function StrettoChainView({
             tailMass,
             dropOffRatio
         };
-    }, [diagnostics?.coverage?.depthHistogram, searchOptions.targetChainLength]);
+    }, [diagnostics?.coverage?.depthHistogram, diagnostics?.coverage?.averageBranchesByDepth, diagnostics?.coverage?.validChainsRatioByDepth, searchOptions.targetChainLength]);
 
     const maxConsecutiveDissonanceRegions = React.useMemo(() => {
         if (!chainCandidate) return 0;
@@ -428,6 +440,8 @@ export default function StrettoChainView({
                                                             />
                                                         </div>
                                                         <span className="w-9 font-mono text-gray-500">{bin.normalizedWidth.toFixed(2)}</span>
+                                                        <span className="w-24 font-mono text-gray-500">b̄ {bin.averageBranches.toFixed(2)}</span>
+                                                        <span className="w-20 font-mono text-gray-500">v/e {(bin.validRatio * 100).toFixed(1)}%</span>
                                                     </div>
                                                 ))}
                                             </div>

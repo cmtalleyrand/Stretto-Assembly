@@ -624,6 +624,8 @@ export interface StrettoSearchReport {
             maxFrontierSize: number;
             maxFrontierClassCount: number;
             depthHistogram: Record<string, number>;
+            averageBranchesByDepth?: Record<string, number>;
+            validChainsRatioByDepth?: Record<string, number>;
             completionLowerBound?: number | null;
             completionLowerBoundIsHeuristic?: boolean;
             completionLowerBoundAssumptions?: {

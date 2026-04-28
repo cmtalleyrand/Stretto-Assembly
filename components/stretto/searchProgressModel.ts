@@ -19,6 +19,9 @@ export interface SearchProgressState {
         dagExploredWorkItems: number;
         dagLiveFrontierWorkItems: number;
         dagHeuristicCompletionRatio?: number;
+        dagDepthHistogram?: Record<string, number>;
+        dagAverageBranchesByDepth?: Record<string, number>;
+        dagValidChainsRatioByDepth?: Record<string, number>;
     };
     heartbeat: boolean;
 }
