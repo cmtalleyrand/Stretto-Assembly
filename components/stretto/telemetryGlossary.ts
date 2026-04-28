@@ -109,7 +109,7 @@ export const STRETTO_TELEMETRY_GLOSSARY: Record<string, TelemetryGlossaryEntry> 
   },
   completionRatioLowerBound: {
     label: 'Search-space completion estimate',
-    formalDefinition: 'Heuristic completion estimator exploredWorkItems / (exploredWorkItems + estimatedRemainingWorkItems), where estimatedRemainingWorkItems is extrapolated from live frontier depth profile and observed branching by depth.',
+    formalDefinition: 'Heuristic completion estimator exploredWorkItems / (exploredWorkItems + estimatedRemainingWorkItems), where estimatedRemainingWorkItems uses a conservative branch upper-envelope (observed max successors by depth with static fallback cap).',
     unit: 'percent (%)',
     incrementSite: 'Derived from termination frontier coverage metrics.',
     estimateClass: 'heuristic'

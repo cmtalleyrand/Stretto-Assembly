@@ -139,6 +139,8 @@ for (const fixture of traversalFixtures) {
     assert.ok(coverage.liveFrontierWorkItems >= 0);
     assert.ok(coverage.completionLowerBound == null || (coverage.completionLowerBound >= 0 && coverage.completionLowerBound <= 1));
     if (coverage.completionLowerBound != null) {
+      const queueDrainCompletion = coverage.exploredWorkItems / Math.max(1, coverage.exploredWorkItems + coverage.liveFrontierWorkItems);
+      assert.ok(coverage.completionLowerBound <= queueDrainCompletion);
       if (coverage.liveFrontierWorkItems === 0) {
         assert.equal(coverage.completionLowerBound, 1);
       }
