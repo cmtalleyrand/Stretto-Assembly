@@ -60,7 +60,7 @@ export function deriveCoverageDisplayMetrics(coverage: CoverageDiagnostics): Cov
         {
             metricKey: 'depthHistogram',
             label: 'depth histogram',
-            value: Object.entries(coverage.depthHistogram).map(([depth, count]) => `${depth}:${count}`).join(', ') || 'n/a',
+            value: '',
             show: true
         }
     ];
@@ -249,6 +249,61 @@ export default function StrettoChainView({
         };
     }, [searchReport]);
 
+    const depthHistogramPresentation = React.useMemo(() => {
+        const histogram = diagnostics?.coverage?.depthHistogram;
+        if (!histogram) return null;
+        const sortedBins = Object.entries(histogram)
+            .map(([depth, count]) => ({ depth: Number(depth), count: Number(count) }))
+            .sort((a, b) => a.depth - b.depth);
+        if (sortedBins.length === 0) {
+            return {
+                bins: sortedBins,
+                peakDepth: null as number | null,
+                peakCount: 0,
+                tailMass: 0,
+                dropOffRatio: null as number | null
+            };
+        }
+        const targetDepth = searchOptions.targetChainLength;
+        let maxCount = 0;
+        let peakDepth = sortedBins[0].depth;
+        let peakCount = sortedBins[0].count;
+        let tailMass = 0;
+        for (const { depth, count } of sortedBins) {
+            if (count > maxCount) {
+                maxCount = count;
+            }
+            if (count > peakCount) {
+                peakCount = count;
+                peakDepth = depth;
+            }
+            if (depth === targetDepth || depth === targetDepth - 1) {
+                tailMass += count;
+            }
+        }
+        const bins = sortedBins.map(({ depth, count }) => ({
+            depth,
+            count,
+            normalizedWidth: maxCount > 0 ? count / maxCount : 0
+        }));
+        const deepestBin = sortedBins[sortedBins.length - 1];
+        const previousBin = sortedBins.length > 1 ? sortedBins[sortedBins.length - 2] : null;
+        const dropOffRatio = (
+            previousBin
+            && previousBin.depth === deepestBin.depth - 1
+            && previousBin.count > 0
+        )
+            ? deepestBin.count / previousBin.count
+            : null;
+        return {
+            bins,
+            peakDepth,
+            peakCount,
+            tailMass,
+            dropOffRatio
+        };
+    }, [diagnostics?.coverage?.depthHistogram, searchOptions.targetChainLength]);
+
     const maxConsecutiveDissonanceRegions = React.useMemo(() => {
         if (!chainCandidate) return 0;
         return computeMaxConsecutiveDissonanceRegions(chainCandidate.regions);
@@ -340,10 +395,44 @@ export default function StrettoChainView({
                                         .map((metric, index) => (
                                             <React.Fragment key={metric.metricKey}>
                                                 {index === 0 ? ' ' : ' · '}
-                                                {metric.label}: {metric.value}
+                                                {metric.metricKey === 'depthHistogram'
+                                                    ? `${metric.label}:`
+                                                    : `${metric.label}: ${metric.value}`
+                                                }
                                                 <MetricHelp metricKey={metric.metricKey} />
                                             </React.Fragment>
                                         ))}
+                                    {depthHistogramPresentation && (
+                                        <div className="mt-1 space-y-1 rounded border border-gray-700/70 bg-gray-900/70 p-1.5">
+                                            <div className="text-[9px] text-gray-200">
+                                                Peak depth: <span className="font-mono text-cyan-200">{depthHistogramPresentation.peakDepth ?? 'n/a'}</span>
+                                                {depthHistogramPresentation.peakDepth != null && (
+                                                    <span className="text-gray-400"> ({depthHistogramPresentation.peakCount.toLocaleString()})</span>
+                                                )}
+                                                {' '}· Tail mass at target ({searchOptions.targetChainLength - 1}/{searchOptions.targetChainLength}): <span className="font-mono text-cyan-200">{depthHistogramPresentation.tailMass.toLocaleString()}</span>
+                                                {' '}· Deep drop-off ratio: <span className="font-mono text-cyan-200">
+                                                    {depthHistogramPresentation.dropOffRatio != null
+                                                        ? depthHistogramPresentation.dropOffRatio.toFixed(2)
+                                                        : 'n/a'}
+                                                </span>
+                                            </div>
+                                            <div className="space-y-0.5">
+                                                {depthHistogramPresentation.bins.map((bin) => (
+                                                    <div key={bin.depth} className="flex items-center gap-1.5 text-[9px] text-gray-300">
+                                                        <span className="w-8 text-right font-mono text-gray-400">{bin.depth}</span>
+                                                        <span className="w-10 text-right font-mono">{bin.count.toLocaleString()}</span>
+                                                        <div className="h-1.5 w-16 rounded bg-gray-800">
+                                                            <div
+                                                                className="h-1.5 rounded bg-cyan-400/90"
+                                                                style={{ width: `${Math.round(bin.normalizedWidth * 100)}%` }}
+                                                            />
+                                                        </div>
+                                                        <span className="w-9 font-mono text-gray-500">{bin.normalizedWidth.toFixed(2)}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             {diagnostics.timeoutExtensionAppliedMs > 0 && (
