@@ -64,18 +64,6 @@ This file is a static reference; interpretation notes are discussed in code revi
 - `a`: pair evaluated with participant A as bass,
 - `b`: pair evaluated with participant B as bass.
 
-**Precision note:** for any realized assignment, exactly one of `a` or `b` is relevant (the member mapped to bass).
-
-**Equivalence result (`none`-only vs directional states):** not equivalent in current algorithm.
-- `none` treats P4 as provisionally consonant in pairwise precompute.
-- Later, when `bassIdx` is known, `applyBassRoleCompatibilityMaskRows` applies directional constraints using `a` for edges where the source is bass and `b` otherwise.
-- If one orientation is compatible and the other is not (for example `a=true`, `b=false`), a `none`-only representation cannot express the required asymmetric pruning and would admit invalid assignments or over-prune valid assignments.
-
-
-**Three concrete musical cases where directional states matter:**
-1. **Static fourth with lower tone in A stream**: A carries `C3`, B carries `F3` at overlap. Interval class is P4. Under `a` (A treated as bass), lower tone is bass ⇒ dissonant; under `b` (B treated as bass), lower tone is not bass ⇒ not dissonant by the implemented P4 rule.
-2. **Static fourth with lower tone in B stream**: A carries `F3`, B carries `C3` at overlap. Same interval class P4, but orientation flips: under `b`, lower tone is bass ⇒ dissonant; under `a`, not dissonant by the same rule.
-3. **Crossing texture with alternating lower owner**: over successive simultaneities the lower pitch alternates between streams (e.g., A below B at one segment, B below A at the next). Directional evaluation changes which segments count as dissonant and therefore changes run-length and dissonance-ratio outcomes; a single `none` state cannot represent this orientation-dependent aggregation.
 
 ## 9) `applyBassRoleCompatibilityMaskRows(record, bassIdx)`
 **Meaning:** projects `allowedVoiceMaskRows` through bass-role constraints when fourth-sensitive contexts require it.  
