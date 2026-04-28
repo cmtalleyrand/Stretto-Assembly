@@ -273,3 +273,7 @@ Never apply `isVoicePairAllowedForTransposition` to results from a fixture with 
 - The test is a tautology (always passes)
 
 When in doubt, ask: *"If this assertion passes, have I actually proven the code is correct?"* If the answer is no, rewrite or delete the test.
+
+## Coverage Policy
+
+This project does not track or enforce line-coverage percentages. The anti-pattern guidance above — testing behaviour, not implementation — is the correctness standard. A test that passes a coverage threshold while only asserting tautologies is worse than no test: it consumes maintenance budget and creates false confidence without catching real bugs.

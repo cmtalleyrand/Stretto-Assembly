@@ -116,3 +116,35 @@ Status labels:
 | `README.md` + `docs/stretto-entry-model.md` | Canonical-ready documentation | Canonical tuple, `d_i` semantics, constraints, and mapping are specified normatively. |
 
 This status is intentionally explicit: the project currently documents the canonical model while preserving runtime compatibility with legacy field names.
+
+## 7) Worked example: legacy → canonical
+
+A 3-entry chain as it appears in the current runtime (legacy `StrettoChainOption` fields):
+
+```typescript
+// chain array (legacy):
+[
+  { startBeat: 0.0, type: 'N', length: 4.0, transposition:  0, voiceIndex: 0 },
+  { startBeat: 2.0, type: 'N', length: 4.0, transposition:  7, voiceIndex: 1 },
+  { startBeat: 3.0, type: 'I', length: 3.0, transposition:  3, voiceIndex: 2 },
+]
+// variantIndices: [0, 0, 1]   (full-normal, full-normal, inverted-truncated)
+// Subject full length L_full = 4.0 beats
+```
+
+Applying the legacy-to-canonical mapping (§4):
+
+| i | d_i | t_i | v_i | inv_i | trunc_i | Derivation |
+|---|-----|-----|-----|-------|---------|-----------|
+| 0 | ⊥   | 0   | 0   | 0     | 0.0     | first entry; t=transposition; type='N'→inv=0; L_full−length=4−4=0 |
+| 1 | 2.0 | 7   | 1   | 0     | 0.0     | d=startBeat₁−startBeat₀=2.0−0.0; type='N'; 4−4=0 |
+| 2 | 1.0 | 3   | 2   | 1     | 1.0     | d=startBeat₂−startBeat₁=3.0−2.0; type='I'→inv=1; 4−3=1.0 |
+
+Canonical chain:
+```
+e0 = (⊥,   0, 0, 0, 0.0)  // d=n/a,    t=0 (root),    v=soprano, inv=false, trunc=0
+e1 = (2.0,  7, 1, 0, 0.0)  // d=2 beats, t=7 (P5 up),  v=alto,    inv=false, trunc=0
+e2 = (1.0,  3, 2, 1, 1.0)  // d=1 beat,  t=3 (m3 up),  v=tenor,   inv=true,  trunc=1 beat
+```
+
+The derived absolute starts are s₀=0, s₁=d₁=2.0, s₂=d₁+d₂=3.0 — matching the original `startBeat` values once normalized to `startBeat₀=0`.

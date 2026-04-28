@@ -2,6 +2,7 @@
 import { StrettoChainOption, StrettoSearchOptions, StrettoChainResult, ScoreLog } from '../../types';
 import { INTERVALS, SCORING } from './strettoConstants';
 import { analyzeStrettoHarmony } from './strettoHarmonyAnalysis';
+import { isStrongBeat } from './strettoTimeUtils';
 
 // --- Weights & Constants ---
 const W_S1 = 0.2; // Unweighted Dissonance
@@ -155,6 +156,8 @@ export function calculateStrettoScore(
 ): StrettoChainResult {
 
     const PPQ = ppq;
+    const tsNum = options.meterNumerator ?? 4;
+    const tsDenom = options.meterDenominator ?? 4;
 
     // 1. Collect all unique time points and place notes
     const timePoints = new Set<number>();
@@ -314,7 +317,7 @@ export function calculateStrettoScore(
 
         totalPolyTime += dur;
 
-        const isStrong = (event.startTick % (PPQ * 2) === 0);
+        const isStrong = isStrongBeat(event.startTick, PPQ, tsNum, tsDenom);
         const weight = isStrong ? 1.5 : 1.0;
         const weightedDur = dur * weight;
 

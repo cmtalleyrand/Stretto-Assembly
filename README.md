@@ -5,7 +5,7 @@
 The primary objective of stretto search and canon search is to find:
 a) for complex subjects in ABC: typcial subjects are between 2 and 4 measures long, with 10-25 notes. MIDI inputs are not often used
 b) the highest quality chains possible: criteria for quality are reflected in scoring, but the most important is disssonance as % of duration with simultaneities and % non-chord tones. As a rule of thumb good chains have less than 25% dissonance and no more than 10% of non-chord tones; acceptable chains no more than 35% dissonance and 25% NCTs; and anything over 50% dissonance is as good as useless
-c) of the length desired by the user: chains 1 shorter than the desired length are some value; chains 2 shorter of limited value and anything shorter is effectively worthless.
+c) of the length desired by the user: chains 1 shorter than the desired length are acceptable but worth approximately 1/10 the value of a chain of the desired length; chains 2 shorter are of limited value (~1/100); anything shorter is effectively worthless.
 d) within a reasonable time frame: ideally less than 30 seconds and no more than a minute, with no particular value to getting outputs in less than 15 seconds
 e) For export to MIDI
 
@@ -98,6 +98,18 @@ Gatekeeper constraint:
    - Assemble longer chains by extending from prevalidated triplet boundaries.
    - Use frontier-based expansion with key-based state merging in the bounded-depth phase, then depth-first continuation over surviving frontier states for deeper targets.
    - Reuse precomputed transition buckets keyed by boundary structure so expansion is linear in reachable edges from each frontier state.
+
+   Frontier expansion (one step, illustrative):
+   ```
+   Frontier @ chain length 3 — state = (boundaryPairKey, depth, U):
+     state A = (key1, 3, U={d2})        ← fewer used-delay slots
+     state B = (key1, 3, U={d2, d4})    ← U_A ⊆ U_B, so B is dominated → prune B
+
+   Expand state A → depth 4 (via precomputed transition bucket for key1):
+     + via triplet boundary key2 → (key2, 4, U={d2, d3})
+     + via triplet boundary key3 → (key3, 4, U={d2})
+   ```
+   U tracks high delays already used in the chain (for rule A.1 global uniqueness). A state is dominated — and pruned — when another state with the same key and depth has a subset of its used-delay set, because every extension reachable from the dominated state is also reachable from the dominator with no worse constraint burden.
 
 4. **Auxiliary admissibility traversals**
    - Run dedicated admissibility traversals (`full` or `delay-variant-only`) that compute reachable structural states and populate admissible pair indices / delay-transition indices.

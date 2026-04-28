@@ -121,12 +121,14 @@ See `SCORING_MECHANISM.md` for all penalty/bonus point values.
 |------|------|
 | `types.ts` | All shared TypeScript interfaces — update here first before changing logic |
 | `constants.ts` | Application-wide constants |
-| `components/services/strettoGenerator.ts` | Main chain search algorithm (~1800 lines) |
+| `components/services/strettoGenerator.ts` | Main chain search algorithm (~4200 lines) |
 | `components/services/strettoScoring.ts` | Scoring and ranking |
 | `components/services/strettoCore.ts` | Core harmonic analysis |
 | `components/services/midiAnalysis.ts` / `midiHarmony.ts` | MIDI parsing and harmonic compatibility (canonical analysis module is `@analysis/midi`) |
 | `hooks/useMidiController.ts` | Central state management |
 | `hooks/useStrettoAssembly.ts` | Stretto search operations |
+
+Additional technical documents live in `docs/`: codebase glossary (`codebase-glossary.md`), active-vs-legacy analysis path guide (`active-vs-legacy-analysis-paths.md`), search optimisation backlog (`search-optimisation-backlog.md`), refactor task plan (`refactor-task-plan.md`), and pairwise invariant test matrix (`stretto-pairwise-invariant-test-matrix.md`).
 
 ### Data flow
 
@@ -154,7 +156,7 @@ The normative entry representation is `e_i = (d_i, t_i, v_i, inv_i, trunc_i)` (s
 - `inv_i` ← `type === 'I'` ? 1 : 0
 - `trunc_i` ← `L_full − length_i`
 
-Do not migrate to canonical form without updating all consumers: `types.ts`, `StrettoChainView.tsx`, `StrettoResultsList.tsx`.
+Do not migrate to canonical form without updating all consumers: `types.ts`, `StrettoChainView.tsx`, `StrettoResultsList.tsx`. Migration is deferred because it requires coordinated changes across this large surface area with no incremental migration path; the canonical model is documented now so future migration has a clear target.
 
 
 ### Canonical analysis import policy

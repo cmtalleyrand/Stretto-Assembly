@@ -6,6 +6,7 @@ import { getInvertedPitch } from './strettoCore';
 import { buildTranspositionRuleTables, TranspositionIndex as RuleTranspositionIndex } from './stretto-opt/ruleTables';
 import { createCompatMatrix } from './stretto-opt/compatMatrix';
 import { buildVoiceTranspositionAdmissibilityIndex } from './stretto-opt/voiceTranspositionAdmissibility';
+import { isStrongBeat } from './strettoTimeUtils';
 
 // --- Constants & Types ---
 // Node budget removed — time is the only search limit.
@@ -1089,28 +1090,8 @@ export function checkCounterpointStructureWithBassRole(
     return { compatible: true, dissonanceRatio: overlapTicks > 0 ? dissonantTicks / overlapTicks : 0, strongBeatParallels, weakBeatParallels, hasFourth, p4SimultaneityCount, hasVoiceCrossing, maxDissonanceRunEvents, maxDissonanceRunTicks, hasParallelPerfect58, dissonanceSpans, p4Spans, parallelPerfectStartTicks, dissonanceRunSpans };
 }
 
-// Helper: Determine beat strength
-function resolveBeatAndMeasureTicks(ppq: number, tsNum: number, tsDenom: number): { beatTicks: number; measureTicks: number } {
-    const measureTicks = ppq * tsNum * (4 / tsDenom);
-    const isCompound = tsDenom === 8 && tsNum % 3 === 0 && tsNum >= 6;
-    const beatTicks = isCompound ? (3 * ppq) / 2 : ppq * (4 / tsDenom);
-    return { beatTicks, measureTicks };
-}
-
-export function isStrongBeat(tick: number, ppq: number, tsNum: number = 4, tsDenom: number = 4): boolean {
-    const { beatTicks, measureTicks } = resolveBeatAndMeasureTicks(ppq, tsNum, tsDenom);
-    const posInMeasure = ((tick % measureTicks) + measureTicks) % measureTicks;
-    const eps = 1e-6;
-
-    if (Math.abs(posInMeasure) < eps) return true;
-
-    // Rule: only 4/4 and 12/8 carry a second strong pulse at beat 3.
-    const hasSecondStrongPulse = (tsNum === 4 && tsDenom === 4) || (tsNum === 12 && tsDenom === 8);
-    if (!hasSecondStrongPulse) return false;
-
-    const secondStrongTick = 2 * beatTicks;
-    return Math.abs(posInMeasure - secondStrongTick) < eps;
-}
+// isStrongBeat is defined in strettoTimeUtils and re-exported here for external callers.
+export { isStrongBeat };
 
 export function isVoicePairAllowedForTransposition(
     voiceA: number,

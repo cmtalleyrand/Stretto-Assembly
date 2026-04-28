@@ -25,7 +25,14 @@ Notation: $n$ is the **absolute entry index** in the chain, $d_n$ is delay betwe
 ## 🚨 Consecutive Dissonance / Monophony Rule
 The consecutive dissonance **event counter** is reset only by a consonant simultaneous interval. Monophony (fewer than 2 voices active at a timepoint) is **transparent** to the event counter — neither incrementing nor resetting it. The tick-duration accumulator (max 1 beat of continuous sounding dissonance) resets on monophony.
 
-Example: dissonance → monophonic → dissonance → dissonance = **3 consecutive dissonances** → invalid.
+Example (counter trace):
+
+```
+Event:    consonance → dissonance → monophony → dissonance → dissonance
+Counter:       0            1       (still 1)       2             3       → invalid
+```
+
+The monophonic gap does not reset the counter; the next polyphonic event continues from where it left off.
 
 ## 1. Hard Constraints (The "Gatekeepers")
 Any chain candidate that violates *any* of these rules is immediately discarded (pruned) during the search process.
@@ -47,6 +54,8 @@ Implementation invariant: Rule A.6 is an immediate-neighbor predicate and is the
 ### B. Voice Interval Constraints
 
 **Scope:** Rules apply to **all temporal pairs** in a chain — not only to entries that sound simultaneously. When a new entry is assigned to a voice, the ordering constraints are checked relative to the most recent prior chain entry in every other voice, whether or not that prior entry is still sounding. These are register-identity constraints (a voice maintains its register relationship throughout the chain), not acoustic simultaneity constraints.
+
+**T values:** T(higher register) and T(lower register) in the table below are the raw semitone transposition values — pitch offsets from the original subject root — of each voice's most recently assigned entry. For non-overlapping pairs this is the transposition value of each voice's last entry, regardless of whether it is still sounding. Sounding MIDI pitches are never used in §B checks; see `isVoicePairAllowedForTransposition` in `strettoGenerator.ts`.
 
 Voice indices are ordered from highest register to lowest (0 = soprano … `ensembleTotal−1` = bass). Voices that are `dist` steps apart must satisfy a minimum transposition gap:
 
@@ -83,6 +92,10 @@ The fraction of polyphonic duration that contains any dissonance.
 
 ### Metric S2: Dissonance Ratio (Weighted)
 Similar to S1, but dissonances occurring on **Strong Beats** are penalized more heavily (1.5x weight).
+
+**Strong beat** — musical definition: the measure downbeat (beat 1) is always strong. In 4/4 and 12/8 only, beat 3 (the mid-measure accent in 4/4) or the second dotted-quarter beat (in 12/8) also carries a strong pulse. All other time signatures have only the downbeat as a strong beat.  
+**Code:** `isStrongBeat(tick, ppq, tsNum, tsDenom)` in `components/services/strettoTimeUtils.ts`.
+
 *   **Ideal:** Lower is better.
 
 ### Metric S3: Non-Chord Tone (NCT) Ratio

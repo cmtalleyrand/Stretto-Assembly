@@ -14,12 +14,47 @@ When introducing a new feature (e.g., a new Harmonic Status):
 4.  **CONSUME**: Update the UI (React components) to handle the new data.
 
 ### 2. Common Pitfalls
-*   **Union Mismatches:** Returning a string "dissonant_severe" when the type is `'dissonant'`.
-    *   *Fix:* Add the new string to the Union Type definition.
-*   **Missing Props:** Passing `pairDissonanceScore` to a component that hasn't defined it in its `Interface`.
-    *   *Fix:* Update the Component's Props Interface.
-*   **Implicit Any:** Creating a variable `const x = []` and pushing complex objects into it.
-    *   *Fix:* Explicitly type it: `const x: MyType[] = []`.
+
+#### Union Mismatches
+Returning a value that isn't in the declared union — TypeScript catches this at compile time, but only if the type is declared first.
+
+```typescript
+// ❌ BAD: 'amber' not declared in the union — compile error
+function getStatus(r: HarmonicRegion): 'consonant' | 'dissonant' {
+    return r.isClean ? 'consonant' : 'amber';
+}
+
+// ✅ GOOD: extend the union in types.ts first, then return it
+// In types.ts: type HarmonicStatus = 'consonant' | 'dissonant' | 'amber';
+function getStatus(r: HarmonicRegion): HarmonicStatus {
+    return r.isClean ? 'consonant' : 'amber';
+}
+```
+
+#### Missing Props
+Passing a prop that the component's interface doesn't declare yet.
+
+```typescript
+// ❌ BAD: dissonanceScore not in ChainViewProps — compile error at call site
+interface ChainViewProps { chain: StrettoChainOption[]; }
+
+// ✅ GOOD: add the prop to the interface first
+interface ChainViewProps { chain: StrettoChainOption[]; dissonanceScore: number; }
+function ChainView({ chain, dissonanceScore }: ChainViewProps) { /* ... */ }
+```
+
+#### Implicit Any
+Untyped arrays that receive heterogeneous pushes silently become `any[]`.
+
+```typescript
+// ❌ BAD: entries inferred as any[]
+const entries = [];
+chain.forEach(e => entries.push({ beat: e.startBeat, pitch: e.transposition }));
+
+// ✅ GOOD: explicit element type
+const entries: { beat: number; pitch: number }[] = [];
+chain.forEach(e => entries.push({ beat: e.startBeat, pitch: e.transposition }));
+```
 
 ### 3. Handling Enums and Switch Cases
 If you change a Type Union (e.g., `HarmonicRegion['type']`), check every `switch` statement that uses it.
