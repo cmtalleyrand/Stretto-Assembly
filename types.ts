@@ -613,6 +613,7 @@ export interface StrettoSearchReport {
             structurallyCompleteChainsFound: number;
             prefixAdmissibleCompleteChainsFound: number;
             scoringValidChainsFound: number;
+            hasTargetValidChain?: boolean;
             finalizationRejectedVoiceAssignment: number;
             finalizationRejectedScoringInvalid: number;
             maxDissonanceRunEventsHistogram?: Record<string, number>;
