@@ -92,6 +92,13 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
   };
 }
 
+
+function deriveHasTargetValidChain(report: StrettoSearchReport, targetChainLength: number): boolean {
+  const diagnosticsFlag = report.stats.completionDiagnostics?.hasTargetValidChain;
+  if (typeof diagnosticsFlag === 'boolean') return diagnosticsFlag;
+  return report.results.some((result) => result.entries.length === targetChainLength && result.isValid === true);
+}
+
 export function deriveSearchStatusPresentation(
   report: StrettoSearchReport,
   targetChainLength: number
@@ -102,10 +109,12 @@ export function deriveSearchStatusPresentation(
   const extensionMs = report.stats.timeoutExtensionAppliedMs || 0;
   const extensionText = extensionMs > 0 ? ` Timeout extension used: +${extensionMs}ms.` : '';
 
-  if (report.stats.stopReason === 'Success') {
+  const hasTargetValidChain = deriveHasTargetValidChain(report, safeTarget);
+
+  if (hasTargetValidChain) {
     return {
       heading: 'Search Succeeded',
-      detail: `Target depth reached (${safeTarget}/${safeTarget}, ${progressPercent}%).${extensionText}`,
+      detail: `Validated target-length chain found (${safeTarget}/${safeTarget}, ${progressPercent}%).${extensionText}`,
       toneClass: 'bg-green-900/30 border-green-800 text-green-200',
       progressPercent
     };

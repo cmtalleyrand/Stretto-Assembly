@@ -6,10 +6,14 @@ function mkReport(
   stopReason: StrettoSearchReport['stats']['stopReason'],
   maxDepthReached: number,
   timeoutExtensionAppliedMs: number = 0,
-  withStats: boolean = false
+  withStats: boolean = false,
+  hasTargetValidChain: boolean = false
 ): StrettoSearchReport {
+  const targetLength = 8;
   return {
-    results: [],
+    results: hasTargetValidChain
+      ? [{ id: 'target-valid', entries: new Array(targetLength).fill(null).map((_, idx) => ({ startBeat: idx, transposition: idx, type: 'N', length: 480, voiceIndex: 1 })), warnings: [], score: 1, isValid: true }]
+      : [],
     stats: {
       nodesVisited: 100,
       timeMs: 5000,
@@ -35,6 +39,14 @@ function mkReport(
             completionRatioLowerBound: 29
           }
         : undefined,
+      completionDiagnostics: {
+        structurallyCompleteChainsFound: hasTargetValidChain ? 1 : 0,
+        prefixAdmissibleCompleteChainsFound: hasTargetValidChain ? 1 : 0,
+        scoringValidChainsFound: hasTargetValidChain ? 1 : 0,
+        hasTargetValidChain,
+        finalizationRejectedVoiceAssignment: 0,
+        finalizationRejectedScoringInvalid: 0
+      },
       stageStats: withStats
         ? {
             validDelayCount: 6,
@@ -63,6 +75,14 @@ function mkReport(
         : undefined
     }
   };
+}
+
+const successFromValidChain = deriveSearchStatusPresentation(mkReport('Exhausted', 8, 0, false, true), 8);
+if (successFromValidChain.heading !== 'Search Succeeded') {
+  throw new Error('Success UI state must be derived from validated target-length chains.');
+}
+if (!successFromValidChain.detail.includes('Validated target-length chain found')) {
+  throw new Error('Success detail must describe validation-based completion, not structural depth alone.');
 }
 
 const timeoutFar = deriveSearchStatusPresentation(mkReport('Timeout', 3), 8);
