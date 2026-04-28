@@ -91,6 +91,20 @@ async function runSearchThroughWorker(request: WorkerRequest): Promise<{ report:
 
 const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
 
+
+function hasTargetValidChain(report: Awaited<ReturnType<typeof searchStrettoChains>>, targetChainLength: number): boolean {
+  return report.results.some((result) => result.entries.length === targetChainLength && result.isValid === true);
+}
+
+function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof searchStrettoChains>>, targetChainLength: number, fixtureLabel: string): void {
+  const invariantHolds = report.stats.stopReason !== 'Success' || hasTargetValidChain(report, targetChainLength);
+  assert.equal(
+    invariantHolds,
+    true,
+    `${fixtureLabel}: invariant violation: stopReason === 'Success' => hasTargetValidChain === true`
+  );
+}
+
 // A) Baseline in-app path: execute through worker protocol + results rendering.
 {
   const options: StrettoSearchOptions = {
@@ -114,6 +128,7 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
   };
 
   const { report, messages } = await runSearchThroughWorker({ subject: abcSubject, options, ppq: PPQ });
+  assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-A');
   assert.ok(report.results.length > 0, 'fixture-A: expected baseline worker search to return at least one chain.');
   assert.ok(messages.some((m) => m.ok && m.kind === 'progress'), 'fixture-A: expected worker to emit progress messages.');
 
@@ -145,6 +160,7 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
   };
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
+  assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-B');
   if (report.results.length === 0) {
     assert.equal(
       report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0,
@@ -186,12 +202,14 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
   };
 
   const report = await searchStrettoChains(constrainedSubject, options, PPQ);
+  assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-C');
   const longestReported = report.results.reduce((maxLen, chain) => Math.max(maxLen, chain.entries.length), 0);
 
   assert.equal(report.stats.stopReason, 'Exhausted', 'fixture-C: expected constrained search to exhaust finite search space.');
-  assert.ok(
-    report.stats.maxDepthReached < options.targetChainLength,
-    `fixture-C: expected maxDepthReached (${report.stats.maxDepthReached}) below targetChainLength (${options.targetChainLength})`
+  assert.equal(
+    hasTargetValidChain(report, options.targetChainLength),
+    false,
+    `fixture-C: expected no validated chain at target depth ${options.targetChainLength}`
   );
   assert.ok(report.results.length > 0, 'fixture-C: expected fallback reporting to emit longest admissible partial chains.');
   assert.ok(
@@ -227,6 +245,7 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
   };
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
+  assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-D');
   const longestReported = report.results.reduce((maxLen, chain) => Math.max(maxLen, chain.entries.length), 0);
 
   assert.ok((report.stats.tripletBudgetMs ?? 0) > 0, 'fixture-D: expected positive triplet budget under bounded runtime.');
@@ -270,6 +289,7 @@ const abcSubject = parseSimpleAbc(DEFAULT_ABC_SUBJECT, PPQ);
   };
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
+  assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-E');
   assert.ok(
     report.stats.stopReason === 'Timeout' || report.stats.stopReason === 'Success',
     `fixture-E: expected Timeout|Success under bounded budget at target depth 8, got ${report.stats.stopReason}.`

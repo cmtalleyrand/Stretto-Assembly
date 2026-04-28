@@ -4281,12 +4281,11 @@ export async function searchStrettoChains(
     }
 
     // --- POST-SEARCH: Reserved finalization stage ---
-    let stopReason: StrettoSearchReport['stats']['stopReason'] = terminationReason || (unscoredResults.length > 0 ? 'Success' : 'Exhausted');
+    const terminalStopReasonFromTraversal: StrettoSearchReport['stats']['stopReason'] = terminationReason || 'Exhausted';
     if (unscoredResults.length === 0 && deferredPartials.length > 0) {
         for (const dp of deferredPartials) {
             unscoredResults.push({ entries: dp.chain, variantIndices: dp.variantIndices });
         }
-        if (!terminationReason) stopReason = 'Exhausted';
     }
 
     const sourceUnscored: UnscoredChain[] = unscoredResults;
@@ -4446,6 +4445,9 @@ export async function searchStrettoChains(
         finalResults.push(leader);
     });
 
+    const hasTargetValidChain = finalResults.some((result) => result.entries.length === options.targetChainLength && result.isValid === true);
+    const stopReason: StrettoSearchReport['stats']['stopReason'] = hasTargetValidChain ? 'Success' : terminalStopReasonFromTraversal;
+
     emitDagProgress(true, true);
     const estimatedRemainingWorkItems = estimateRemainingWorkItems();
     const totalEstimatedWorkItems = dagExploredWorkItems + estimatedRemainingWorkItems;
@@ -4518,6 +4520,7 @@ export async function searchStrettoChains(
                 structurallyCompleteChainsFound,
                 prefixAdmissibleCompleteChainsFound,
                 scoringValidChainsFound: scoringValidChainsFoundCount,
+                hasTargetValidChain,
                 finalizationRejectedVoiceAssignment,
                 finalizationRejectedScoringInvalid,
                 maxDissonanceRunEventsHistogram: Object.keys(maxDissonanceRunEventsHistogram).length > 0
