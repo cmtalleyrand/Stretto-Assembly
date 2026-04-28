@@ -105,6 +105,21 @@ function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof 
   );
 }
 
+function assertDisplayedChainsAreScoredAndValid(report: Awaited<ReturnType<typeof searchStrettoChains>>, fixtureLabel: string): void {
+  for (const chain of report.results) {
+    assert.equal(chain.isValid, true, `${fixtureLabel}: displayed chain ${chain.id} must be valid.`);
+    assert.equal(Number.isFinite(chain.score), true, `${fixtureLabel}: displayed chain ${chain.id} must have a finite numeric score.`);
+  }
+}
+
+function assertInvalidDiagnosticsHaveNoScores(report: Awaited<ReturnType<typeof searchStrettoChains>>, fixtureLabel: string): void {
+  const diagnostics = report.stats.completionDiagnostics?.invalidChainDiagnostics ?? [];
+  for (const invalid of diagnostics) {
+    assert.equal(invalid.isValid, false, `${fixtureLabel}: invalid diagnostics partition must contain only invalid chains.`);
+    assert.equal('score' in invalid, false, `${fixtureLabel}: invalid diagnostic chain ${invalid.id} must not carry a score field.`);
+  }
+}
+
 // A) Baseline in-app path: execute through worker protocol + results rendering.
 {
   const options: StrettoSearchOptions = {
@@ -129,6 +144,8 @@ function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof 
 
   const { report, messages } = await runSearchThroughWorker({ subject: abcSubject, options, ppq: PPQ });
   assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-A');
+  assertDisplayedChainsAreScoredAndValid(report, 'fixture-A');
+  assertInvalidDiagnosticsHaveNoScores(report, 'fixture-A');
   assert.ok(report.results.length > 0, 'fixture-A: expected baseline worker search to return at least one chain.');
   assert.ok(messages.some((m) => m.ok && m.kind === 'progress'), 'fixture-A: expected worker to emit progress messages.');
 
@@ -161,6 +178,8 @@ function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof 
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
   assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-B');
+  assertDisplayedChainsAreScoredAndValid(report, 'fixture-B');
+  assertInvalidDiagnosticsHaveNoScores(report, 'fixture-B');
   if (report.results.length === 0) {
     assert.equal(
       report.stats.completionDiagnostics?.scoringValidChainsFound ?? 0,
@@ -203,6 +222,8 @@ function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof 
 
   const report = await searchStrettoChains(constrainedSubject, options, PPQ);
   assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-C');
+  assertDisplayedChainsAreScoredAndValid(report, 'fixture-C');
+  assertInvalidDiagnosticsHaveNoScores(report, 'fixture-C');
   const longestReported = report.results.reduce((maxLen, chain) => Math.max(maxLen, chain.entries.length), 0);
 
   assert.equal(report.stats.stopReason, 'Exhausted', 'fixture-C: expected constrained search to exhaust finite search space.');
@@ -246,6 +267,8 @@ function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof 
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
   assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-D');
+  assertDisplayedChainsAreScoredAndValid(report, 'fixture-D');
+  assertInvalidDiagnosticsHaveNoScores(report, 'fixture-D');
   const longestReported = report.results.reduce((maxLen, chain) => Math.max(maxLen, chain.entries.length), 0);
 
   assert.ok((report.stats.tripletBudgetMs ?? 0) > 0, 'fixture-D: expected positive triplet budget under bounded runtime.');
@@ -290,6 +313,8 @@ function assertSuccessImpliesTargetValidChain(report: Awaited<ReturnType<typeof 
 
   const report = await searchStrettoChains(abcSubject, options, PPQ);
   assertSuccessImpliesTargetValidChain(report, options.targetChainLength, 'fixture-E');
+  assertDisplayedChainsAreScoredAndValid(report, 'fixture-E');
+  assertInvalidDiagnosticsHaveNoScores(report, 'fixture-E');
   assert.ok(
     report.stats.stopReason === 'Timeout' || report.stats.stopReason === 'Success',
     `fixture-E: expected Timeout|Success under bounded budget at target depth 8, got ${report.stats.stopReason}.`

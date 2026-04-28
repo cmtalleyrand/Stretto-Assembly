@@ -96,7 +96,11 @@ export function deriveSearchDiagnosticsPresentation(report: StrettoSearchReport)
 function deriveHasTargetValidChain(report: StrettoSearchReport, targetChainLength: number): boolean {
   const diagnosticsFlag = report.stats.completionDiagnostics?.hasTargetValidChain;
   if (typeof diagnosticsFlag === 'boolean') return diagnosticsFlag;
-  return report.results.some((result) => result.entries.length === targetChainLength && result.isValid === true);
+  return report.results.some((result) => (
+    result.entries.length === targetChainLength
+    && result.isValid === true
+    && Number.isFinite(result.score)
+  ));
 }
 
 export function deriveSearchStatusPresentation(
