@@ -24,7 +24,7 @@ function mkReport(
             maxFrontierSize: 150,
             maxFrontierClassCount: 12,
             depthHistogram: { '1': 3, '2': 12, '3': 56 },
-            completionLowerBound: 0.71,
+            completionLowerBound: 0.29,
             completionLowerBoundIsHeuristic: true,
             completionLowerBoundAssumptions: {
               monotoneQueuedWorkItems: true
@@ -32,7 +32,7 @@ function mkReport(
             edgesTraversed: 500,
             frontierSizeAtTermination: 40,
             frontierClassesAtTermination: 8,
-            completionRatioLowerBound: 71
+            completionRatioLowerBound: 29
           }
         : undefined,
       stageStats: withStats
@@ -105,9 +105,9 @@ if (!diagnostics.constraintSignals.some((signal) => signal.includes('Triplet rej
 if (!diagnostics.constraintSignals.some((signal) => signal.includes('terminationFrontier=40 (8 classes)'))) {
   throw new Error('Diagnostics must expose termination frontier coverage signal.');
 }
-if (!diagnostics.constraintSignals.some((signal) => signal.includes('completionLowerBound(heuristic)=71% explored=71 live=29'))) {
-  throw new Error('Diagnostics must expose heuristic completion-bound assumptions and explored/live work-item counts.');
-}
+	if (!diagnostics.constraintSignals.some((signal) => signal.includes('searchSpaceCompletion(heuristic)=29% explored=71 live=29'))) {
+	  throw new Error('Diagnostics must expose heuristic completion assumptions and explored/live work-item counts.');
+	}
 
 const runtime = deriveSearchRuntimePresentation(12000, 30000);
 if (runtime.elapsedPercent !== 40) {
