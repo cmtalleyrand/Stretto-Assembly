@@ -1,109 +1,79 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { Midi } from '@tonejs/midi';
-import { AppState, TrackInfo, MidiEventCounts, MidiEventType, TempoChangeMode, ConversionOptions, PianoRollTrackData, TrackAnalysisData, OutputStrategy, RhythmRule, VoiceAssignmentMode, AnalysisSection } from '../types';
+import { useReducer, useCallback, useEffect, useMemo } from 'react';
+import { AppState, ConversionOptions } from '../types';
 import { getQuantizationWarning, stopPlayback } from '../components/services/midiService';
 import { MUSICAL_TIME_OPTIONS } from '../constants';
 import { useMidiActions } from './useMidiActions';
+import { createInitialMidiControllerState, midiControllerReducer } from './midiControllerState';
 
 export const useMidiController = () => {
-  // --- 1. STATE ---
-  const [appState, setAppState] = useState<AppState>(AppState.IDLE);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [successMessage, setSuccessMessage] = useState<string>('');
-  const [midiData, setMidiData] = useState<Midi | null>(null);
-  const [trackInfo, setTrackInfo] = useState<TrackInfo[]>([]);
-  const [selectedTracks, setSelectedTracks] = useState<Set<number>>(new Set());
-  const [fileName, setFileName] = useState<string>('input.mid');
-  const [playingTrackId, setPlayingTrackId] = useState<number | null>(null);
-  const [eventCounts, setEventCounts] = useState<MidiEventCounts | null>(null);
-  const [eventsToDelete, setEventsToDelete] = useState<Set<MidiEventType>>(new Set());
-  
-  const [generatedScore, setGeneratedScore] = useState<string>('');
-  const [auditLog, setAuditLog] = useState<string>(''); 
-  const [analyzedTrackData, setAnalyzedTrackData] = useState<TrackAnalysisData | null>(null);
-  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState<boolean>(false);
+  const [controllerState, dispatch] = useReducer(midiControllerReducer, undefined, createInitialMidiControllerState);
+  const { midiSessionState, conversionSettingsState, analysisUiState } = controllerState;
 
-  // Settings
-  const [originalTempo, setOriginalTempo] = useState<number | null>(null);
-  const [newTempo, setNewTempo] = useState<string>('');
-  const [originalTimeSignature, setOriginalTimeSignature] = useState<{numerator: number, denominator: number} | null>(null);
-  const [newTimeSignature, setNewTimeSignature] = useState({numerator: '', denominator: ''});
-  const [tempoChangeMode, setTempoChangeMode] = useState<TempoChangeMode>('speed');
-  const [originalDuration, setOriginalDuration] = useState<number | null>(null);
-  const [newDuration, setNewDuration] = useState<number | null>(null);
+  const {
+    appState,
+    midiData,
+    trackInfo,
+    selectedTracks,
+    fileName,
+    playingTrackId,
+    eventCounts,
+    eventsToDelete
+  } = midiSessionState;
 
-  const [modalRoot, setModalRoot] = useState<number>(0);
-  const [modalModeName, setModalModeName] = useState<string>('Major');
-  const [isModalConversionEnabled, setIsModalConversionEnabled] = useState<boolean>(false);
-  const [modalMappings, setModalMappings] = useState<Record<number, number>>({});
+  const {
+    originalTempo,
+    newTempo,
+    originalTimeSignature,
+    newTimeSignature,
+    tempoChangeMode,
+    originalDuration,
+    newDuration,
+    modalRoot,
+    modalModeName,
+    isModalConversionEnabled,
+    modalMappings,
+    primaryRhythm,
+    secondaryRhythm,
+    quantizeDurationMin,
+    shiftToMeasure,
+    detectOrnaments,
+    softOverlapToleranceIndex,
+    pitchBias,
+    maxVoices,
+    disableChords,
+    voiceAssignmentMode,
+    outputStrategy,
+    analysisSections,
+    contextText,
+    voiceNames
+  } = conversionSettingsState;
 
-  const [primaryRhythm, setPrimaryRhythm] = useState<RhythmRule>({ enabled: true, family: 'Simple', minNoteValue: '1/16' }); 
-  const [secondaryRhythm, setSecondaryRhythm] = useState<RhythmRule>({ enabled: false, family: 'Triple', minNoteValue: '1/8t' });
-
-  const [quantizeDurationMin, setQuantizeDurationMin] = useState<string>('off');
-  const [shiftToMeasure, setShiftToMeasure] = useState<boolean>(false);
-  const [detectOrnaments, setDetectOrnaments] = useState<boolean>(true); 
-  const [softOverlapToleranceIndex, setSoftOverlapToleranceIndex] = useState<number>(5); 
-  const [pitchBias, setPitchBias] = useState<number>(50); 
-  const [maxVoices, setMaxVoices] = useState<number>(0); 
-  const [disableChords, setDisableChords] = useState<boolean>(false);
-  const [voiceAssignmentMode, setVoiceAssignmentMode] = useState<VoiceAssignmentMode>('auto');
-  const [outputStrategy, setOutputStrategy] = useState<OutputStrategy>('separate_voices'); 
-  const [voiceNames, setVoiceNames] = useState<Record<number, string>>({}); 
-  
-  const [analysisSections, setAnalysisSections] = useState<AnalysisSection[]>([
-      { 
-          id: '1', name: 'Section A', startMeasure: 1, endMeasure: 8, harmonyMode: 'hia_v2', pitchStatsMode: 'frequency',
-          chordTolerance: '1/32', chordMinDuration: 'off', arpeggioWindowVal: '1/2', ignorePassingMotion: false,
-          hybridConfig: { voiceRoles: {}, arpStrategy: 'note_based', arpHistoryCount: 4, arpHistoryTime: '1/2' },
-          debugLogging: false
-      }
-  ]);
-  const [contextText, setContextText] = useState<string>('');
-
-  const [isPianoRollVisible, setIsPianoRollVisible] = useState<boolean>(false);
-  const [pianoRollTrackData, setPianoRollTrackData] = useState<PianoRollTrackData | null>(null);
-
-  // --- 2. EFFECTS & HELPERS ---
+  const {
+    errorMessage,
+    successMessage,
+    generatedScore,
+    auditLog,
+    analyzedTrackData,
+    isAnalysisModalOpen,
+    isPianoRollVisible,
+    pianoRollTrackData
+  } = analysisUiState;
 
   useEffect(() => { return () => { stopPlayback(); }; }, []);
 
-  // Duration Recalc
   useEffect(() => {
     if (appState === AppState.IDLE || appState === AppState.LOADING) return;
     if (originalTempo && originalDuration) {
-        const parsedTempo = parseInt(newTempo, 10);
-        let duration = originalDuration;
-        if (!isNaN(parsedTempo) && parsedTempo > 0) {
-            if (tempoChangeMode === 'speed') setNewDuration(duration * (originalTempo / parsedTempo));
-            else setNewDuration(duration);
-        } else setNewDuration(duration);
+      const parsedTempo = parseInt(newTempo, 10);
+      let duration = originalDuration;
+      if (!isNaN(parsedTempo) && parsedTempo > 0) {
+        if (tempoChangeMode === 'speed') {
+          duration = duration * (originalTempo / parsedTempo);
+        }
+      }
+      dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { newDuration: duration } });
     }
   }, [newTempo, tempoChangeMode, originalTempo, originalDuration, appState]);
-  
-  const handleReset = useCallback((fullReset = true) => {
-    if(fullReset) { setAppState(AppState.IDLE); setMidiData(null); setTrackInfo([]); setFileName(''); }
-    stopPlayback(); setPlayingTrackId(null);
-    setErrorMessage(''); setSuccessMessage(''); setGeneratedScore(''); setAuditLog('');
-    setSelectedTracks(new Set());
-    setOriginalTempo(null); setNewTempo('');
-    setOriginalTimeSignature(null); setNewTimeSignature({numerator: '', denominator: ''});
-    setEventCounts(null); setEventsToDelete(new Set());
-    setTempoChangeMode('speed'); setOriginalDuration(null); setNewDuration(null);
-    setModalRoot(0); setModalModeName('Major'); setIsModalConversionEnabled(false); setModalMappings({});
-    setPrimaryRhythm({ enabled: true, family: 'Simple', minNoteValue: '1/16' });
-    setSecondaryRhythm({ enabled: false, family: 'Triple', minNoteValue: '1/8t' });
-    setQuantizeDurationMin('off'); setShiftToMeasure(false); setDetectOrnaments(true);
-    setSoftOverlapToleranceIndex(5); setPitchBias(50); setMaxVoices(0); setDisableChords(false);
-    setVoiceAssignmentMode('auto'); setOutputStrategy('separate_voices'); setVoiceNames({});
-    setAnalysisSections([{ 
-        id: '1', name: 'Section A', startMeasure: 1, endMeasure: 8, harmonyMode: 'hia_v2', pitchStatsMode: 'frequency',
-        chordTolerance: '1/32', chordMinDuration: 'off', arpeggioWindowVal: '1/2', ignorePassingMotion: false,
-        hybridConfig: { voiceRoles: {}, arpStrategy: 'note_based', arpHistoryCount: 4, arpHistoryTime: '1/2' },
-        debugLogging: false
-    }]);
-    setContextText(''); setAnalyzedTrackData(null); setIsAnalysisModalOpen(false);
-  }, []);
 
   const getConversionOptions = useCallback((): ConversionOptions | null => {
     if (!originalTempo || !midiData) return null;
@@ -114,67 +84,140 @@ export const useMidiController = () => {
     if (isNaN(parsedTsNum) || isNaN(parsedTsDenom) || parsedTsNum <= 0 || parsedTsDenom <= 0) return null;
 
     return {
-        tempo: parsedTempo,
-        timeSignature: { numerator: parsedTsNum, denominator: parsedTsDenom },
-        tempoChangeMode, originalTempo, transposition: 0, noteTimeScale: 1, inversionMode: 'off',
-        primaryRhythm, secondaryRhythm, quantizationValue: primaryRhythm.enabled ? primaryRhythm.minNoteValue : 'off', 
-        quantizeDurationMin, shiftToMeasure, detectOrnaments,
-        modalConversion: { enabled: isModalConversionEnabled, root: modalRoot, modeName: modalModeName, mappings: modalMappings },
-        removeShortNotesThreshold: 0, pruneOverlaps: false, pruneThresholdIndex: 0,
-        voiceSeparationOverlapTolerance: MUSICAL_TIME_OPTIONS[softOverlapToleranceIndex].value,
-        voiceSeparationPitchBias: pitchBias, voiceSeparationMaxVoices: maxVoices,
-        voiceSeparationDisableChords: disableChords, voiceAssignmentMode, outputStrategy: 'separate_voices', 
-        sections: analysisSections, voiceNames
+      tempo: parsedTempo,
+      timeSignature: { numerator: parsedTsNum, denominator: parsedTsDenom },
+      tempoChangeMode,
+      originalTempo,
+      transposition: 0,
+      noteTimeScale: 1,
+      inversionMode: 'off',
+      primaryRhythm,
+      secondaryRhythm,
+      quantizationValue: primaryRhythm.enabled ? primaryRhythm.minNoteValue : 'off',
+      quantizeDurationMin,
+      shiftToMeasure,
+      detectOrnaments,
+      modalConversion: { enabled: isModalConversionEnabled, root: modalRoot, modeName: modalModeName, mappings: modalMappings },
+      removeShortNotesThreshold: 0,
+      pruneOverlaps: false,
+      pruneThresholdIndex: 0,
+      voiceSeparationOverlapTolerance: MUSICAL_TIME_OPTIONS[softOverlapToleranceIndex].value,
+      voiceSeparationPitchBias: pitchBias,
+      voiceSeparationMaxVoices: maxVoices,
+      voiceSeparationDisableChords: disableChords,
+      voiceAssignmentMode,
+      outputStrategy: 'separate_voices',
+      sections: analysisSections,
+      voiceNames
     };
   }, [newTempo, newTimeSignature, originalTempo, tempoChangeMode, primaryRhythm, secondaryRhythm, quantizeDurationMin, shiftToMeasure, detectOrnaments, softOverlapToleranceIndex, pitchBias, maxVoices, disableChords, voiceAssignmentMode, midiData, analysisSections, voiceNames, modalRoot, modalModeName, isModalConversionEnabled, modalMappings]);
 
   const quantizationWarning = useMemo(() => {
-      if (!midiData || !primaryRhythm.enabled) return null;
-      const options = getConversionOptions();
-      if (!options) return null;
-      return getQuantizationWarning(midiData, selectedTracks, options);
+    if (!midiData || !primaryRhythm.enabled) return null;
+    const options = getConversionOptions();
+    if (!options) return null;
+    return getQuantizationWarning(midiData, selectedTracks, options);
   }, [midiData, selectedTracks, primaryRhythm, getConversionOptions]);
 
   const clearMessages = useCallback(() => {
-      setErrorMessage(''); setSuccessMessage('');
-      if(appState === AppState.SUCCESS || appState === AppState.ERROR) setAppState(AppState.LOADED);
+    dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { errorMessage: '', successMessage: '' } });
+    if (appState === AppState.SUCCESS || appState === AppState.ERROR) {
+      dispatch({ type: 'MIDI_SESSION_PATCH', payload: { appState: AppState.LOADED } });
+    }
   }, [appState]);
 
-  // --- 3. ACTIONS (from hook) ---
   const actions = useMidiActions({
-      midiData, selectedTracks, trackInfo, playingTrackId, eventsToDelete,
-      setAppState, setErrorMessage, setSuccessMessage, setMidiData, setTrackInfo, setEventCounts, setFileName, setSelectedTracks, setPlayingTrackId, setEventsToDelete,
-      setGeneratedScore, setAuditLog, setAnalyzedTrackData, setIsAnalysisModalOpen, setPianoRollTrackData, setIsPianoRollVisible,
-      setOriginalTempo, setNewTempo, setOriginalTimeSignature, setNewTimeSignature, setOriginalDuration, setNewDuration,
-      handleReset, getConversionOptions
+    midiData,
+    selectedTracks,
+    trackInfo,
+    playingTrackId,
+    eventsToDelete,
+    dispatch,
+    getConversionOptions
   });
 
   return {
     state: {
-        appState, errorMessage, successMessage, fileName, trackInfo, selectedTracks, playingTrackId, eventCounts, midiData,
-        isLoadedState: [AppState.LOADED, AppState.GENERATING, AppState.SUCCESS, AppState.ERROR].includes(appState),
-        quantizationWarning, isPianoRollVisible, pianoRollTrackData, generatedScore, auditLog, analyzedTrackData, isAnalysisModalOpen
+      appState,
+      errorMessage,
+      successMessage,
+      fileName,
+      trackInfo,
+      selectedTracks,
+      playingTrackId,
+      eventCounts,
+      midiData,
+      isLoadedState: [AppState.LOADED, AppState.GENERATING, AppState.SUCCESS, AppState.ERROR].includes(appState),
+      quantizationWarning,
+      isPianoRollVisible,
+      pianoRollTrackData,
+      generatedScore,
+      auditLog,
+      analyzedTrackData,
+      isAnalysisModalOpen
     },
     settings: {
-        originalTempo, newTempo, originalTimeSignature, newTimeSignature, tempoChangeMode, originalDuration, newDuration,
-        modalRoot, modalModeName, isModalConversionEnabled, modalMappings,
-        primaryRhythm, secondaryRhythm, quantizationValue: primaryRhythm.enabled ? primaryRhythm.minNoteValue : 'off', 
-        quantizeDurationMin, shiftToMeasure, detectOrnaments, softOverlapToleranceIndex, pitchBias, maxVoices, disableChords,
-        voiceAssignmentMode, outputStrategy, eventsToDelete, analysisSections, contextText, voiceNames
+      originalTempo,
+      newTempo,
+      originalTimeSignature,
+      newTimeSignature,
+      tempoChangeMode,
+      originalDuration,
+      newDuration,
+      modalRoot,
+      modalModeName,
+      isModalConversionEnabled,
+      modalMappings,
+      primaryRhythm,
+      secondaryRhythm,
+      quantizationValue: primaryRhythm.enabled ? primaryRhythm.minNoteValue : 'off',
+      quantizeDurationMin,
+      shiftToMeasure,
+      detectOrnaments,
+      softOverlapToleranceIndex,
+      pitchBias,
+      maxVoices,
+      disableChords,
+      voiceAssignmentMode,
+      outputStrategy,
+      eventsToDelete,
+      analysisSections,
+      contextText,
+      voiceNames
     },
     setters: {
-        setNewTempo, setNewTimeSignature, setTempoChangeMode, setModalRoot, setModalModeName, setIsModalConversionEnabled, setModalMappings,
-        setPrimaryRhythm, setSecondaryRhythm, setQuantizeDurationMin, setShiftToMeasure, setDetectOrnaments, setSoftOverlapToleranceIndex,
-        setPitchBias, setMaxVoices, setDisableChords, setVoiceAssignmentMode, setOutputStrategy, setIsPianoRollVisible, setEventsToDelete,
-        setAnalysisSections, setContextText, setVoiceNames, setIsAnalysisModalOpen
+      setNewTempo: (value: string) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { newTempo: value } }),
+      setNewTimeSignature: (value: { numerator: string; denominator: string }) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { newTimeSignature: value } }),
+      setTempoChangeMode: (value: 'speed' | 'time') => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { tempoChangeMode: value } }),
+      setModalRoot: (value: number) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { modalRoot: value } }),
+      setModalModeName: (value: string) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { modalModeName: value } }),
+      setIsModalConversionEnabled: (value: boolean) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { isModalConversionEnabled: value } }),
+      setModalMappings: (value: Record<number, number>) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { modalMappings: value } }),
+      setPrimaryRhythm: (value: typeof primaryRhythm) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { primaryRhythm: value } }),
+      setSecondaryRhythm: (value: typeof secondaryRhythm) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { secondaryRhythm: value } }),
+      setQuantizeDurationMin: (value: string) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { quantizeDurationMin: value } }),
+      setShiftToMeasure: (value: boolean) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { shiftToMeasure: value } }),
+      setDetectOrnaments: (value: boolean) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { detectOrnaments: value } }),
+      setSoftOverlapToleranceIndex: (value: number) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { softOverlapToleranceIndex: value } }),
+      setPitchBias: (value: number) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { pitchBias: value } }),
+      setMaxVoices: (value: number) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { maxVoices: value } }),
+      setDisableChords: (value: boolean) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { disableChords: value } }),
+      setVoiceAssignmentMode: (value: 'auto' | 'manual') => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { voiceAssignmentMode: value } }),
+      setOutputStrategy: (value: 'combine' | 'separate_tracks' | 'separate_voices') => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { outputStrategy: value } }),
+      setIsPianoRollVisible: (value: boolean) => dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { isPianoRollVisible: value } }),
+      setEventsToDelete: (value: Set<'pitchBend' | 'controlChange' | 'programChange'>) => dispatch({ type: 'MIDI_SESSION_PATCH', payload: { eventsToDelete: value } }),
+      setAnalysisSections: (value: typeof analysisSections) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { analysisSections: value } }),
+      setContextText: (value: string) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { contextText: value } }),
+      setVoiceNames: (value: Record<number, string>) => dispatch({ type: 'CONVERSION_SETTINGS_PATCH', payload: { voiceNames: value } }),
+      setIsAnalysisModalOpen: (value: boolean) => dispatch({ type: 'ANALYSIS_UI_PATCH', payload: { isAnalysisModalOpen: value } })
     },
     actions: {
-        ...actions,
-        clearMessages,
-        handleReset: () => actions.handleReset(true),
-        handleGenerateScore: () => actions.handleGenerateScore(contextText),
-        handleDownloadScore: () => actions.handleDownloadScore(generatedScore, fileName),
-        handleDownloadAuditLog: () => actions.handleDownloadAuditLog(auditLog, fileName)
+      ...actions,
+      clearMessages,
+      handleReset: () => actions.handleReset(true),
+      handleGenerateScore: () => actions.handleGenerateScore(contextText),
+      handleDownloadScore: () => actions.handleDownloadScore(generatedScore, fileName),
+      handleDownloadAuditLog: () => actions.handleDownloadAuditLog(auditLog, fileName)
     }
   };
 };

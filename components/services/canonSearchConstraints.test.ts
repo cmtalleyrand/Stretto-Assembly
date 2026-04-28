@@ -135,8 +135,13 @@ assert.ok(
 // ─── Progress callback fires ─────────────────────────────────────────────────
 
 let progressCalls = 0;
-await runCanonSearch(subject, baseOptions, 480, () => { progressCalls++; });
+let firstProgressMsg: string | null = null;
+await runCanonSearch(subject, baseOptions, 480, (_pct, msg) => {
+  progressCalls++;
+  if (firstProgressMsg === null) firstProgressMsg = msg;
+});
 assert.ok(progressCalls > 0, 'onProgress callback must be called at least once');
+assert.equal(firstProgressMsg, 'Preparing search space…', 'first progress message must be the preparation stage');
 
 console.log('canon search constraints: all assertions passed');
 console.log(`  4-voice results: ${report4.results.length}`);
