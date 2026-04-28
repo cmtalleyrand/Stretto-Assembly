@@ -189,6 +189,8 @@ export interface StrettoSearchProgressUpdate {
         dagDepthHistogram?: Record<string, number>;
         dagAverageBranchesByDepth?: Record<string, number>;
         dagValidChainsRatioByDepth?: Record<string, number>;
+        dagInvalidByPrecomputedAdmissibilityRatioByDepth?: Record<string, number>;
+        dagInvalidByOtherChecksRatioByDepth?: Record<string, number>;
     };
 }
 
@@ -1677,6 +1679,8 @@ export async function searchStrettoChains(
     let dagDepthHistogramSnapshot: Record<string, number> | undefined = undefined;
     let dagAverageBranchesByDepthSnapshot: Record<string, number> | undefined = undefined;
     let dagValidChainsRatioByDepthSnapshot: Record<string, number> | undefined = undefined;
+    let dagInvalidByPrecomputedAdmissibilityRatioByDepthSnapshot: Record<string, number> | undefined = undefined;
+    let dagInvalidByOtherChecksRatioByDepthSnapshot: Record<string, number> | undefined = undefined;
     let operationCounter = 0;
     let lastProgressEmitMs = 0;
     let fullChainsFound = 0;
@@ -1726,7 +1730,9 @@ export async function searchStrettoChains(
                 dagHeuristicCompletionRatio,
                 dagDepthHistogram: dagDepthHistogramSnapshot,
                 dagAverageBranchesByDepth: dagAverageBranchesByDepthSnapshot,
-                dagValidChainsRatioByDepth: dagValidChainsRatioByDepthSnapshot
+                dagValidChainsRatioByDepth: dagValidChainsRatioByDepthSnapshot,
+                dagInvalidByPrecomputedAdmissibilityRatioByDepth: dagInvalidByPrecomputedAdmissibilityRatioByDepthSnapshot,
+                dagInvalidByOtherChecksRatioByDepth: dagInvalidByOtherChecksRatioByDepthSnapshot
             }
         });
     };
@@ -2969,6 +2975,7 @@ export async function searchStrettoChains(
         }
         const { chain, variantIndices, nInv, nTrunc, nRestricted, nFree, usedLongDelays, longDelaySignature } = node;
         const depth = chain.length;
+        const nextDepth = depth + 1;
         const prevEntry = chain[depth - 1];
 
         // Sb/3 rule relaxations (A.1 repeat allowed, A.3 recoil skip) only activate
@@ -3119,7 +3126,11 @@ export async function searchStrettoChains(
                     const tPrevIdx = absoluteTranspositionToIndex.get(prevTransposition);
                     const tCurrIdx = absoluteTranspositionToIndex.get(t);
                     if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                    if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
+                    recordCandidateTransitionAtDepth(nextDepth);
+                    if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) {
+                        recordPrecomputedAdmissibilityRejectionAtDepth(nextDepth);
+                        continue;
+                    }
                     // A.7 meetsAdjacentTranspositionSeparation: guaranteed by triplet precomp
                     stageStats.candidateTransitionsEnumerated++;
                     candidateTransitions.push({
@@ -3164,7 +3175,11 @@ export async function searchStrettoChains(
                         const tPrevIdx = absoluteTranspositionToIndex.get(chain[depth - 1].transposition);
                         const tCurrIdx = absoluteTranspositionToIndex.get(t);
                         if (tPrevIdx === undefined || tCurrIdx === undefined) continue;
-                        if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) continue;
+                        recordCandidateTransitionAtDepth(nextDepth);
+                        if (!probeVoiceTransitionReachability(depth, tPrevIdx, tCurrIdx)) {
+                            recordPrecomputedAdmissibilityRejectionAtDepth(nextDepth);
+                            continue;
+                        }
                         stageStats.candidateTransitionsEnumerated++;
                         candidateTransitions.push({
                             varIdx,
@@ -3298,6 +3313,7 @@ export async function searchStrettoChains(
                         prefixDissonanceState: nextPrefixDissonanceState,
                         prefixAdmissible: true
                     });
+                    recordAcceptedTransitionAtDepth(nextDepth);
                 }
             }
 
@@ -3321,6 +3337,9 @@ export async function searchStrettoChains(
     const dagGeneratedSuccessorsByDepth: Map<number, number> = new Map();
     const dagMaxSuccessorsByDepth: Map<number, number> = new Map();
     const dagValidChainsByDepth: Map<number, number> = new Map([[1, 1]]);
+    const dagCandidateTransitionsByDepth: Map<number, number> = new Map();
+    const dagRejectedByPrecomputedAdmissibilityByDepth: Map<number, number> = new Map();
+    const dagAcceptedTransitionsByDepth: Map<number, number> = new Map();
     const queueDagWorkItems = (depth: number, count: number): void => {
         if (count <= 0) return;
         dagLiveFrontierWorkItems += count;
@@ -3332,6 +3351,15 @@ export async function searchStrettoChains(
         if (count <= 0) return;
         dagGeneratedSuccessorsByDepth.set(depth, (dagGeneratedSuccessorsByDepth.get(depth) ?? 0) + count);
         dagMaxSuccessorsByDepth.set(depth, Math.max(dagMaxSuccessorsByDepth.get(depth) ?? 0, count));
+    };
+    const recordCandidateTransitionAtDepth = (depth: number): void => {
+        dagCandidateTransitionsByDepth.set(depth, (dagCandidateTransitionsByDepth.get(depth) ?? 0) + 1);
+    };
+    const recordPrecomputedAdmissibilityRejectionAtDepth = (depth: number): void => {
+        dagRejectedByPrecomputedAdmissibilityByDepth.set(depth, (dagRejectedByPrecomputedAdmissibilityByDepth.get(depth) ?? 0) + 1);
+    };
+    const recordAcceptedTransitionAtDepth = (depth: number): void => {
+        dagAcceptedTransitionsByDepth.set(depth, (dagAcceptedTransitionsByDepth.get(depth) ?? 0) + 1);
     };
     const startDagWorkItem = (depth: number): void => {
         dagExploredWorkItems++;
@@ -3401,6 +3429,22 @@ export async function searchStrettoChains(
             .reduce<Record<string, number>>((acc, [depth, exploredCount]) => {
                 const validChains = dagValidChainsByDepth.get(depth) ?? 0;
                 acc[String(depth)] = exploredCount > 0 ? validChains / exploredCount : 0;
+                return acc;
+            }, {});
+        dagInvalidByPrecomputedAdmissibilityRatioByDepthSnapshot = Array.from(dagCandidateTransitionsByDepth.entries())
+            .sort(([depthA], [depthB]) => depthA - depthB)
+            .reduce<Record<string, number>>((acc, [depth, candidateTransitions]) => {
+                const precomputedRejected = dagRejectedByPrecomputedAdmissibilityByDepth.get(depth) ?? 0;
+                acc[String(depth)] = candidateTransitions > 0 ? precomputedRejected / candidateTransitions : 0;
+                return acc;
+            }, {});
+        dagInvalidByOtherChecksRatioByDepthSnapshot = Array.from(dagCandidateTransitionsByDepth.entries())
+            .sort(([depthA], [depthB]) => depthA - depthB)
+            .reduce<Record<string, number>>((acc, [depth, candidateTransitions]) => {
+                const precomputedRejected = dagRejectedByPrecomputedAdmissibilityByDepth.get(depth) ?? 0;
+                const accepted = dagAcceptedTransitionsByDepth.get(depth) ?? 0;
+                const otherRejected = Math.max(0, candidateTransitions - precomputedRejected - accepted);
+                acc[String(depth)] = candidateTransitions > 0 ? otherRejected / candidateTransitions : 0;
                 return acc;
             }, {});
         emitStageProgress('dag', dagCompletedUnits, dagTotalUnits, force, terminal);
@@ -4266,6 +4310,22 @@ export async function searchStrettoChains(
             acc[String(depth)] = exploredCount > 0 ? validChains / exploredCount : 0;
             return acc;
         }, {});
+    const invalidByPrecomputedAdmissibilityRatioByDepth = Array.from(dagCandidateTransitionsByDepth.entries())
+        .sort(([depthA], [depthB]) => depthA - depthB)
+        .reduce<Record<string, number>>((acc, [depth, candidateTransitions]) => {
+            const precomputedRejected = dagRejectedByPrecomputedAdmissibilityByDepth.get(depth) ?? 0;
+            acc[String(depth)] = candidateTransitions > 0 ? precomputedRejected / candidateTransitions : 0;
+            return acc;
+        }, {});
+    const invalidByOtherChecksRatioByDepth = Array.from(dagCandidateTransitionsByDepth.entries())
+        .sort(([depthA], [depthB]) => depthA - depthB)
+        .reduce<Record<string, number>>((acc, [depth, candidateTransitions]) => {
+            const precomputedRejected = dagRejectedByPrecomputedAdmissibilityByDepth.get(depth) ?? 0;
+            const accepted = dagAcceptedTransitionsByDepth.get(depth) ?? 0;
+            const otherRejected = Math.max(0, candidateTransitions - precomputedRejected - accepted);
+            acc[String(depth)] = candidateTransitions > 0 ? otherRejected / candidateTransitions : 0;
+            return acc;
+        }, {});
     const completionRatioLowerBound = completionLowerBound == null ? null : Math.round(completionLowerBound * 100);
 
     return {
@@ -4306,6 +4366,8 @@ export async function searchStrettoChains(
                 depthHistogram,
                 averageBranchesByDepth,
                 validChainsRatioByDepth,
+                invalidByPrecomputedAdmissibilityRatioByDepth,
+                invalidByOtherChecksRatioByDepth,
                 completionLowerBound,
                 completionLowerBoundIsHeuristic,
                 completionLowerBoundAssumptions,

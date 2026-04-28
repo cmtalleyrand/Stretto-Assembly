@@ -39,6 +39,8 @@ interface StrettoSearchPanelProps {
             dagDepthHistogram?: Record<string, number>;
             dagAverageBranchesByDepth?: Record<string, number>;
             dagValidChainsRatioByDepth?: Record<string, number>;
+            dagInvalidByPrecomputedAdmissibilityRatioByDepth?: Record<string, number>;
+            dagInvalidByOtherChecksRatioByDepth?: Record<string, number>;
         };
         heartbeat: boolean;
     } | null;
@@ -75,20 +77,26 @@ export default function StrettoSearchPanel({
         if (!histogram) return [];
         const avgBranches = searchProgress.telemetry.dagAverageBranchesByDepth ?? {};
         const validRatio = searchProgress.telemetry.dagValidChainsRatioByDepth ?? {};
+        const invalidPrecomputedRatio = searchProgress.telemetry.dagInvalidByPrecomputedAdmissibilityRatioByDepth ?? {};
+        const invalidOtherRatio = searchProgress.telemetry.dagInvalidByOtherChecksRatioByDepth ?? {};
         return Object.entries(histogram)
             .map(([depth, explored]) => {
                 const exploredCount = Number(explored);
                 if (!Number.isFinite(exploredCount) || exploredCount <= 0) return null;
                 const avg = Number(avgBranches[depth] ?? 0);
                 const ratio = Number(validRatio[depth] ?? 0);
+                const invalidPrecomputed = Number(invalidPrecomputedRatio[depth] ?? 0);
+                const invalidOther = Number(invalidOtherRatio[depth] ?? 0);
                 return {
                     depth: Number(depth),
                     explored: exploredCount,
                     avgBranches: Number.isFinite(avg) ? avg : 0,
                     validRatio: Number.isFinite(ratio) ? ratio : 0,
+                    invalidPrecomputedRatio: Number.isFinite(invalidPrecomputed) ? invalidPrecomputed : 0,
+                    invalidOtherRatio: Number.isFinite(invalidOther) ? invalidOther : 0,
                 };
             })
-            .filter((row): row is { depth: number; explored: number; avgBranches: number; validRatio: number } => row !== null)
+            .filter((row): row is { depth: number; explored: number; avgBranches: number; validRatio: number; invalidPrecomputedRatio: number; invalidOtherRatio: number } => row !== null)
             .sort((a, b) => a.depth - b.depth);
     }, [searchProgress]);
 
@@ -618,7 +626,7 @@ export default function StrettoSearchPanel({
                                     <div className="text-gray-300 font-semibold">Live per-depth telemetry (post-admissibility)</div>
                                     {liveDepthTelemetryRows.map((row) => (
                                         <div key={row.depth}>
-                                            d{row.depth}: explored {row.explored.toLocaleString()} · avg branches {row.avgBranches.toFixed(2)} · valid/explored {(row.validRatio * 100).toFixed(1)}%
+                                            d{row.depth}: explored {row.explored.toLocaleString()} · avg branches {row.avgBranches.toFixed(2)} · valid/explored {(row.validRatio * 100).toFixed(1)}% · invalid precomputed {(row.invalidPrecomputedRatio * 100).toFixed(1)}% · invalid other {(row.invalidOtherRatio * 100).toFixed(1)}%
                                         </div>
                                     ))}
                                 </div>

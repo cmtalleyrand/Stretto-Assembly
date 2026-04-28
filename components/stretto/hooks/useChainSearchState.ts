@@ -29,6 +29,8 @@ export interface StrettoSearchProgressState {
         dagDepthHistogram?: Record<string, number>;
         dagAverageBranchesByDepth?: Record<string, number>;
         dagValidChainsRatioByDepth?: Record<string, number>;
+        dagInvalidByPrecomputedAdmissibilityRatioByDepth?: Record<string, number>;
+        dagInvalidByOtherChecksRatioByDepth?: Record<string, number>;
     };
     heartbeat: boolean;
 }
