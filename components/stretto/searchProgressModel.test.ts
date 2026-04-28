@@ -120,7 +120,7 @@ function testOverallEstimateBounds() {
     assert.ok(display.overallEstimatePercent >= 0 && display.overallEstimatePercent <= 100,
         `Overall estimate must be in [0, 100], got ${display.overallEstimatePercent}`);
     assert.equal(display.dagEdgesPerExpandedNode, 7, 'DAG edges/node should expose transition branching factor.');
-    assert.equal(display.dagCompletionLowerBoundPercent, 75, 'Completion lower bound should use explored/(explored+live) when heuristic ratio is absent.');
+    assert.equal(display.dagCompletionLowerBoundPercent, 75, 'Completion fallback should use explored/(explored+live) when heuristic ratio is absent.');
     assert.equal(Math.round(display.dagFrontierPressurePercent ?? 0), 25, 'Frontier pressure should expose live frontier share.');
     assert.match(display.countersLabel, /edges\/node 7\.00/, 'DAG counters should include edges-per-node diagnostic.');
 }
