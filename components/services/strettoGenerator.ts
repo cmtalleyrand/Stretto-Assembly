@@ -1,5 +1,5 @@
 
-import { RawNote, StrettoChainResult, StrettoSearchOptions, StrettoChainOption, StrettoConstraintMode, StrettoSearchReport } from '../../types';
+import { RawNote, StrettoChainResult, StrettoSearchOptions, StrettoChainOption, StrettoConstraintMode, StrettoSearchReport, StrettoInvalidChainDiagnostic } from '../../types';
 import { INTERVALS, SCALE_INTERVALS } from './strettoConstants';
 import { calculateStrettoScore, SubjectVariant, InternalNote } from './strettoScoring';
 import { getInvertedPitch } from './strettoCore';
@@ -4291,7 +4291,8 @@ export async function searchStrettoChains(
     const sourceUnscored: UnscoredChain[] = unscoredResults;
     sourceUnscored.sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
 
-    const scoredResults: StrettoChainResult[] = [];
+    const validScoredResults: StrettoChainResult[] = [];
+    const invalidChainDiagnostics: StrettoInvalidChainDiagnostic[] = [];
     let scoringValidChainsFoundCount = 0;
     const finalizationDeadlineMs = terminationReason === 'Timeout'
         ? activeTimeLimitMs + FINALIZATION_TIMEOUT_GRACE_MS
@@ -4328,10 +4329,17 @@ export async function searchStrettoChains(
         finalizationScoredCount++;
         const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
         if (scored.isValid) {
-            scoredResults.push(scored);
+            validScoredResults.push({ ...scored, score: scored.score ?? 0 });
             scoringValidChainsFoundCount++;
         } else {
             finalizationRejectedScoringInvalid++;
+            invalidChainDiagnostics.push({
+                id: scored.id,
+                entries: scored.entries,
+                warnings: scored.warnings,
+                isValid: false,
+                maxDissonanceRunEvents: scored.maxDissonanceRunEvents
+            });
             const runEvents = scored.maxDissonanceRunEvents ?? 0;
             const histKey = String(runEvents);
             maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
@@ -4344,7 +4352,7 @@ export async function searchStrettoChains(
     // false-empty UI outcomes caused by sparse valid chains.
     if (
         terminationReason === 'Timeout'
-        && scoredResults.length === 0
+        && validScoredResults.length === 0
         && sourceUnscored.length > finalizedCandidateCount
     ) {
         const recoveryDeadlineMs = Date.now() + TIMEOUT_VALID_RESULT_RECOVERY_BUDGET_MS;
@@ -4369,18 +4377,25 @@ export async function searchStrettoChains(
             finalizationScoredCount++;
             const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
             if (scored.isValid) {
-                scoredResults.push(scored);
+                validScoredResults.push({ ...scored, score: scored.score ?? 0 });
                 scoringValidChainsFoundCount++;
                 break;
             }
             finalizationRejectedScoringInvalid++;
+            invalidChainDiagnostics.push({
+                id: scored.id,
+                entries: scored.entries,
+                warnings: scored.warnings,
+                isValid: false,
+                maxDissonanceRunEvents: scored.maxDissonanceRunEvents
+            });
             const runEvents = scored.maxDissonanceRunEvents ?? 0;
             const histKey = String(runEvents);
             maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
         }
     }
 
-    if (scoredResults.length === 0 && deferredPartials.length > 0) {
+    if (validScoredResults.length === 0 && deferredPartials.length > 0) {
         const partialCandidates = deferredPartials
             .map((dp) => ({ entries: dp.chain, variantIndices: dp.variantIndices }))
             .sort((a, b) => estimateCandidateUpperBound(b.entries) - estimateCandidateUpperBound(a.entries));
@@ -4405,17 +4420,24 @@ export async function searchStrettoChains(
             const scored = calculateStrettoScore(assigned, variants, uc.variantIndices, options, ppq, autoTruncBeats);
             if (!scored.isValid) {
                 finalizationRejectedScoringInvalid++;
+                invalidChainDiagnostics.push({
+                    id: scored.id,
+                    entries: scored.entries,
+                    warnings: scored.warnings,
+                    isValid: false,
+                    maxDissonanceRunEvents: scored.maxDissonanceRunEvents
+                });
                 const runEvents = scored.maxDissonanceRunEvents ?? 0;
                 const histKey = String(runEvents);
                 maxDissonanceRunEventsHistogram[histKey] = (maxDissonanceRunEventsHistogram[histKey] ?? 0) + 1;
                 continue;
             }
-            scoredResults.push(scored);
+            validScoredResults.push({ ...scored, score: scored.score ?? 0 });
             scoringValidChainsFoundCount++;
-            if (scoredResults.length >= MAX_RESULTS) break;
+            if (validScoredResults.length >= MAX_RESULTS) break;
         }
     }
-    const finalizedResults: StrettoChainResult[] = scoredResults;
+    const finalizedResults: StrettoChainResult[] = validScoredResults;
     fullChainsFound = scoringValidChainsFoundCount;
 
     // Group by delay pattern + type sequence to avoid similar chains clogging display
@@ -4525,6 +4547,9 @@ export async function searchStrettoChains(
                 finalizationRejectedScoringInvalid,
                 maxDissonanceRunEventsHistogram: Object.keys(maxDissonanceRunEventsHistogram).length > 0
                     ? maxDissonanceRunEventsHistogram
+                    : undefined,
+                invalidChainDiagnostics: invalidChainDiagnostics.length > 0
+                    ? invalidChainDiagnostics
                     : undefined
             },
             coverage: {

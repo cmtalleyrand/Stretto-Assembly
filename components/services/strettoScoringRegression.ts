@@ -122,6 +122,47 @@ function testPostTruncationContractionPenalty() {
   assert.equal(postTruncPenalty, 40, 'Expected post-truncation contraction miss to incur 40 points.');
 }
 
+function testInvalidChainsDoNotExposeScores() {
+  const variants: SubjectVariant[] = [
+    {
+      type: 'N',
+      truncationBeats: 0,
+      lengthTicks: 480,
+      notes: [
+        { relTick: 0, durationTicks: 160, pitch: 60 },
+        { relTick: 160, durationTicks: 160, pitch: 62 },
+        { relTick: 320, durationTicks: 160, pitch: 64 }
+      ],
+    },
+  ];
+
+  const chain: StrettoChainOption[] = [
+    { startBeat: 0, transposition: 0, type: 'N', length: 480, voiceIndex: 0 },
+    { startBeat: 0, transposition: 1, type: 'N', length: 480, voiceIndex: 1 },
+  ];
+
+  const options: StrettoSearchOptions = {
+    ensembleTotal: 2,
+    targetChainLength: 2,
+    subjectVoiceIndex: 0,
+    truncationMode: 'None',
+    truncationTargetBeats: 0,
+    inversionMode: 'None',
+    useChromaticInversion: false,
+    thirdSixthMode: 'None',
+    pivotMidi: 60,
+    requireConsonantEnd: false,
+    disallowComplexExceptions: true,
+    maxPairwiseDissonance: 1,
+    scaleRoot: 0,
+    scaleMode: 'Major',
+  };
+
+  const scored = calculateStrettoScore(chain, variants, [0, 0], options, 480);
+  assert.equal(scored.isValid, false, 'Expected persistent dissonance run to invalidate chain.');
+  assert.equal(scored.score, undefined, 'Invalid chain must not expose a score.');
+}
+
 function runRegression() {
   testRepeatedDelayPenalty();
   testClusterPenaltyCanAccumulateAtCenter();
@@ -129,6 +170,7 @@ function runRegression() {
   testNoEarlyExpansionPenaltyInFinalThird();
   testMissingStepPenalty();
   testPostTruncationContractionPenalty();
+  testInvalidChainsDoNotExposeScores();
   console.log('PASS: stretto distance-penalty regression suite.');
 }
 

@@ -149,10 +149,20 @@ export default function StrettoChainView({
         return deriveSearchRuntimePresentation(searchElapsedMs, configuredBudgetMs);
     }, [isSearching, searchElapsedMs, searchOptions.maxSearchTimeMs]);
 
+    const scoredValidChains = React.useMemo(
+        () => chainResults.filter((result) => result.isValid === true && Number.isFinite(result.score)),
+        [chainResults]
+    );
+
+    const selectedScoredValidChain = React.useMemo(() => {
+        if (!selectedChain) return null;
+        return scoredValidChains.find((result) => result.id === selectedChain.id) ?? null;
+    }, [selectedChain, scoredValidChains]);
+
     // Re-implement candidate generation here to use the new Polyphonic Region Logic
     // instead of relying on the parent's potentially outdated logic
     const chainCandidate = React.useMemo((): StrettoCandidate | null => {
-        if (!selectedChain) return null;
+        if (!selectedScoredValidChain) return null;
         let allNotes: RawNote[] = [];
         const validSubjectNotes = subjectNotes.filter(n => !!n);
         const currentPpq = ppq || 480;
@@ -160,7 +170,7 @@ export default function StrettoChainView({
         const sortedSubj = [...validSubjectNotes].sort((a,b)=>a.ticks-b.ticks);
         const startTick = sortedSubj[0].ticks;
         
-        selectedChain.entries.forEach((entry) => {
+        selectedScoredValidChain.entries.forEach((entry) => {
             const entryStartTick = Math.round(entry.startBeat * currentPpq);
             const transformed = sortedSubj.map(n => {
                 let pitch = n.midi;
@@ -191,7 +201,7 @@ export default function StrettoChainView({
         const harmonicRegions = generatePolyphonicHarmonicRegions(allNotes, searchOptions.scaleRoot);
         
         return { 
-            id: selectedChain.id, 
+            id: selectedScoredValidChain.id, 
             intervalLabel: "Chain", 
             intervalSemis: 0, 
             delayBeats: 0, 
@@ -200,13 +210,13 @@ export default function StrettoChainView({
             errors: [], 
             notes: allNotes, 
             regions: harmonicRegions, 
-            dissonanceRatio: selectedChain.dissonanceRatio || 0,
-            nctRatio: selectedChain.nctRatio || 0, // Use the calculated value from the search result for consistency
-            pairDissonanceScore: selectedChain.pairDissonanceScore || 0, // Use the calculated intensity from the search result
+            dissonanceRatio: selectedScoredValidChain.dissonanceRatio || 0,
+            nctRatio: selectedScoredValidChain.nctRatio || 0, // Use the calculated value from the search result for consistency
+            pairDissonanceScore: selectedScoredValidChain.pairDissonanceScore || 0, // Use the calculated intensity from the search result
             endsOnDissonance: false,
-            detectedChords: selectedChain.detectedChords
+            detectedChords: selectedScoredValidChain.detectedChords
         };
-    }, [selectedChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.scaleMode]);
+    }, [selectedScoredValidChain, subjectNotes, ppq, searchOptions.pivotMidi, searchOptions.useChromaticInversion, masterTransposition, searchOptions.scaleRoot, searchOptions.scaleMode]);
 
     const searchStatus = React.useMemo(() => {
         if (!searchReport) return null;
@@ -352,7 +362,7 @@ export default function StrettoChainView({
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
                 <div className="lg:col-span-1 bg-gray-900 border border-gray-700 rounded shadow-inner">
                     <div className="p-3 border-b border-gray-700 bg-gray-800 flex justify-between items-center">
-                        <h3 className="text-xs font-bold text-gray-400">FOUND CHAINS ({chainResults.length})</h3>
+                        <h3 className="text-xs font-bold text-gray-400">FOUND CHAINS ({scoredValidChains.length})</h3>
                         {searchReport && (
                             <div className="text-[9px] text-gray-500 text-right">
                                 {searchReport.stats.nodesVisited.toLocaleString()} nodes
@@ -476,8 +486,8 @@ export default function StrettoChainView({
                         </div>
                     )}
                     <StrettoResultsList 
-                        results={chainResults}
-                        selectedId={selectedChain?.id || null}
+                        results={scoredValidChains}
+                        selectedId={selectedScoredValidChain?.id || null}
                         onSelect={setSelectedChain}
                         voiceNames={voiceNames}
                     />
@@ -494,7 +504,7 @@ export default function StrettoChainView({
                         onClearAssembly={() => {}}
                         onDownloadChain={onDownloadChain}
                     />
-                    {selectedChain && (
+                    {selectedScoredValidChain && (
                         <div className="mt-3 rounded border border-gray-700 bg-gray-900/60 p-2 text-[10px] text-gray-300">
                             <span className="font-semibold text-gray-200">Rendered Harmonic-Region Diagnostic:</span>{' '}
                             Maximum consecutive dissonant regions = <span className="font-mono text-amber-300">{maxConsecutiveDissonanceRegions}</span>
