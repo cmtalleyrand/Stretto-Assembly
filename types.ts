@@ -612,6 +612,7 @@ export interface StrettoSearchReport {
         completionDiagnostics?: {
             structurallyCompleteChainsFound: number;
             prefixAdmissibleCompleteChainsFound: number;
+            distinctStructuralChainCount: number;
             scoringValidChainsFound: number;
             finalizationRejectedVoiceAssignment: number;
             finalizationRejectedScoringInvalid: number;

@@ -1,9 +1,4 @@
-// Frontier study runner. Sweeps (subject × quotas × H) and prints the
-// measurement table.
-//
-// |prefixes| is sourced from searchStrettoChains (the full pipeline,
-// every rule applied), so it is the rigorous count of valid chains of
-// length H — not a custom truncated rule-applier.
+// Frontier study runner.
 
 import { runFrontierStudy, type FrontierStudySubject } from './frontierStudy';
 
@@ -60,24 +55,11 @@ const quotaCells: { label: string; qI: 'None' | 'Unlimited' | number; qT: 'None'
     { label: 'q∞/∞',  qI: 'Unlimited', qT: 'Unlimited' }
 ];
 
-interface Row {
-    subject: string;
-    quotas: string;
-    H: number;
-    prefixes: number;
-    lean: number;
-    comp: number;
-    ratioLean: string;
-    ratioComp: string;
-    ms: number;
-    stop: string;
-}
-
-const rows: Row[] = [];
+console.log('Subject  Quotas  H  StructComplete  PrefixAdmis  Distinct  RatioStruct  RatioAdmis  DAGmerge   Stop        ms');
 
 for (const s of subjects) {
     for (const q of quotaCells) {
-        for (const H of [3, 4, 5, 6, 7]) {
+        for (const H of [3, 4, 5, 6, 7, 8]) {
             const r = await runFrontierStudy({
                 subject: s,
                 H,
@@ -90,34 +72,10 @@ for (const s of subjects) {
                 disallowComplexExceptions: true,
                 maxSearchTimeMs: 60_000
             });
-            rows.push({
-                subject: s.name.split(':')[0],
-                quotas: q.label,
-                H,
-                prefixes: r.prefixes,
-                lean: r.distinctLean,
-                comp: r.distinctComp,
-                ratioLean: r.ratioLean.toFixed(2),
-                ratioComp: r.ratioComp.toFixed(2),
-                ms: r.timeMs,
-                stop: r.stopReason
-            });
             console.log(
-                `${s.name.split(':')[0].padEnd(3)}  ${q.label.padEnd(5)}  H=${H}  prefixes=${String(r.prefixes).padStart(8)}  lean=${String(r.distinctLean).padStart(8)}  comp=${String(r.distinctComp).padStart(8)}  rL=${r.ratioLean.toFixed(2).padStart(6)}  rC=${r.ratioComp.toFixed(2).padStart(6)}  ${r.stopReason.padEnd(10)}  ${r.timeMs}ms`
+                `${s.name.split(':')[0].padEnd(7)}  ${q.label.padEnd(6)}  ${H}  ${String(r.structurallyComplete).padStart(14)}  ${String(r.prefixAdmissible).padStart(11)}  ${String(r.distinctStructural).padStart(8)}  ${r.ratioStructural.toFixed(2).padStart(11)}  ${r.ratioPrefixAdmissible.toFixed(2).padStart(10)}  ${String(r.deterministicDagMergedNodes ?? 0).padStart(8)}   ${r.stopReason.padEnd(10)}  ${String(r.timeMs).padStart(5)}`
             );
-            const fc = r.featureCardinalities;
-            console.log(
-                `       feature cardinalities:  d_H=${fc.d_H}  d_Hm1=${fc.d_Hm1}  var_H=${fc.var_H}  t_H=${fc.t_H}  v_H=${fc.v_H}  perVoice=${fc.perVoice}  tail=${fc.tail}  U=${fc.U}  |U|=${fc.U_size}`
-            );
-            if (r.stopReason === 'Timeout' || r.stopReason === 'NodeLimit') break;
+            if (r.stopReason === 'Timeout') break;
         }
     }
-}
-
-console.log('\nSummary table:');
-console.log('Subject  Quotas  H  Prefixes      Lean         Comp         Ratio_lean  Ratio_comp  Stop        ms');
-for (const r of rows) {
-    console.log(
-        `${r.subject.padEnd(7)}  ${r.quotas.padEnd(6)}  ${r.H}  ${String(r.prefixes).padStart(10)}  ${String(r.lean).padStart(10)}  ${String(r.comp).padStart(10)}  ${r.ratioLean.padStart(10)}  ${r.ratioComp.padStart(10)}  ${r.stop.padEnd(10)}  ${String(r.ms).padStart(5)}`
-    );
 }

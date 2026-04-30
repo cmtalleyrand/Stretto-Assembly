@@ -4350,6 +4350,7 @@ export async function searchStrettoChains(
             completionDiagnostics: {
                 structurallyCompleteChainsFound,
                 prefixAdmissibleCompleteChainsFound,
+                distinctStructuralChainCount: unscoredResults.length,
                 scoringValidChainsFound: scoringValidChainsFoundCount,
                 finalizationRejectedVoiceAssignment,
                 finalizationRejectedScoringInvalid,
