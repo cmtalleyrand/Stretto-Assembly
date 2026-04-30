@@ -1,5 +1,9 @@
 // Frontier study runner. Sweeps (subject × quotas × H) and prints the
 // measurement table.
+//
+// |prefixes| is sourced from searchStrettoChains (the full pipeline,
+// every rule applied), so it is the rigorous count of valid chains of
+// length H — not a custom truncated rule-applier.
 
 import { runFrontierStudy, type FrontierStudySubject } from './frontierStudy';
 
@@ -50,15 +54,10 @@ const subjects: FrontierStudySubject[] = [
     }
 ];
 
-const tradTranspositions = [-31, -29, -19, -17, -7, -5, 0, 5, 7, 17, 19, 29, 31, -24, -12, 12, 24];
-const INF = 0x7fffffff;
-const MAX_PREFIXES = 300_000;
-
-// (qI, qT) cells; qRestricted = unbounded throughout.
-const quotaCells: { label: string; qI: number; qT: number }[] = [
-    { label: 'q0/0', qI: 0, qT: 0 },
-    { label: 'q1/1', qI: 1, qT: 1 },
-    { label: 'q∞/∞', qI: INF, qT: INF }
+const quotaCells: { label: string; qI: 'None' | 'Unlimited' | number; qT: 'None' | 'Unlimited' | number }[] = [
+    { label: 'q0/0',  qI: 'None',      qT: 'None' },
+    { label: 'q1/1',  qI: 1,           qT: 1 },
+    { label: 'q∞/∞',  qI: 'Unlimited', qT: 'Unlimited' }
 ];
 
 interface Row {
@@ -66,12 +65,12 @@ interface Row {
     quotas: string;
     H: number;
     prefixes: number;
-    capped: boolean;
     lean: number;
     comp: number;
     ratioLean: string;
     ratioComp: string;
     ms: number;
+    stop: string;
 }
 
 const rows: Row[] = [];
@@ -84,39 +83,41 @@ for (const s of subjects) {
                 H,
                 qI: q.qI,
                 qT: q.qT,
-                qRestricted: INF,
+                qRestricted: 'None',
                 ensembleTotal: 4,
                 subjectVoiceIndex: 1,
-                transpositionPool: tradTranspositions,
                 maxPairwiseDissonance: 0.5,
-                fourthTreatment: 'dissonant',
-                maxPrefixes: MAX_PREFIXES
+                disallowComplexExceptions: true,
+                maxSearchTimeMs: 60_000
             });
             rows.push({
                 subject: s.name.split(':')[0],
                 quotas: q.label,
                 H,
                 prefixes: r.prefixes,
-                capped: r.cappedAtMax,
                 lean: r.distinctLean,
                 comp: r.distinctComp,
                 ratioLean: r.ratioLean.toFixed(2),
                 ratioComp: r.ratioComp.toFixed(2),
-                ms: r.timeMs
+                ms: r.timeMs,
+                stop: r.stopReason
             });
-            // Print incrementally so partial progress is visible.
             console.log(
-                `${s.name.split(':')[0].padEnd(3)}  ${q.label.padEnd(5)}  H=${H}  prefixes=${String(r.prefixes).padStart(8)}${r.cappedAtMax ? '+' : ' '}  lean=${String(r.distinctLean).padStart(8)}  comp=${String(r.distinctComp).padStart(8)}  rL=${r.ratioLean.toFixed(2).padStart(6)}  rC=${r.ratioComp.toFixed(2).padStart(6)}  ${r.timeMs}ms`
+                `${s.name.split(':')[0].padEnd(3)}  ${q.label.padEnd(5)}  H=${H}  prefixes=${String(r.prefixes).padStart(8)}  lean=${String(r.distinctLean).padStart(8)}  comp=${String(r.distinctComp).padStart(8)}  rL=${r.ratioLean.toFixed(2).padStart(6)}  rC=${r.ratioComp.toFixed(2).padStart(6)}  ${r.stopReason.padEnd(10)}  ${r.timeMs}ms`
             );
-            if (r.cappedAtMax) break;  // skip larger H if smaller H already capped
+            const fc = r.featureCardinalities;
+            console.log(
+                `       feature cardinalities:  d_H=${fc.d_H}  d_Hm1=${fc.d_Hm1}  var_H=${fc.var_H}  t_H=${fc.t_H}  v_H=${fc.v_H}  perVoice=${fc.perVoice}  tail=${fc.tail}  U=${fc.U}  |U|=${fc.U_size}`
+            );
+            if (r.stopReason === 'Timeout' || r.stopReason === 'NodeLimit') break;
         }
     }
 }
 
 console.log('\nSummary table:');
-console.log('Subject  Quotas  H  Prefixes      Lean         Comp         Ratio_lean  Ratio_comp  ms');
+console.log('Subject  Quotas  H  Prefixes      Lean         Comp         Ratio_lean  Ratio_comp  Stop        ms');
 for (const r of rows) {
     console.log(
-        `${r.subject.padEnd(7)}  ${r.quotas.padEnd(6)}  ${r.H}  ${String(r.prefixes).padStart(10)}${r.capped ? '+' : ' '}  ${String(r.lean).padStart(10)}  ${String(r.comp).padStart(10)}  ${r.ratioLean.padStart(10)}  ${r.ratioComp.padStart(10)}  ${String(r.ms).padStart(5)}`
+        `${r.subject.padEnd(7)}  ${r.quotas.padEnd(6)}  ${r.H}  ${String(r.prefixes).padStart(10)}  ${String(r.lean).padStart(10)}  ${String(r.comp).padStart(10)}  ${r.ratioLean.padStart(10)}  ${r.ratioComp.padStart(10)}  ${r.stop.padEnd(10)}  ${String(r.ms).padStart(5)}`
     );
 }
