@@ -131,7 +131,10 @@ function buildPairCache(
     options: StrettoSearchOptions
 ): Map<string, PairRecord> {
     const cache = new Map<string, PairRecord>();
-    const fourthTreatment = options.disallowComplexExceptions ? 'dissonant' : 'provisional';
+    // Match existing pipeline's base structural pair scan (strettoGenerator.ts:2236):
+    // P4 treated as provisionally consonant. The 'dissonant' variant is reserved
+    // for the bass-role P4 check, which lives in post-hoc CSP.
+    const fourthTreatment: 'provisional' | 'dissonant' = 'provisional';
     const ΔtSet = new Set<number>();
     for (const a of transpositionPool) for (const b of transpositionPool) ΔtSet.add(b - a);
 
