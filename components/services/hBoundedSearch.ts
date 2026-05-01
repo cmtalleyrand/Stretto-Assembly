@@ -19,7 +19,9 @@
 // full chains. Hooking into the existing voice CSP / scoring is a
 // follow-up that requires exporting assignVoices.
 
-import { checkCounterpointStructureWithBassRole } from './strettoGenerator';
+import { checkCounterpointStructureWithBassRole, isVoicePairAllowedForTransposition } from './strettoGenerator';
+import { calculateStrettoScore } from './strettoScoring';
+import type { StrettoChainOption, StrettoChainResult } from '../../types';
 import { getInvertedPitch } from './strettoCore';
 import type { SubjectVariant, InternalNote } from './strettoScoring';
 import type { RawNote, StrettoSearchOptions, StrettoConstraintMode } from '../../types';
@@ -100,7 +102,12 @@ function buildVariants(rawSubject: RawNote[], options: StrettoSearchOptions, ppq
     return variants;
 }
 
-interface PairRecord { compatible: boolean; hasParallelPerfect58: boolean; }
+interface PairRecord {
+    compatible: boolean;
+    hasParallelPerfect58: boolean;
+    hasFourth: boolean;
+    compatibleWhenPairIncludesBass: boolean;
+}
 
 function buildPairCache(
     variants: SubjectVariant[], ppq: number, delayStep: number,
@@ -120,8 +127,24 @@ function buildPairCache(
                         'provisional', ppq, options.meterNumerator ?? 4, options.meterDenominator ?? 4,
                         options.allowP4RunLengthExtension ?? false, true
                     );
+                    // For pairs containing a P4, re-run with 'dissonant' treatment
+                    // to determine compatibility when the pair includes the bass voice
+                    // (P4-as-bass dissonance, §D). If no P4, both treatments give the
+                    // same compatibility outcome.
+                    let compatibleWhenPairIncludesBass = r.compatible;
+                    if (r.hasFourth) {
+                        const r2 = checkCounterpointStructureWithBassRole(
+                            variants[vA], variants[vB], d, Δt, options.maxPairwiseDissonance,
+                            'dissonant', ppq, options.meterNumerator ?? 4, options.meterDenominator ?? 4,
+                            options.allowP4RunLengthExtension ?? false, true
+                        );
+                        compatibleWhenPairIncludesBass = r2.compatible;
+                    }
                     cache.set(`${vA}|${vB}|${d}|${Δt}`, {
-                        compatible: r.compatible, hasParallelPerfect58: r.hasParallelPerfect58
+                        compatible: r.compatible,
+                        hasParallelPerfect58: r.hasParallelPerfect58,
+                        hasFourth: r.hasFourth,
+                        compatibleWhenPairIncludesBass
                     });
                 }
             }
@@ -407,7 +430,126 @@ function continueFromFrontier(
     return continuations;
 }
 
-// --- Top-level orchestrator ---
+// --- Voice CSP (mirrors strettoGenerator.ts:2846 assignVoices) ---
+
+function assignVoices(
+    chain: HBoundedFullChain,
+    pairCache: Map<string, PairRecord>,
+    options: StrettoSearchOptions,
+    ppq: number
+): { voices: number[] } | null {
+    const n = chain.entries.length;
+    const voices = new Array<number>(n).fill(-1);
+    const bassIdx = options.ensembleTotal - 1;
+
+    function conflicts(i: number, j: number): boolean {
+        const ei = chain.entries[i], ej = chain.entries[j];
+        if (ei.startTick > ej.startTick) return conflicts(j, i);
+        const iEnd = ei.startTick + ei.lengthTicks;
+        return ej.startTick < iEnd - ppq;
+    }
+
+    function valid(pos: number, v: number): boolean {
+        if (pos === 0) return v === options.subjectVoiceIndex;
+        for (let k = 0; k < pos; k++) {
+            if (!isVoicePairAllowedForTransposition(
+                voices[k], v,
+                chain.entries[pos].transposition - chain.entries[k].transposition,
+                options.ensembleTotal, false
+            )) return false;
+            if (conflicts(k, pos) && voices[k] === v) return false;
+            if (conflicts(k, pos)) {
+                const eK = chain.entries[k], eP = chain.entries[pos];
+                const [eIdx, lIdx] = eK.startTick <= eP.startTick ? [k, pos] : [pos, k];
+                const eE = chain.entries[eIdx], eL = chain.entries[lIdx];
+                const relDelay = eL.startTick - eE.startTick;
+                const relTrans = eL.transposition - eE.transposition;
+                const rec = pairCache.get(`${eE.variantIndex}|${eL.variantIndex}|${relDelay}|${relTrans}`);
+                if (rec?.hasFourth) {
+                    const eV = eK.startTick <= eP.startTick ? voices[k] : v;
+                    const lV = eK.startTick <= eP.startTick ? v : voices[k];
+                    const pairContainsBass = eV === bassIdx || lV === bassIdx;
+                    if (pairContainsBass && !rec.compatibleWhenPairIncludesBass) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    function backtrack(pos: number): boolean {
+        if (pos === n) return true;
+        for (let v = 0; v < options.ensembleTotal; v++) {
+            if (valid(pos, v)) {
+                voices[pos] = v;
+                if (backtrack(pos + 1)) return true;
+            }
+        }
+        voices[pos] = -1;
+        return false;
+    }
+    if (!backtrack(0)) return null;
+    return { voices };
+}
+
+// --- Scored top-level runner ---
+
+export interface HBoundedScoredResult {
+    results: StrettoChainResult[];
+    distinctFrontiers: number;
+    phase1Prefixes: number;
+    phase2Continuations: number;
+    voiceAssignedCount: number;
+    scoringValidCount: number;
+    timeMs: number;
+}
+
+export async function runHBoundedSearchScored(opts: HBoundedSearchOptions): Promise<HBoundedScoredResult> {
+    const t0 = Date.now();
+    const structural = await runHBoundedSearch(opts);
+
+    // Rebuild pair cache + variants for assignVoices/scoring (could be memoised
+    // across the two calls — left as future optimisation).
+    const variants = buildVariants(opts.rawSubject, opts.options, opts.ppq);
+    const pairCache = buildPairCache(variants, opts.ppq, opts.ppq / 2, opts.transpositionPool, opts.options);
+
+    const results: StrettoChainResult[] = [];
+    let voiceAssignedCount = 0;
+    let scoringValidCount = 0;
+
+    for (let i = 0; i < structural.chains.length; i++) {
+        const c = structural.chains[i];
+        const assigned = assignVoices(c, pairCache, opts.options, opts.ppq);
+        if (!assigned) continue;
+        voiceAssignedCount++;
+
+        // Convert to StrettoChainOption with voice indices, then score.
+        const chainOpts: StrettoChainOption[] = c.entries.map((e, idx) => ({
+            startBeat: e.startTick / opts.ppq,
+            transposition: e.transposition,
+            type: e.type,
+            length: e.lengthTicks,
+            voiceIndex: assigned.voices[idx]
+        }));
+        const variantIndices = c.entries.map(e => e.variantIndex);
+        const scored = calculateStrettoScore(chainOpts, variants, variantIndices, opts.options, opts.ppq, 0);
+        if (scored.isValid) {
+            scoringValidCount++;
+            results.push(scored);
+        }
+    }
+
+    return {
+        results,
+        distinctFrontiers: structural.distinctFrontiers,
+        phase1Prefixes: structural.phase1Prefixes,
+        phase2Continuations: structural.phase2Continuations,
+        voiceAssignedCount,
+        scoringValidCount,
+        timeMs: Date.now() - t0
+    };
+}
+
+// --- Top-level orchestrator (structural only) ---
 
 export async function runHBoundedSearch(opts: HBoundedSearchOptions): Promise<HBoundedSearchResult> {
     const t0 = Date.now();

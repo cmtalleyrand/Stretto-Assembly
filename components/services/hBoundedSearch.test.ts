@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { searchStrettoChains } from './strettoGenerator';
 import { runPhaseOne } from './phaseOnePrefixEnum';
-import { runHBoundedSearch } from './hBoundedSearch';
+import { runHBoundedSearch, runHBoundedSearchScored } from './hBoundedSearch';
 import type { RawNote, StrettoSearchOptions } from '../../types';
 
 const ppq = 480;
@@ -98,6 +98,24 @@ for (const N of [4]) {
         for (const s of oldSigs) if (newSigs.has(s)) covered++;
         console.log(`  N=${N} H=${H}  existingValid=${oldSigs.size}  HBoundedFull=${newSigs.size}  covered=${covered}/${oldSigs.size}`);
         assert.equal(covered, oldSigs.size, `H-bounded missing valid chain at H=${H}`);
+    }
+}
+
+console.log('\nTest 4: scored H-bounded vs searchStrettoChains');
+for (const N of [4]) {
+    for (const H of [2, 3]) {
+        const opts: StrettoSearchOptions = { ...baseOptions, targetChainLength: N, maxSearchTimeMs: 60_000 };
+        const oldR = await searchStrettoChains(baseSubject, opts, ppq);
+        const oldFullDepth = oldR.results.filter(r => r.entries.length === N);
+        const oldSigs = new Set(oldFullDepth.map(r => sigEntries(r.entries)));
+        const scored = await runHBoundedSearchScored({
+            rawSubject: baseSubject, options: opts, ppq, transpositionPool: tradTranspositions, H
+        });
+        const newSigs = new Set(scored.results.map(r => sigEntries(r.entries)));
+        let covered = 0;
+        for (const s of oldSigs) if (newSigs.has(s)) covered++;
+        console.log(`  N=${N} H=${H}  existing=${oldSigs.size}  HBoundedScored=${newSigs.size}  covered=${covered}/${oldSigs.size}  voiceAssigned=${scored.voiceAssignedCount}  scoreValid=${scored.scoringValidCount}  ms=${scored.timeMs}`);
+        assert.equal(covered, oldSigs.size, `H-bounded scored missing valid chain at H=${H}`);
     }
 }
 
